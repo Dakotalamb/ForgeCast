@@ -1,16 +1,18 @@
-# ForgeCast 0.1.0 alpha
+# ForgeCast 0.2.0 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
-**This is a developer alpha, not a finished Aitum replacement. There is no compiled
-OBS DLL or installer in this package.** The local companion runs now with Python;
-the native module needs an OBS/Qt SDK build and Windows live validation. All
-implemented platform adapters also need testing with your authorized accounts.
-The companion Hub update is included alongside this folder in the source bundle.
+**This is a developer preview, not a finished Aitum replacement.** GitHub Actions
+compiled a Windows installer and an OBS 32.2.2 native module. Installation in
+OBS and live streaming still need validation. The local companion runs with Python;
+all implemented platform adapters also need testing with your authorized accounts.
+The Hub backend is maintained in its separate repository.
 
-`packaging/build-windows.ps1` and `packaging/ForgeCast.iss` now define a branded
-Windows installer build for the local companion and native module. They are
-source build instructions, not a compiled/tested installer. See
+The Windows Actions workflow compiles the OBS module and companion and bundles
+them with `packaging/ForgeCast.iss`. Download the preview installer from the
+successful workflow run's artifact. Close OBS before running the EXE, install,
+then start ForgeCast from the Start menu and look for Docks → ForgeCast Control
+inside OBS. Test privately before using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
 
 ## Start with the safe demo
@@ -51,7 +53,7 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 | Stream Doctor | Delta-based rendering/encoding/network classification; incident cooldown/history; JSON report | Unit tested; real OBS validation needed |
 | OBS controls | Authenticated v5 WebSocket, start/stop main stream/recording, replay | Mock-server integration tested |
 | Preflight | Mute flags, reported disk space, OBS CPU/memory | Code implemented; not an audio/capture quality test |
-| Multistream | Native C++ shared H.264/AAC RTMP output engine, eight destinations, independent start/stop, reconnect | Source only; not compiled/live-tested |
+| Multistream | Native C++ shared H.264/AAC RTMP output engine, eight destinations, independent start/stop, reconnect | Compiled for OBS 32.2.2; not live-tested |
 | Hub | Pairing token, OAuth account sync/refresh, events, reports, Kick relay | Source implemented; deploy and live-test Hub |
 | Credentials | Windows DPAPI storage; session-only storage on other OSes | Memory path tested; Windows DPAPI needs Windows test |
 | Kick chat | Verified webhook to Hub and five-second local relay | Source implemented; public HTTPS webhook/live test required |
