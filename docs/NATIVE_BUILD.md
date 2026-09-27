@@ -1,6 +1,7 @@
 # Native OBS module: build and live-test gate
 
-No native binary has been produced or validated in the generation environment.
+A Windows build has compiled the native module and installer against OBS 32.2.2
+in GitHub Actions. Live installation and streaming tests have not been completed.
 Do not claim this source is production-ready. Runtime and ABI compatibility must
 be checked against the exact OBS version you use.
 
