@@ -68,7 +68,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python -m pip install -r requirements.txt 'pyinstaller==6.16.0'
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-          python -m PyInstaller --noconfirm --clean --onedir --name ForgeCast --paths . --add-data 'web;web' --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
+          python -m PyInstaller --noconfirm --clean --onedir --name ForgeCast --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
           if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
           if (-not (Test-Path 'dist/ForgeCast/ForgeCast.exe')) { throw 'Companion EXE missing' }
       - name: Install Inno Setup and create installer
