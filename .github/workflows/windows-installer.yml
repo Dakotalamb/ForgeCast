@@ -1,0 +1,90 @@
+name: Build ForgeCast Windows installer
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows-installer:
+    runs-on: windows-2022
+    timeout-minutes: 90
+    steps:
+      - name: Check out ForgeCast
+        uses: actions/checkout@v4
+      - name: Check out official OBS plugin build template
+        uses: actions/checkout@v4
+        with:
+          repository: obsproject/obs-plugintemplate
+          ref: master
+          path: .obs-template
+      - name: Configure OBS 32.2.2 native build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $template = Join-Path $env:GITHUB_WORKSPACE '.obs-template'
+          Copy-Item 'native/forgecast.cpp' (Join-Path $template 'src/plugin-main.cpp') -Force
+          Copy-Item 'packaging/ci-native-CMakeLists.txt' (Join-Path $template 'CMakeLists.txt') -Force
+          $locale = Join-Path $template 'data/locale'
+          New-Item -ItemType Directory -Force $locale | Out-Null
+          Copy-Item 'packaging/en-US.ini' (Join-Path $locale 'en-US.ini') -Force
+          $specPath = Join-Path $template 'buildspec.json'
+          $spec = Get-Content $specPath -Raw | ConvertFrom-Json
+          $spec.name = 'forgecast'
+          $spec.displayName = 'ForgeCast'
+          $spec.version = '0.2.0'
+          $spec.author = 'Forged Destiny Gaming'
+          $spec.website = 'https://forgeddestinygaming.com/'
+          $spec.dependencies.'obs-studio'.version = '32.2.2'
+          # The official template checks the OBS source archive's SHA-256.
+          $archive = Join-Path $env:RUNNER_TEMP 'obs-studio-32.2.2.zip'
+          Invoke-WebRequest 'https://github.com/obsproject/obs-studio/archive/refs/tags/32.2.2.zip' -OutFile $archive
+          $spec.dependencies.'obs-studio'.hashes.'windows-x64' = (Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant()
+          $spec | ConvertTo-Json -Depth 15 | Set-Content -Encoding UTF8 $specPath
+      - name: Compile native OBS module
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          Push-Location '.obs-template'
+          try {
+            cmake --preset windows-ci-x64
+            if ($LASTEXITCODE -ne 0) { throw 'Native configuration failed' }
+            cmake --build --preset windows-ci-x64 --config Release --parallel
+            if ($LASTEXITCODE -ne 0) { throw 'Native compilation failed' }
+            cmake --install build_x64 --config Release --prefix "$env:GITHUB_WORKSPACE/stage"
+            if ($LASTEXITCODE -ne 0) { throw 'Native staging failed' }
+          } finally { Pop-Location }
+          if (-not (Test-Path 'stage/forgecast/bin/64bit/forgecast.dll')) { throw 'OBS module DLL missing' }
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Freeze ForgeCast companion
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          python -m pip install -r requirements.txt 'pyinstaller==6.16.0'
+          if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+          python -m PyInstaller --noconfirm --clean --onedir --name ForgeCast --paths . --add-data 'web;web' --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
+          if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
+          if (-not (Test-Path 'dist/ForgeCast/ForgeCast.exe')) { throw 'Companion EXE missing' }
+      - name: Install Inno Setup and create installer
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          choco install innosetup --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
+          & $iscc 'packaging/ForgeCast.iss'
+          if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
+          if (-not (Test-Path 'release/ForgeCast-0.2.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+      - name: Upload installer for private testing
+        uses: actions/upload-artifact@v4
+        with:
+          name: ForgeCast-OBS-32.2.2-Windows-preview-installer
+          path: release/ForgeCast-0.2.0-preview-win-x64-setup.exe
+          if-no-files-found: error

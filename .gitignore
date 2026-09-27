@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.build-venv/
+build-native/
+build-pyinstaller/
+build_x64/
+dist/
+release/
+stage/
+.obs-template/
+*.spec
+.env
+*.log
