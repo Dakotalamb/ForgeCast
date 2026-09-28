@@ -72,6 +72,7 @@ jobs:
           python -m PyInstaller --noconfirm --clean --windowed --onedir --name FDGCast --icon "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico" --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --add-data "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico;packaging" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
           if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
           if (-not (Test-Path 'dist/FDGCast/FDGCast.exe')) { throw 'Companion EXE missing' }
+          if (-not (Test-Path 'dist/FDGCast/_internal/packaging/FDGCast.ico')) { throw 'Window/taskbar icon missing from packaged app' }
       - name: Smoke test packaged local service
         shell: pwsh
         run: |
@@ -106,6 +107,14 @@ jobs:
               if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
             }
             if (-not $opened) { throw 'FDGCast desktop window did not open' }
+            Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class FDGWindowIcon { [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr window, uint message, IntPtr which, IntPtr unused); }'
+            $windowIcon = [IntPtr]::Zero
+            for ($i = 0; $i -lt 15; $i++) {
+              $windowIcon = [FDGWindowIcon]::SendMessage($process.MainWindowHandle, 0x7F, [IntPtr]1, [IntPtr]::Zero)
+              if ($windowIcon -ne [IntPtr]::Zero) { break }
+              Start-Sleep -Milliseconds 300
+            }
+            if ($windowIcon -eq [IntPtr]::Zero) { throw 'FDGCast window/taskbar icon was not applied' }
             $bridge = Join-Path $env:LOCALAPPDATA 'ForgeCast/bridge-token'
             if (-not (Test-Path $bridge)) { throw 'FDGCast OBS bridge token missing' }
             $token = (Get-Content $bridge -Raw).Trim()
