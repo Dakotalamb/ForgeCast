@@ -119,6 +119,18 @@ jobs:
           & $iscc 'packaging/ForgeCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
           if (-not (Test-Path 'release/ForgeCast-0.3.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+      - name: Smoke test installed OBS module location
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $installer = (Resolve-Path 'release/ForgeCast-0.3.0-preview-win-x64-setup.exe').Path
+          $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
+          $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
+          if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
+          if (-not (Test-Path $installed)) { throw "OBS module missing after install: $installed" }
+          $installedHash = (Get-FileHash $installed -Algorithm SHA256).Hash
+          $builtHash = (Get-FileHash 'stage/forgecast/bin/64bit/forgecast.dll' -Algorithm SHA256).Hash
+          if ($installedHash -ne $builtHash) { throw 'Installed OBS module differs from compiled module' }
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
