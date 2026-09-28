@@ -31,6 +31,7 @@ $python = Join-Path $venv 'Scripts\python.exe'
 & $python -m pip install -r (Join-Path $root 'requirements.txt') 'pyinstaller==6.16.0' 'pywebview==6.2.1'
 if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
 & $python -m PyInstaller --noconfirm --clean --windowed --onedir --name ForgeCast `
+  --icon (Join-Path $root 'packaging/ForgeCast.ico') `
   --paths $root --add-data "$(Join-Path $root 'web');web" `
   --distpath (Join-Path $root 'dist') --workpath (Join-Path $root 'build-pyinstaller') `
   --specpath (Join-Path $root 'build-pyinstaller') (Join-Path $root 'launcher.py')

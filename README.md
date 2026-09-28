@@ -1,4 +1,4 @@
-# ForgeCast 0.3.3 preview
+# ForgeCast 0.3.4 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
@@ -18,7 +18,7 @@ diagnostics, and multistream controls are available in OBS. Test privately befor
 using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
 
-The first launch of 0.3.3 places Stream Doctor beside Sources, ForgeCast Events
+The first launch of 0.3.4 places Stream Doctor beside Sources, ForgeCast Events
 in the Event List area with Chat beside it, and Multistream beside Outputs. ForgeCast Control shares the
 Multistream space as a tab. In OBS, use the Control dock's **Arrange ForgeCast
 docks** button to restore that layout. To drag docks elsewhere, turn off
@@ -26,8 +26,9 @@ docks** button to restore that layout. To drag docks elsewhere, turn off
 Outputs and Event List docks stay available; close them yourself if preferred.
 Platform sign-in happens in the Hub. ForgeCast's Connections tab pairs to the
 Hub and syncs your accounts; raw API IDs/tokens live under Advanced for testing.
-Chat in OBS includes a Twitch/YouTube message box; choose which connected
-channel receives your message. Kick replies are not supported yet. ForgeCast
+Chat in OBS includes Twitch, YouTube and Kick message targets; choose which
+connected channel receives your message. Kick requires a linked Hub account
+and a fresh account sync; the Hub must grant `chat:write`. ForgeCast
 Events collects available platform activity, OBS status, and Stream Doctor
 incidents. Twitch follows and Kick alerts require additional platform scopes
 and integrations; they are not included in this preview.
@@ -120,7 +121,13 @@ After restarting, click Sync Hub accounts again; for a new live YouTube broadcas
 sync again to discover its current liveChatId. Manual chats must be reconnected.
 For Kick, configure its developer app's public HTTPS webhook as
 `https://YOUR-HUB/api/forgecast/v1/webhooks/kick`, then reconnect Kick in Hub Settings
-to subscribe to `chat.message.sent`. Kick chat relay is currently read-only.
+to subscribe to `chat.message.sent`. Kick replies use the authorized user's
+official chat endpoint and send only to that user's linked channel.
+
+The app and installer use Forged Destiny Gaming's orange F icon. The installer
+is still unsigned: adding an icon does not remove Windows SmartScreen's
+"Unknown publisher" warning. Public distribution needs a trusted code signing
+certificate, and even signed new builds may need time to gain reputation.
 
 ## Native multistream module (developer build)
 

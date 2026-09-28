@@ -26,6 +26,7 @@
 #include <QPushButton>
 #include <QPointer>
 #include <QSettings>
+#include <QSizePolicy>
 #include <QStringList>
 #include <QTextBrowser>
 #include <QTextCursor>
@@ -80,25 +81,35 @@ public:
                       "QLabel { color: #ff7549; padding: 8px; }");
         auto *layout = new QVBoxLayout(this);
         connection = new QLabel("FORGECAST CHAT · Start ForgeCast to connect", this);
+        connection->setWordWrap(true);
+        connection->setMinimumWidth(0);
+        connection->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         feed = new QTextBrowser(this);
         feed->setOpenExternalLinks(false);
+        feed->setMinimumWidth(0);
         layout->addWidget(connection);
         layout->addWidget(feed);
         auto *composer = new QHBoxLayout();
         sendTo = new QComboBox(this);
         sendTo->addItem("Twitch", "twitch");
         sendTo->addItem("YouTube", "youtube");
+        sendTo->addItem("Kick", "kick");
         sendTo->setToolTip("Replies go to your connected channel on this platform.");
         compose = new QLineEdit(this);
         compose->setPlaceholderText("Message your channel…");
         compose->setMaxLength(200);
+        compose->setMinimumWidth(0);
+        compose->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Fixed);
         sendButton = new QPushButton("Send", this);
+        sendTo->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Fixed);
         composer->addWidget(sendTo);
         composer->addWidget(compose, 1);
         composer->addWidget(sendButton);
         layout->addLayout(composer);
-        sendStatus = new QLabel("Choose Twitch or YouTube to reply. Kick replies are not available yet.", this);
+        sendStatus = new QLabel("Choose a connected channel to reply.", this);
         sendStatus->setWordWrap(true);
+        sendStatus->setMinimumWidth(0);
+        sendStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         layout->addWidget(sendStatus);
         auto submitMessage = [this] {
             const auto value = compose->text().trimmed();

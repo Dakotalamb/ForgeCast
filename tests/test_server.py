@@ -1,6 +1,7 @@
 import tempfile
 import unittest
 import time
+from unittest.mock import patch
 from aiohttp.test_utils import TestClient, TestServer
 from forgecast.server import State, create_app
 
@@ -90,6 +91,29 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,400)
         self.assertEqual(sender.messages,['hello stream'])
         self.state.adapters.pop('youtube')
+
+    async def test_kick_reply_uses_linked_channel_and_keeps_token_private(self):
+        from unittest.mock import AsyncMock
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        self.state.demo=False
+        self.state.config['kick']={'channel_id':'12345'}
+        self.state.vault.set('kick_token','FAKE-KICK-ACCESS-TOKEN')
+        send=AsyncMock(return_value={'data':{'message_id':'abc'}})
+        with patch('forgecast.server.api',send):
+            r=await self.client.post('/native/action',headers=headers,
+                                     json={'action':'chat_send','platform':'kick','text':'  hi kick '})
+        self.assertEqual(r.status,200)
+        self.assertEqual(send.await_args.args[1:3],('POST','https://api.kick.com/public/v1/chat'))
+        self.assertEqual(send.await_args.kwargs['json'],
+                         {'type':'user','broadcaster_user_id':12345,'content':'hi kick'})
+        self.assertNotIn('FAKE-KICK-ACCESS-TOKEN',await r.text())
+
+    async def test_kick_reply_requires_linked_account(self):
+        self.state.demo=False
+        r=await self.client.post('/native/action',headers={**self.headers,'Authorization':'Bearer '+self.state.native_key},
+                                 json={'action':'chat_send','platform':'kick','text':'hi'})
+        self.assertEqual(r.status,400)
+        self.assertIn('Link Kick',await r.text())
 
     async def test_native_destination_action_needs_auth_and_live_mode(self):
         target={'action':'save','name':'YouTube','server':'rtmps://example.com/live','key':'TEST-KEY'}

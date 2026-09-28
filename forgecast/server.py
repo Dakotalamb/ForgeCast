@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.3.3-preview', demo=self.demo,
+        return dict(schema_version=1, app='ForgeCast', version='0.3.4-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -95,6 +95,25 @@ def combined_events(s):
                 for i in s.doctor.incidents)
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
+
+
+async def send_chat(s, platform, text):
+    message = str(text).strip()
+    if platform not in ('twitch', 'youtube', 'kick') or not message or len(message) > 200:
+        raise ValueError('Choose a connected channel and enter 1–200 characters.')
+    if platform == 'kick':
+        token = s.vault.get('kick_token')
+        channel = s.config.get('kick', {}).get('channel_id')
+        if not token or not channel:
+            raise ValueError('Link Kick in the Hub, then Sync linked accounts in ForgeCast.')
+        await api(s.session, 'POST', 'https://api.kick.com/public/v1/chat',
+                  headers={'Authorization':'Bearer '+token},
+                  json={'type':'user', 'broadcaster_user_id':int(channel), 'content':message})
+    else:
+        if platform not in s.adapters:
+            raise ValueError('Connect '+platform.title()+' in ForgeCast first.')
+        await s.adapters[platform].send(message)
+    s.event('Message sent to '+platform.title()+'.')
 
 
 @web.middleware
@@ -246,10 +265,7 @@ async def action(request):
                 s.config.pop(platform, None)
                 s.save()
         elif op == 'chat_send':
-            platform, text = data['platform'], str(data.get('text', '')).strip()
-            if platform not in s.adapters or not text or len(text)>200:
-                raise ValueError('Select a connected platform and enter 1–200 characters.')
-            await s.adapters[platform].send(text)
+            await send_chat(s, data.get('platform'), data.get('text', ''))
         elif op == 'hub_save':
             url = str(data['url']).rstrip('/')
             parsed = urlparse(url)
@@ -273,7 +289,14 @@ async def action(request):
                     if platform in s.statuses: s.status(platform, conn.get('error', 'Reconnect in Hub settings.'))
                     continue
                 if platform == 'kick':
-                    s.status('kick', 'Hub webhook relay ready')
+                    user_id = str(conn.get('user_id') or '').strip()
+                    if not user_id.isdigit() or int(user_id) <= 0:
+                        s.status('kick', 'Kick channel ID unavailable; reconnect Kick in Hub settings.')
+                        continue
+                    s.vault.set('kick_token', token)
+                    s.config['kick'] = {'channel_id':user_id}
+                    s.save()
+                    s.status('kick', 'Hub chat and replies ready')
                     continue
                 if platform == 'twitch':
                     user_id, client_id = conn.get('user_id'), conn.get('client_id')
@@ -390,14 +413,7 @@ async def native_action(request):
         return web.json_response({'ok': True})
     async with s.lock:
         if op == 'chat_send':
-            platform = str(data.get('platform', '')).lower()
-            message = str(data.get('text', '')).strip()
-            if platform not in ('twitch', 'youtube') or not message or len(message) > 200:
-                raise ValueError('Choose Twitch or YouTube and type a message of 1–200 characters.')
-            if platform not in s.adapters:
-                raise ValueError('Connect '+platform.title()+' in the ForgeCast app first.')
-            await s.adapters[platform].send(message)
-            s.event('Message sent to '+platform.title()+'.')
+            await send_chat(s, data.get('platform'), data.get('text', ''))
         elif op == 'save':
             if any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
@@ -480,6 +496,11 @@ async def poll_hub(s):
                     accounts = await api(s.session,'GET',url+'/api/forgecast/v1/connections',headers=headers)
                     for conn in accounts.get('connections', []):
                         platform = conn.get('platform')
+                        if platform == 'kick' and s.config.get('kick'):
+                            if conn.get('access_token'):
+                                s.vault.set('kick_token', conn['access_token'])
+                            elif conn.get('error'):
+                                s.status('kick', conn['error'])
                         if platform in s.adapters:
                             if conn.get('access_token'): s.adapters[platform].token = conn['access_token']
                             elif conn.get('error'): s.status(platform,conn['error'])

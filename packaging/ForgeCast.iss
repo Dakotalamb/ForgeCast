@@ -3,13 +3,15 @@
 [Setup]
 AppId={{C47C9B69-A4E0-4F8B-8D90-6D4CCF944210}
 AppName=ForgeCast
-AppVersion=0.3.3 Preview
+AppVersion=0.3.4 Preview
 AppPublisher=Forged Destiny Gaming
 AppPublisherURL=https://forgeddestinygaming.com/
+SetupIconFile={#SourcePath}ForgeCast.ico
+UninstallDisplayIcon={app}\ForgeCast.exe
 DefaultDirName={autopf}\Forged Destiny Gaming\ForgeCast
 DefaultGroupName=ForgeCast
 OutputDir={#SourcePath}..\release
-OutputBaseFilename=ForgeCast-0.3.3-preview-win-x64-setup
+OutputBaseFilename=ForgeCast-0.3.4-preview-win-x64-setup
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin

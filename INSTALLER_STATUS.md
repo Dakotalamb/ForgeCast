@@ -39,7 +39,7 @@ changes the companion to a desktop window. Its Windows build passed native
 compilation, desktop startup and installation-path checks. OBS runtime and
 live-streaming tests on a creator PC remain. The 0.2.0 artifact lacks these docks.
 
-The 0.3.3 preview places Stream Doctor beside Sources, ForgeCast Events in the
+The 0.3.4 preview places Stream Doctor beside Sources, ForgeCast Events in the
 Event List area, Chat beside Events, and Multistream beside Outputs on first
 launch; subsequent OBS rearrangements
 are preserved. The Control panel can bring the desktop app forward and reset
