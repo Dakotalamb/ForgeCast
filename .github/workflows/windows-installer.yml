@@ -35,7 +35,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'ForgeCast'
-          $spec.version = '0.2.0'
+          $spec.version = '0.3.0'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -66,11 +66,30 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          python -m pip install -r requirements.txt 'pyinstaller==6.16.0'
+          python -m pip install -r requirements.txt 'pyinstaller==6.16.0' 'pywebview==6.2.1'
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-          python -m PyInstaller --noconfirm --clean --onedir --name ForgeCast --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name ForgeCast --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
           if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
           if (-not (Test-Path 'dist/ForgeCast/ForgeCast.exe')) { throw 'Companion EXE missing' }
+      - name: Smoke test packaged local service
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = (Resolve-Path 'dist/ForgeCast/ForgeCast.exe').Path
+          $process = Start-Process $app -ArgumentList '--headless' -PassThru
+          try {
+            $ready = $false
+            for ($i = 0; $i -lt 35; $i++) {
+              Start-Sleep -Seconds 1
+              try {
+                $response = Invoke-WebRequest 'http://127.0.0.1:17654/' -TimeoutSec 2
+                if ($response.StatusCode -eq 200) { $ready = $true; break }
+              } catch { if ($process.HasExited) { throw 'ForgeCast packaged service exited on startup' } }
+            }
+            if (-not $ready) { throw 'ForgeCast packaged service did not become ready' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Install Inno Setup and create installer
         shell: pwsh
         run: |
@@ -81,10 +100,10 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/ForgeCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/ForgeCast-0.2.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/ForgeCast-0.3.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: ForgeCast-OBS-32.2.2-Windows-preview-installer
-          path: release/ForgeCast-0.2.0-preview-win-x64-setup.exe
+          name: ForgeCast-0.3.0-OBS-32.2.2-Windows-preview-installer
+          path: release/ForgeCast-0.3.0-preview-win-x64-setup.exe
           if-no-files-found: error

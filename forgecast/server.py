@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.2.0-preview', demo=self.demo,
+        return dict(schema_version=1, app='ForgeCast', version='0.3.0-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -332,7 +332,72 @@ async def native(request):
             commands.append(command)
         else:
             s.event('Expired native command discarded. Nothing was started.')
-    return web.json_response({'commands':commands})
+    # OBS owns the operator view. Send only bounded, non-credential telemetry to
+    # its native chat and Stream Doctor docks over the authenticated loopback bridge.
+    return web.json_response({
+        'commands': commands,
+        'messages': list(s.chat.messages)[-80:],
+        'issues': s.current_issues[:12],
+        'stats': {key: s.stats.get(key) for key in
+                  ('activeFps', 'cpuUsage', 'renderSkippedFrames', 'renderTotalFrames',
+                   'outputSkippedFrames', 'outputTotalFrames', 'stream_active')},
+        'statuses': s.statuses,
+        'destinations': s.config.get('destinations', []),
+        'outputs': s.native_outputs,
+        'stream_active': bool(s.stats.get('stream_active')),
+        'obs_connected': bool(s.obs and s.obs.connected),
+        'scene': s.scene,
+        'setup_url': f'http://127.0.0.1:{PORT}/#{s.browser_key}',
+    })
+
+
+async def native_action(request):
+    s = request.app['state']
+    data = await request.json()
+    op = data.get('action')
+    if s.demo:
+        raise ValueError('Live actions are disabled in demo mode.')
+    async with s.lock:
+        if op == 'save':
+            if any(o.get('active') or o.get('busy') for o in s.native_outputs):
+                raise ValueError('Stop secondary outputs before editing destinations.')
+            name = str(data.get('name', '')).strip()
+            server = str(data.get('server', '')).strip()
+            key = str(data.get('key', '')).strip()
+            if not key or len(key) > 4096:
+                raise ValueError('A valid stream key is required.')
+            if len(s.config.get('destinations', [])) >= 8:
+                raise ValueError('At most eight destinations are supported.')
+            dest = validate_destination({'id':uuid.uuid4().hex[:12], 'name':name, 'server':server})
+            s.vault.set('stream:'+dest['id'], key)
+            s.config.setdefault('destinations', []).append(dest)
+            s.save()
+        elif op == 'delete':
+            dest_id = str(data.get('id', ''))
+            if any(o.get('id') == dest_id and (o.get('active') or o.get('busy')) for o in s.native_outputs):
+                raise ValueError('Stop this destination first.')
+            items = s.config.get('destinations', [])
+            if not any(d['id'] == dest_id for d in items):
+                raise ValueError('Destination not found.')
+            s.config['destinations'] = [d for d in items if d['id'] != dest_id]
+            s.vault.delete('stream:'+dest_id)
+            s.save()
+        elif op in ('start', 'stop', 'stop_all'):
+            if time.time()-s.native_seen > 5:
+                raise ValueError('OBS native module is disconnected.')
+            cmd = dict(id=uuid.uuid4().hex, action=op, created=time.time())
+            if op != 'stop_all':
+                dest = next((x for x in s.config.get('destinations', []) if x['id'] == data.get('id')), None)
+                if not dest:
+                    raise ValueError('Destination not found.')
+                cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
+            if len(s.commands) >= 30:
+                raise ValueError('Command queue is full.')
+            s.commands.append(cmd)
+            s.event('OBS dock requested secondary output '+op+'.')
+        else:
+            raise ValueError('Unsupported OBS dock action.')
+    return web.json_response({'ok':True})
 
 
 async def poll(s):
@@ -449,10 +514,11 @@ def create_app(state):
     app.router.add_post('/api/action', action)
     app.router.add_get('/api/report', report)
     app.router.add_post('/native/poll', native)
+    app.router.add_post('/native/action', native_action)
     return app
 
 
-def main():
+def main(on_ready=None):
     parser = argparse.ArgumentParser(description='ForgeCast local OBS companion · alpha')
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--no-browser', action='store_true')
@@ -477,10 +543,12 @@ def main():
         url = f'http://127.0.0.1:{PORT}/#'+s.browser_key
         print('ForgeCast dashboard / OBS Custom Browser Dock URL:\n'+url)
         print('Keep this local URL private. Do not add this dock as a broadcast source.')
+        if on_ready:
+            on_ready(url)
         if not args.no_browser:
             asyncio.get_running_loop().call_later(1, webbrowser.open, url)
     app.on_startup.append(announce)
-    web.run_app(app, sock=listener, access_log=None, print=None)
+    web.run_app(app, sock=listener, access_log=None, print=None, handle_signals=False)
 
 
 if __name__ == '__main__':

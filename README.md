@@ -1,4 +1,4 @@
-# ForgeCast 0.2.0 preview
+# ForgeCast 0.3.0 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
@@ -11,8 +11,11 @@ The Hub backend is maintained in its separate repository.
 The Windows Actions workflow compiles the OBS module and companion and bundles
 them with `packaging/ForgeCast.iss`. Download the preview installer from the
 successful workflow run's artifact. Close OBS before running the EXE, install,
-then start ForgeCast from the Start menu and look for Docks → ForgeCast Control
-inside OBS. Test privately before using it on a public stream. See
+then start the ForgeCast desktop app from the Start menu. In OBS, open Docks →
+ForgeCast Chat, ForgeCast Stream Doctor, ForgeCast Multistream, or ForgeCast Control.
+The desktop app runs the local account and telemetry companion; daily chat,
+diagnostics, and multistream controls are available in OBS. Test privately before
+using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
 
 ## Start with the safe demo
@@ -46,14 +49,14 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 
 | Area | This package | Verification |
 |---|---|---|
-| Local dashboard | Five tabs, responsive CSS, demo mode, connection states | Local HTTP tests; rendered-browser QA blocked |
+| Desktop app | Dedicated ForgeCast window for initial Hub, account and OBS connection setup | Windows app still needs live testing |
 | Shared chat provenance | Platform + original broadcaster + chatter; dedup by source message ID | Unit tested with fixtures |
 | Twitch adapter | EventSub messages/chat notifications/deletes/clears; send to configured receiving channel | Code implemented; live OAuth test needed |
 | YouTube adapter | API polling with server interval; chat/activity/deletion; send | Code implemented; live token/quota test needed |
 | Stream Doctor | Delta-based rendering/encoding/network classification; incident cooldown/history; JSON report | Unit tested; real OBS validation needed |
 | OBS controls | Authenticated v5 WebSocket, start/stop main stream/recording, replay | Mock-server integration tested |
 | Preflight | Mute flags, reported disk space, OBS CPU/memory | Code implemented; not an audio/capture quality test |
-| Multistream | Native C++ shared H.264/AAC RTMP output engine, eight destinations, independent start/stop, reconnect | Compiled for OBS 32.2.2; not live-tested |
+| Multistream | Native OBS dock with destination setup, start/stop and status; shared H.264/AAC RTMP output engine, eight destinations, reconnect | Windows build pending; not live-tested |
 | Hub | Pairing token, OAuth account sync/refresh, events, reports, Kick relay | Source implemented; deploy and live-test Hub |
 | Credentials | Windows DPAPI storage; session-only storage on other OSes | Memory path tested; Windows DPAPI needs Windows test |
 | Kick chat | Verified webhook to Hub and five-second local relay | Source implemented; public HTTPS webhook/live test required |

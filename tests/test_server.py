@@ -45,6 +45,34 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/native/poll',headers=self.headers,json={})
         self.assertEqual(r.status,401)
 
+    async def test_native_docks_show_chat_origin_and_doctor(self):
+        self.state.chat.add({'id':'twitch:box:one','platform':'twitch',
+                             'origin':'Box_Beard','user':'Viewer','text':'hello','shared':True})
+        self.state.current_issues=[{'title':'Network drops','evidence':'4 frames dropped',
+                                    'suggestion':'Check upload headroom.'}]
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/poll',headers=headers,json={'outputs':[]})
+        self.assertEqual(r.status,200)
+        payload=await r.json()
+        selected=next(row for row in payload['messages'] if row['id']=='twitch:box:one')
+        self.assertEqual(selected['origin'],'Box_Beard')
+        self.assertTrue(selected['shared'])
+        self.assertEqual(payload['issues'][0]['title'],'Network drops')
+        self.assertNotIn('native_key',str(payload))
+
+    async def test_native_destination_action_needs_auth_and_live_mode(self):
+        target={'action':'save','name':'YouTube','server':'rtmps://example.com/live','key':'TEST-KEY'}
+        r=await self.client.post('/native/action',headers=self.headers,json=target)
+        self.assertEqual(r.status,401)
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/action',headers=headers,json=target)
+        self.assertEqual(r.status,400)  # demo cannot alter stream destinations
+        self.state.demo=False
+        r=await self.client.post('/native/action',headers=headers,json=target)
+        self.assertEqual(r.status,200)
+        self.assertNotIn('TEST-KEY',self.state.config_path.read_text())
+        self.assertEqual(self.state.config['destinations'][0]['name'],'YouTube')
+
     async def test_report_excludes_chat(self):
         r=await self.client.get('/api/report',headers=self.headers)
         text=await r.text()

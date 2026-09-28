@@ -33,3 +33,7 @@ It has not yet been installed or exercised inside OBS on a creator PC.
 
 The Windows installer is **compiled but has not been live tested in OBS**.
 See `docs/NATIVE_BUILD.md` for local build guidance.
+
+The 0.3.0 preview adds native OBS Chat, Stream Doctor and Multistream docks and
+changes the companion to a desktop window. This version requires a separate
+successful Windows build and live test; the 0.2.0 artifact does not include it.
