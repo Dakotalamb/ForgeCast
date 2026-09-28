@@ -56,7 +56,7 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 | Stream Doctor | Delta-based rendering/encoding/network classification; incident cooldown/history; JSON report | Unit tested; real OBS validation needed |
 | OBS controls | Authenticated v5 WebSocket, start/stop main stream/recording, replay | Mock-server integration tested |
 | Preflight | Mute flags, reported disk space, OBS CPU/memory | Code implemented; not an audio/capture quality test |
-| Multistream | Native OBS dock with destination setup, start/stop and status; shared H.264/AAC RTMP output engine, eight destinations, reconnect | Windows build pending; not live-tested |
+| Multistream | Native OBS dock with destination setup, start/stop and status; shared H.264/AAC RTMP output engine, eight destinations, reconnect | Windows build passed; not live-tested inside OBS |
 | Hub | Pairing token, OAuth account sync/refresh, events, reports, Kick relay | Source implemented; deploy and live-test Hub |
 | Credentials | Windows DPAPI storage; session-only storage on other OSes | Memory path tested; Windows DPAPI needs Windows test |
 | Kick chat | Verified webhook to Hub and five-second local relay | Source implemented; public HTTPS webhook/live test required |
