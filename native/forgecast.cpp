@@ -792,8 +792,9 @@ void obs_module_post_load(void)
     if (iconPath) {
         const QIcon icon(QString::fromUtf8(iconPath));
         bfree(iconPath);
-        for (QWidget *content : {chatDock.data(), eventsDock.data(), doctorDock.data(),
-                                 multistreamDock.data(), dock.data()}) {
+        QWidget *contents[] = {chatDock.data(), eventsDock.data(), doctorDock.data(),
+                               multistreamDock.data(), dock.data()};
+        for (QWidget *content : contents) {
             if (content && content->parentWidget()) content->parentWidget()->setWindowIcon(icon);
         }
     }
