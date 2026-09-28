@@ -39,5 +39,7 @@ changes the companion to a desktop window. Its Windows build passed native
 compilation, desktop startup and installation-path checks. OBS runtime and
 live-streaming tests on a creator PC remain. The 0.2.0 artifact lacks these docks.
 
-The 0.3.1 preview docks the ForgeCast panels in OBS by default, makes them
-compact tabs, and brings the desktop app forward from the Control panel.
+The 0.3.2 preview places Stream Doctor beside Sources, Chat beside Event List,
+and Multistream beside Outputs on first launch; subsequent OBS rearrangements
+are preserved. The Control panel can bring the desktop app forward and reset
+the ForgeCast dock layout. The companion uses Hub pairing for account setup.
