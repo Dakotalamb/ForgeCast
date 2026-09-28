@@ -90,6 +90,24 @@ jobs:
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
+      - name: Smoke test ForgeCast desktop window
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $app = (Resolve-Path 'dist/ForgeCast/ForgeCast.exe').Path
+          $process = Start-Process $app -PassThru
+          try {
+            $opened = $false
+            for ($i = 0; $i -lt 25; $i++) {
+              Start-Sleep -Seconds 1
+              $process.Refresh()
+              if ($process.HasExited) { throw 'ForgeCast desktop app exited before showing a window' }
+              if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
+            }
+            if (-not $opened) { throw 'ForgeCast desktop window did not open' }
+          } finally {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+          }
       - name: Install Inno Setup and create installer
         shell: pwsh
         run: |
