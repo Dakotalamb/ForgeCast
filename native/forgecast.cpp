@@ -4,7 +4,8 @@
 #include <obs-frontend-api.h>
 #include <QApplication>
 #include <QByteArray>
-#include <QDesktopServices>
+#include <QColor>
+#include <QDockWidget>
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFile>
@@ -12,9 +13,11 @@
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QHBoxLayout>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMainWindow>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -157,6 +160,9 @@ public:
 class MultistreamDock : public QWidget {
     QLabel *status;
     QListWidget *list;
+    QPushButton *startButton;
+    QPushButton *stopButton;
+    QPushButton *removeButton;
     QByteArray lastDestinations;
     std::function<void(const QJsonObject &)> send;
     QString selectedId() const
@@ -167,24 +173,53 @@ public:
     explicit MultistreamDock(std::function<void(const QJsonObject &)> submit) : QWidget(), send(std::move(submit))
     {
         setStyleSheet("QWidget { background:#151719;color:#f4f4f4; }"
-                      "QListWidget { background:#1d2022;border:0; }"
-                      "QPushButton { background:#ff531f;color:#151719;border:0;padding:8px; }"
-                      "QLabel { padding:8px; }");
+                      "QListWidget { background:#1d2022;border:1px solid #363a3e;border-radius:5px;padding:3px; }"
+                      "QListWidget::item { padding:7px; }"
+                      "QListWidget::item:selected { background:#453126;color:#ffffff; }"
+                      "QPushButton { background:#ff531f;color:#151719;border:0;border-radius:4px;"
+                      "padding:6px;font-weight:600; }"
+                      "QPushButton:disabled { background:#34383b;color:#909497; }"
+                      "QPushButton#secondary { background:#34383b;color:#f4f4f4; }"
+                      "QPushButton#stopAll { background:#342421;color:#ff9576; }"
+                      "QLabel { padding:3px; }");
         auto *layout = new QVBoxLayout(this);
         auto *heading = new QLabel("FORGECAST MULTISTREAM", this);
         heading->setStyleSheet("color:#ff7549;font-weight:700");
-        status = new QLabel("Start the ForgeCast companion to manage destinations.", this);
+        status = new QLabel("Start the ForgeCast app to connect.", this);
         status->setWordWrap(true);
         list = new QListWidget(this);
+        list->setMinimumHeight(95);
+        list->setMaximumHeight(220);
         layout->addWidget(heading);
         layout->addWidget(status);
         layout->addWidget(list);
-        auto *add = new QPushButton("Add destination", this);
-        auto *start = new QPushButton("Start selected", this);
-        auto *stop = new QPushButton("Stop selected", this);
-        auto *stopAll = new QPushButton("Stop all secondary streams", this);
-        auto *remove = new QPushButton("Remove selected", this);
-        for (auto *button : {add, start, stop, stopAll, remove}) layout->addWidget(button);
+        auto *add = new QPushButton("+ Add stream", this);
+        removeButton = new QPushButton("Remove", this);
+        removeButton->setObjectName("secondary");
+        startButton = new QPushButton("Start selected", this);
+        stopButton = new QPushButton("Stop selected", this);
+        stopButton->setObjectName("secondary");
+        auto *stopAll = new QPushButton("Stop all", this);
+        stopAll->setObjectName("stopAll");
+        auto *management = new QHBoxLayout();
+        management->addWidget(add);
+        management->addWidget(removeButton);
+        layout->addLayout(management);
+        auto *controls = new QHBoxLayout();
+        controls->addWidget(startButton);
+        controls->addWidget(stopButton);
+        layout->addLayout(controls);
+        layout->addWidget(stopAll);
+        layout->addStretch();
+        startButton->setEnabled(false);
+        stopButton->setEnabled(false);
+        removeButton->setEnabled(false);
+        connect(list, &QListWidget::currentItemChanged, this, [this] {
+            const bool selected = !selectedId().isEmpty();
+            startButton->setEnabled(selected);
+            stopButton->setEnabled(selected);
+            removeButton->setEnabled(selected);
+        });
         connect(add, &QPushButton::clicked, this, [this] {
             QDialog dialog(this);
             dialog.setWindowTitle("Add ForgeCast destination");
@@ -204,16 +239,16 @@ public:
                                  {"server", server.text()}, {"key", key.text()}});
             key.clear();
         });
-        connect(start, &QPushButton::clicked, this, [this] {
+        connect(startButton, &QPushButton::clicked, this, [this] {
             if (!selectedId().isEmpty()) send(QJsonObject{{"action", "start"}, {"id", selectedId()}});
         });
-        connect(stop, &QPushButton::clicked, this, [this] {
+        connect(stopButton, &QPushButton::clicked, this, [this] {
             if (!selectedId().isEmpty()) send(QJsonObject{{"action", "stop"}, {"id", selectedId()}});
         });
         connect(stopAll, &QPushButton::clicked, this, [this] {
             send(QJsonObject{{"action", "stop_all"}});
         });
-        connect(remove, &QPushButton::clicked, this, [this] {
+        connect(removeButton, &QPushButton::clicked, this, [this] {
             if (!selectedId().isEmpty()) send(QJsonObject{{"action", "delete"}, {"id", selectedId()}});
         });
     }
@@ -242,17 +277,19 @@ public:
                         if (row.value("reconnecting").toBool()) state = "RECONNECTING";
                     }
                 }
-                auto *item = new QListWidgetItem(dest.value("name").toString() + " · " + state, list);
+                auto *item = new QListWidgetItem(dest.value("name").toString() + "   " + state, list);
                 item->setData(Qt::UserRole, dest.value("id").toString());
+                if (state == "LIVE") item->setForeground(QColor("#80d6a0"));
+                else if (state == "RECONNECTING") item->setForeground(QColor("#ff9576"));
                 if (item->data(Qt::UserRole).toString() == selected) list->setCurrentItem(item);
             }
         }
         if (destinations.isEmpty())
-            status->setText("Add Twitch, YouTube or Kick using each platform's RTMP server and stream key.");
+            status->setText("No extra streams yet. Add a destination to get started.");
         else if (!payload.value("stream_active").toBool())
-            status->setText("Start the main OBS stream with H.264/AAC before starting extra outputs.");
+            status->setText("Main stream offline · Start OBS streaming first (H.264/AAC).");
         else
-            status->setText("Main OBS stream active. Select a destination and press Start.");
+            status->setText("Main stream live · Select a destination to control it.");
     }
 };
 
@@ -268,7 +305,6 @@ class ForgeDock : public QWidget {
     QJsonArray results;
     bool pending = false;
     QString bridgePath;
-    QUrl setupUrl;
 public:
     ForgeDock() : QWidget(), network(this)
     {
@@ -287,11 +323,10 @@ public:
         auto *stop = new QPushButton("Stop ForgeCast secondary outputs", this);
         layout->addWidget(stop);
         connect(stop, &QPushButton::clicked, this, [this] { stopAll(); });
-        auto *setup = new QPushButton("Open ForgeCast connection setup", this);
+        auto *setup = new QPushButton("Open ForgeCast app", this);
         layout->addWidget(setup);
         connect(setup, &QPushButton::clicked, this, [this] {
-            if (setupUrl.isValid()) QDesktopServices::openUrl(setupUrl);
-            else label->setText("Start the ForgeCast companion, then try setup again.");
+            sendAction(QJsonObject{{"action", "focus"}});
         });
         layout->addStretch();
 #ifdef _WIN32
@@ -326,12 +361,14 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         auto *reply = network.post(request, QJsonDocument(action).toJson());
-        connect(reply, &QNetworkReply::finished, this, [reply] {
+        const bool focusing = action.value("action").toString() == "focus";
+        connect(reply, &QNetworkReply::finished, this, [this, reply, focusing] {
             if (multistreamDock) {
                 if (reply->error() != QNetworkReply::NoError) {
                     QString error = QJsonDocument::fromJson(reply->readAll()).object().value("error").toString();
-                    multistreamDock->message(error.isEmpty() ? "Action failed. Check ForgeCast connection." : error);
-                } else multistreamDock->message("Request accepted. Waiting for OBS output status.");
+                    if (focusing) label->setText(error.isEmpty() ? "Open ForgeCast from the Start menu." : error);
+                    else multistreamDock->message(error.isEmpty() ? "Action failed. Check ForgeCast connection." : error);
+                } else if (!focusing) multistreamDock->message("Request accepted. Waiting for OBS output status.");
             }
             reply->deleteLater();
         });
@@ -486,7 +523,6 @@ public:
             if (reply->error() == QNetworkReply::NoError) {
                 for (int i = 0; i < sentResults && !results.isEmpty(); ++i) results.removeAt(0);
                 auto payload = QJsonDocument::fromJson(reply->readAll()).object();
-                setupUrl = QUrl(payload.value("setup_url").toString());
                 if (chatDock) chatDock->update(payload);
                 if (doctorDock) doctorDock->update(payload);
                 if (multistreamDock) multistreamDock->update(payload);
@@ -496,7 +532,6 @@ public:
                                "Control destinations and read diagnostics in your ForgeCast browser dock.\n"
                                "Stopping the main OBS stream also stops secondary outputs.");
             } else {
-                setupUrl = QUrl();
                 if (chatDock) chatDock->disconnected();
                 if (doctorDock) doctorDock->disconnected();
                 if (multistreamDock) multistreamDock->message("ForgeCast companion disconnected.");
@@ -509,6 +544,32 @@ public:
 };
 
 static QPointer<ForgeDock> dock;
+static void showDocked(QWidget *content)
+{
+    // OBS registers add_dock_by_id widgets as hidden and floating. Put the
+    // registered host back in OBS's right docking area before showing it.
+    auto *host = qobject_cast<QDockWidget *>(content->parentWidget());
+    if (host) {
+        host->setAllowedAreas(Qt::AllDockWidgetAreas);
+        host->setFloating(false);
+        host->show();
+    }
+}
+static void groupForgeCastDocks()
+{
+    if (!chatDock || !doctorDock || !multistreamDock || !dock) return;
+    auto *chat = qobject_cast<QDockWidget *>(chatDock->parentWidget());
+    auto *doctor = qobject_cast<QDockWidget *>(doctorDock->parentWidget());
+    auto *streams = qobject_cast<QDockWidget *>(multistreamDock->parentWidget());
+    auto *control = qobject_cast<QDockWidget *>(dock->parentWidget());
+    if (!chat || !doctor || !streams || !control) return;
+    auto *main = qobject_cast<QMainWindow *>(chat->parentWidget());
+    if (!main) return;
+    main->tabifyDockWidget(chat, doctor);
+    main->tabifyDockWidget(chat, streams);
+    main->tabifyDockWidget(chat, control);
+    chat->raise();
+}
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
@@ -540,25 +601,27 @@ void obs_module_post_load(void)
     if (!obs_frontend_add_dock_by_id("forgecast-chat", "ForgeCast Chat", chatDock.data())) {
         delete chatDock.data();
         chatDock.clear();
-    }
+    } else showDocked(chatDock.data());
     doctorDock = new DoctorDock();
     if (!obs_frontend_add_dock_by_id("forgecast-doctor", "ForgeCast Stream Doctor", doctorDock.data())) {
         delete doctorDock.data();
         doctorDock.clear();
-    }
+    } else showDocked(doctorDock.data());
     dock = new ForgeDock();
     if (!obs_frontend_add_dock_by_id("forgecast-control", "ForgeCast Control", dock.data())) {
         delete dock.data();
         dock.clear();
         return;
     }
+    showDocked(dock.data());
     multistreamDock = new MultistreamDock([](const QJsonObject &action) {
         if (dock) dock->sendAction(action);
     });
     if (!obs_frontend_add_dock_by_id("forgecast-multistream", "ForgeCast Multistream", multistreamDock.data())) {
         delete multistreamDock.data();
         multistreamDock.clear();
-    }
+    } else showDocked(multistreamDock.data());
+    groupForgeCastDocks();
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }
 

@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.3.0-preview', demo=self.demo,
+        return dict(schema_version=1, app='ForgeCast', version='0.3.1-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -347,7 +347,6 @@ async def native(request):
         'stream_active': bool(s.stats.get('stream_active')),
         'obs_connected': bool(s.obs and s.obs.connected),
         'scene': s.scene,
-        'setup_url': f'http://127.0.0.1:{PORT}/#{s.browser_key}',
     })
 
 
@@ -357,6 +356,23 @@ async def native_action(request):
     op = data.get('action')
     if s.demo:
         raise ValueError('Live actions are disabled in demo mode.')
+    if op == 'focus':
+        if os.name != 'nt':
+            raise ValueError('ForgeCast desktop window is available in the Windows installer.')
+        import ctypes
+        user32 = ctypes.windll.user32
+        user32.FindWindowW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
+        user32.FindWindowW.restype = ctypes.c_void_p
+        user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
+        user32.FlashWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        hwnd = user32.FindWindowW(None, 'ForgeCast · Forged Destiny Gaming')
+        if not hwnd:
+            raise ValueError('ForgeCast app is not open. Start it from the Windows Start menu.')
+        user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+        if not user32.SetForegroundWindow(hwnd):
+            user32.FlashWindow(hwnd, True)
+        return web.json_response({'ok': True})
     async with s.lock:
         if op == 'save':
             if any(o.get('active') or o.get('busy') for o in s.native_outputs):

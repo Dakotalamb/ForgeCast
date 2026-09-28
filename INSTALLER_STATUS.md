@@ -38,3 +38,6 @@ The 0.3.0 preview adds native OBS Chat, Stream Doctor and Multistream docks and
 changes the companion to a desktop window. Its Windows build passed native
 compilation, desktop startup and installation-path checks. OBS runtime and
 live-streaming tests on a creator PC remain. The 0.2.0 artifact lacks these docks.
+
+The 0.3.1 preview docks the ForgeCast panels in OBS by default, makes them
+compact tabs, and brings the desktop app forward from the Control panel.

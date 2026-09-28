@@ -35,7 +35,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'ForgeCast'
-          $spec.version = '0.3.0'
+          $spec.version = '0.3.1'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -105,6 +105,13 @@ jobs:
               if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
             }
             if (-not $opened) { throw 'ForgeCast desktop window did not open' }
+            $bridge = Join-Path $env:LOCALAPPDATA 'ForgeCast/bridge-token'
+            if (-not (Test-Path $bridge)) { throw 'ForgeCast OBS bridge token missing' }
+            $token = (Get-Content $bridge -Raw).Trim()
+            $response = Invoke-RestMethod 'http://127.0.0.1:17654/native/action' -Method Post `
+              -Headers @{Authorization="Bearer $token"} -ContentType 'application/json' `
+              -Body '{"action":"focus"}'
+            if (-not $response.ok) { throw 'OBS Open ForgeCast app action failed' }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
@@ -118,12 +125,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/ForgeCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/ForgeCast-0.3.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/ForgeCast-0.3.1-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/ForgeCast-0.3.0-preview-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/ForgeCast-0.3.1-preview-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -134,6 +141,6 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: ForgeCast-0.3.0-OBS-32.2.2-Windows-preview-installer
-          path: release/ForgeCast-0.3.0-preview-win-x64-setup.exe
+          name: ForgeCast-0.3.1-OBS-32.2.2-Windows-preview-installer
+          path: release/ForgeCast-0.3.1-preview-win-x64-setup.exe
           if-no-files-found: error

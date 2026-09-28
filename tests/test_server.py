@@ -58,7 +58,8 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(selected['origin'],'Box_Beard')
         self.assertTrue(selected['shared'])
         self.assertEqual(payload['issues'][0]['title'],'Network drops')
-        self.assertNotIn('native_key',str(payload))
+        self.assertNotIn(self.state.native_key,str(payload))
+        self.assertNotIn(self.state.browser_key,str(payload))
 
     async def test_native_destination_action_needs_auth_and_live_mode(self):
         target={'action':'save','name':'YouTube','server':'rtmps://example.com/live','key':'TEST-KEY'}
@@ -72,6 +73,11 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(r.status,200)
         self.assertNotIn('TEST-KEY',self.state.config_path.read_text())
         self.assertEqual(self.state.config['destinations'][0]['name'],'YouTube')
+
+    async def test_focus_action_requires_native_auth(self):
+        self.state.demo=False
+        r=await self.client.post('/native/action',headers=self.headers,json={'action':'focus'})
+        self.assertEqual(r.status,401)
 
     async def test_report_excludes_chat(self):
         r=await self.client.get('/api/report',headers=self.headers)

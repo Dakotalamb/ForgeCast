@@ -1,4 +1,4 @@
-# ForgeCast 0.3.0 preview
+# ForgeCast 0.3.1 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
