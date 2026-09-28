@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.3.1-preview', demo=self.demo,
+        return dict(schema_version=1, app='ForgeCast', version='0.3.2-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',

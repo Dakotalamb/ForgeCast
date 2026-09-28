@@ -23,6 +23,8 @@
 #include <QNetworkRequest>
 #include <QPushButton>
 #include <QPointer>
+#include <QSettings>
+#include <QStringList>
 #include <QTextBrowser>
 #include <QTextCursor>
 #include <QTimer>
@@ -296,6 +298,7 @@ public:
 static QPointer<ChatDock> chatDock;
 static QPointer<DoctorDock> doctorDock;
 static QPointer<MultistreamDock> multistreamDock;
+static void arrangeForgeCastDocks();
 
 class ForgeDock : public QWidget {
     QNetworkAccessManager network;
@@ -328,6 +331,9 @@ public:
         connect(setup, &QPushButton::clicked, this, [this] {
             sendAction(QJsonObject{{"action", "focus"}});
         });
+        auto *arrange = new QPushButton("Arrange ForgeCast docks", this);
+        layout->addWidget(arrange);
+        connect(arrange, &QPushButton::clicked, this, [] { arrangeForgeCastDocks(); });
         layout->addStretch();
 #ifdef _WIN32
         bridgePath = qEnvironmentVariable("LOCALAPPDATA") + "/ForgeCast/bridge-token";
@@ -546,16 +552,33 @@ public:
 static QPointer<ForgeDock> dock;
 static void showDocked(QWidget *content)
 {
-    // OBS registers add_dock_by_id widgets as hidden and floating. Put the
-    // registered host back in OBS's right docking area before showing it.
+    // OBS registers new docks hidden and floating; show the existing host.
     auto *host = qobject_cast<QDockWidget *>(content->parentWidget());
     if (host) {
         host->setAllowedAreas(Qt::AllDockWidgetAreas);
-        host->setFloating(false);
         host->show();
     }
 }
-static void groupForgeCastDocks()
+static QDockWidget *findObsDock(QMainWindow *main, const QStringList &names)
+{
+    for (auto *candidate : main->findChildren<QDockWidget *>()) {
+        for (const auto &name : names)
+            if (candidate->windowTitle().compare(name, Qt::CaseInsensitive) == 0)
+                return candidate;
+    }
+    return nullptr;
+}
+static void placeBeside(QMainWindow *main, QDockWidget *anchor, QDockWidget *target)
+{
+    if (!anchor || !target || anchor == target) return;
+    const auto area = main->dockWidgetArea(anchor);
+    if (area == Qt::NoDockWidgetArea) return;
+    main->removeDockWidget(target);
+    main->addDockWidget(area, target);
+    main->splitDockWidget(anchor, target, Qt::Horizontal);
+    target->show();
+}
+static void arrangeForgeCastDocks()
 {
     if (!chatDock || !doctorDock || !multistreamDock || !dock) return;
     auto *chat = qobject_cast<QDockWidget *>(chatDock->parentWidget());
@@ -565,10 +588,22 @@ static void groupForgeCastDocks()
     if (!chat || !doctor || !streams || !control) return;
     auto *main = qobject_cast<QMainWindow *>(chat->parentWidget());
     if (!main) return;
-    main->tabifyDockWidget(chat, doctor);
-    main->tabifyDockWidget(chat, streams);
-    main->tabifyDockWidget(chat, control);
-    chat->raise();
+    // Match the OBS workspace: Doctor between Sources and Controls, Chat next
+    // to Event List, and Multistream next to Outputs at the bottom right.
+    auto *sources = findObsDock(main, {"Sources"});
+    auto *events = findObsDock(main, {"Event List"});
+    auto *outputs = findObsDock(main, {"Outputs"});
+    if (sources && main->dockWidgetArea(sources) != Qt::NoDockWidgetArea)
+        placeBeside(main, sources, doctor);
+    else main->addDockWidget(Qt::BottomDockWidgetArea, doctor);
+    if (events && main->dockWidgetArea(events) != Qt::NoDockWidgetArea)
+        placeBeside(main, events, chat);
+    else main->addDockWidget(Qt::RightDockWidgetArea, chat);
+    if (outputs && main->dockWidgetArea(outputs) != Qt::NoDockWidgetArea)
+        placeBeside(main, outputs, streams);
+    else main->addDockWidget(Qt::BottomDockWidgetArea, streams);
+    main->tabifyDockWidget(streams, control);
+    doctor->show(); chat->show(); streams->show(); streams->raise();
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
@@ -621,7 +656,17 @@ void obs_module_post_load(void)
         delete multistreamDock.data();
         multistreamDock.clear();
     } else showDocked(multistreamDock.data());
-    groupForgeCastDocks();
+    QSettings settings("Forged Destiny Gaming", "ForgeCast");
+    if (!settings.value("arranged-layout-0.3.2", false).toBool()) {
+        QTimer::singleShot(0, [] {
+            arrangeForgeCastDocks();
+            QSettings settings("Forged Destiny Gaming", "ForgeCast");
+            settings.setValue("arranged-layout-0.3.2", true);
+        });
+    }
+    obs_frontend_add_tools_menu_item("ForgeCast: Arrange docks", [](void *) {
+        arrangeForgeCastDocks();
+    }, nullptr);
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }
 

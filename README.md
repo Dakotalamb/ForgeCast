@@ -1,4 +1,4 @@
-# ForgeCast 0.3.1 preview
+# ForgeCast 0.3.2 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
@@ -17,6 +17,15 @@ The desktop app runs the local account and telemetry companion; daily chat,
 diagnostics, and multistream controls are available in OBS. Test privately before
 using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
+
+The first launch of 0.3.2 places Stream Doctor beside Sources, Chat beside the
+Event List, and Multistream beside Outputs. ForgeCast Control shares the
+Multistream space as a tab. In OBS, use the Control dock's **Arrange ForgeCast
+docks** button to restore that layout. To drag docks elsewhere, turn off
+**Docks → Lock Docks**. OBS saves subsequent manual arrangements. Other plugins'
+Outputs and Event List docks stay available; close them yourself if preferred.
+Platform sign-in happens in the Hub. ForgeCast's Connections tab pairs to the
+Hub and syncs your accounts; raw API IDs/tokens live under Advanced for testing.
 
 ## Start with the safe demo
 
