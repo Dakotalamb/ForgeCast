@@ -43,7 +43,7 @@ function renderChat() {
 let lastChat='', lastDest='';
 function render(s) {
  state=s;
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.3.2';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.3.3';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('scene').textContent=s.scene;
  const stats=s.stats, fresh=s.obs_connected||s.demo;

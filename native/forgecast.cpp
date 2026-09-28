@@ -5,6 +5,8 @@
 #include <QApplication>
 #include <QByteArray>
 #include <QColor>
+#include <QComboBox>
+#include <QDateTime>
 #include <QDockWidget>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -63,9 +65,15 @@ struct Destination {
 class ChatDock : public QWidget {
     QLabel *connection;
     QTextBrowser *feed;
+    QComboBox *sendTo;
+    QLineEdit *compose;
+    QPushButton *sendButton;
+    QLabel *sendStatus;
+    QString pendingText;
+    std::function<void(const QJsonObject &)> send;
     QByteArray lastMessages;
 public:
-    ChatDock() : QWidget()
+    explicit ChatDock(std::function<void(const QJsonObject &)> submit) : QWidget(), send(std::move(submit))
     {
         setStyleSheet("QWidget { background: #151719; color: #f4f4f4; }"
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }"
@@ -76,6 +84,42 @@ public:
         feed->setOpenExternalLinks(false);
         layout->addWidget(connection);
         layout->addWidget(feed);
+        auto *composer = new QHBoxLayout();
+        sendTo = new QComboBox(this);
+        sendTo->addItem("Twitch", "twitch");
+        sendTo->addItem("YouTube", "youtube");
+        sendTo->setToolTip("Replies go to your connected channel on this platform.");
+        compose = new QLineEdit(this);
+        compose->setPlaceholderText("Message your channel…");
+        compose->setMaxLength(200);
+        sendButton = new QPushButton("Send", this);
+        composer->addWidget(sendTo);
+        composer->addWidget(compose, 1);
+        composer->addWidget(sendButton);
+        layout->addLayout(composer);
+        sendStatus = new QLabel("Choose Twitch or YouTube to reply. Kick replies are not available yet.", this);
+        sendStatus->setWordWrap(true);
+        layout->addWidget(sendStatus);
+        auto submitMessage = [this] {
+            const auto value = compose->text().trimmed();
+            if (value.isEmpty() || !sendButton->isEnabled()) return;
+            pendingText = compose->text();
+            sendButton->setEnabled(false);
+            sendStatus->setText("Sending to " + sendTo->currentText() + "…");
+            send(QJsonObject{{"action", "chat_send"}, {"platform", sendTo->currentData().toString()},
+                             {"text", value}});
+        };
+        connect(sendButton, &QPushButton::clicked, this, submitMessage);
+        connect(compose, &QLineEdit::returnPressed, this, submitMessage);
+    }
+
+    void sendResult(bool success, const QString &error)
+    {
+        sendButton->setEnabled(true);
+        if (success && compose->text() == pendingText) compose->clear();
+        sendStatus->setText(success ? "Message sent to your selected channel." :
+                            (error.isEmpty() ? "Message could not be sent. Check your connection." : error));
+        pendingText.clear();
     }
 
     void disconnected()
@@ -108,6 +152,51 @@ public:
         if (messages.isEmpty()) html += "<p>Messages will appear here when accounts are connected and live.</p>";
         feed->setHtml(html + "</div>");
         feed->moveCursor(QTextCursor::End);
+    }
+};
+
+class EventsDock : public QWidget {
+    QTextBrowser *feed;
+    QByteArray lastEvents;
+public:
+    EventsDock() : QWidget()
+    {
+        setStyleSheet("QWidget { background:#151719;color:#f4f4f4; }"
+                      "QTextBrowser { background:#1d2022;border:0;padding:8px; }"
+                      "QLabel { color:#ff7549;padding:5px; }");
+        auto *layout = new QVBoxLayout(this);
+        auto *heading = new QLabel("FORGECAST EVENTS", this);
+        heading->setStyleSheet("font-weight:700");
+        feed = new QTextBrowser(this);
+        feed->setOpenExternalLinks(false);
+        auto *note = new QLabel("Twitch/YouTube activity · OBS status · Stream Doctor. "
+                                "Kick alerts and Twitch follows need additional platform support.", this);
+        note->setWordWrap(true);
+        layout->addWidget(heading);
+        layout->addWidget(feed);
+        layout->addWidget(note);
+        disconnected();
+    }
+    void disconnected() { feed->setHtml("<p>Start the ForgeCast app to see activity.</p>"); }
+    void update(const QJsonObject &payload)
+    {
+        const auto events = payload.value("events").toArray();
+        const auto bytes = QJsonDocument(events).toJson(QJsonDocument::Compact);
+        if (bytes == lastEvents) return;
+        lastEvents = bytes;
+        QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
+        for (const auto &entry : events) {
+            const auto row = entry.toObject();
+            const auto source = row.value("source").toString().toHtmlEscaped();
+            const auto description = row.value("text").toString().toHtmlEscaped();
+            const auto timestamp = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble()))
+                                       .toLocalTime().toString("h:mm AP");
+            html += "<p style='margin:0 0 12px'><b style='color:#ff7549'>" + source +
+                    "</b> · <span style='color:#a9adb0'>" + timestamp +
+                    "</span><br>" + description + "</p>";
+        }
+        if (events.isEmpty()) html += "<p>Activity from your connected platforms will appear here.</p>";
+        feed->setHtml(html + "</div>");
     }
 };
 
@@ -296,6 +385,7 @@ public:
 };
 
 static QPointer<ChatDock> chatDock;
+static QPointer<EventsDock> eventsDock;
 static QPointer<DoctorDock> doctorDock;
 static QPointer<MultistreamDock> multistreamDock;
 static void arrangeForgeCastDocks();
@@ -358,6 +448,8 @@ public:
     {
         QFile tokenFile(bridgePath);
         if (!tokenFile.open(QIODevice::ReadOnly)) {
+            if (action.value("action") == "chat_send" && chatDock)
+                chatDock->sendResult(false, "Start the ForgeCast app before sending chat.");
             if (multistreamDock) multistreamDock->message("Start the ForgeCast companion first.");
             return;
         }
@@ -368,13 +460,18 @@ public:
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         auto *reply = network.post(request, QJsonDocument(action).toJson());
         const bool focusing = action.value("action").toString() == "focus";
-        connect(reply, &QNetworkReply::finished, this, [this, reply, focusing] {
+        const bool sendingChat = action.value("action").toString() == "chat_send";
+        connect(reply, &QNetworkReply::finished, this, [this, reply, focusing, sendingChat] {
+            const bool success = reply->error() == QNetworkReply::NoError;
+            const auto error = success ? QString() :
+                QJsonDocument::fromJson(reply->readAll()).object().value("error").toString();
+            if (sendingChat && chatDock)
+                chatDock->sendResult(success, error);
             if (multistreamDock) {
-                if (reply->error() != QNetworkReply::NoError) {
-                    QString error = QJsonDocument::fromJson(reply->readAll()).object().value("error").toString();
+                if (!success) {
                     if (focusing) label->setText(error.isEmpty() ? "Open ForgeCast from the Start menu." : error);
-                    else multistreamDock->message(error.isEmpty() ? "Action failed. Check ForgeCast connection." : error);
-                } else if (!focusing) multistreamDock->message("Request accepted. Waiting for OBS output status.");
+                    else if (!sendingChat) multistreamDock->message(error.isEmpty() ? "Action failed. Check ForgeCast connection." : error);
+                } else if (!focusing && !sendingChat) multistreamDock->message("Request accepted. Waiting for OBS output status.");
             }
             reply->deleteLater();
         });
@@ -488,6 +585,7 @@ public:
         QFile tokenFile(bridgePath);
         if (!tokenFile.open(QIODevice::ReadOnly)) {
             if (chatDock) chatDock->disconnected();
+            if (eventsDock) eventsDock->disconnected();
             if (doctorDock) doctorDock->disconnected();
             if (multistreamDock) multistreamDock->message("Start the ForgeCast companion to manage destinations.");
             label->setText("FORGECAST · Companion not running\n"
@@ -530,6 +628,7 @@ public:
                 for (int i = 0; i < sentResults && !results.isEmpty(); ++i) results.removeAt(0);
                 auto payload = QJsonDocument::fromJson(reply->readAll()).object();
                 if (chatDock) chatDock->update(payload);
+                if (eventsDock) eventsDock->update(payload);
                 if (doctorDock) doctorDock->update(payload);
                 if (multistreamDock) multistreamDock->update(payload);
                 for (const auto &value : payload.value("commands").toArray())
@@ -539,6 +638,7 @@ public:
                                "Stopping the main OBS stream also stops secondary outputs.");
             } else {
                 if (chatDock) chatDock->disconnected();
+                if (eventsDock) eventsDock->disconnected();
                 if (doctorDock) doctorDock->disconnected();
                 if (multistreamDock) multistreamDock->message("ForgeCast companion disconnected.");
                 label->setText("FORGECAST · Companion disconnected\n"
@@ -580,30 +680,38 @@ static void placeBeside(QMainWindow *main, QDockWidget *anchor, QDockWidget *tar
 }
 static void arrangeForgeCastDocks()
 {
-    if (!chatDock || !doctorDock || !multistreamDock || !dock) return;
+    if (!chatDock || !eventsDock || !doctorDock || !multistreamDock || !dock) return;
     auto *chat = qobject_cast<QDockWidget *>(chatDock->parentWidget());
+    auto *activity = qobject_cast<QDockWidget *>(eventsDock->parentWidget());
     auto *doctor = qobject_cast<QDockWidget *>(doctorDock->parentWidget());
     auto *streams = qobject_cast<QDockWidget *>(multistreamDock->parentWidget());
     auto *control = qobject_cast<QDockWidget *>(dock->parentWidget());
-    if (!chat || !doctor || !streams || !control) return;
+    if (!chat || !activity || !doctor || !streams || !control) return;
     auto *main = qobject_cast<QMainWindow *>(chat->parentWidget());
     if (!main) return;
-    // Match the OBS workspace: Doctor between Sources and Controls, Chat next
-    // to Event List, and Multistream next to Outputs at the bottom right.
+    // Match the OBS workspace: Doctor beside Sources, ForgeCast Events in the
+    // existing Event List area with Chat next to it, and Multistream by Outputs.
     auto *sources = findObsDock(main, {"Sources"});
     auto *events = findObsDock(main, {"Event List"});
     auto *outputs = findObsDock(main, {"Outputs"});
     if (sources && main->dockWidgetArea(sources) != Qt::NoDockWidgetArea)
         placeBeside(main, sources, doctor);
     else main->addDockWidget(Qt::BottomDockWidgetArea, doctor);
-    if (events && main->dockWidgetArea(events) != Qt::NoDockWidgetArea)
+    if (events && main->dockWidgetArea(events) != Qt::NoDockWidgetArea) {
         placeBeside(main, events, chat);
-    else main->addDockWidget(Qt::RightDockWidgetArea, chat);
+        main->removeDockWidget(activity);
+        main->addDockWidget(main->dockWidgetArea(events), activity);
+        main->tabifyDockWidget(events, activity);
+    } else {
+        main->addDockWidget(Qt::RightDockWidgetArea, activity);
+        placeBeside(main, activity, chat);
+    }
     if (outputs && main->dockWidgetArea(outputs) != Qt::NoDockWidgetArea)
         placeBeside(main, outputs, streams);
     else main->addDockWidget(Qt::BottomDockWidgetArea, streams);
     main->tabifyDockWidget(streams, control);
-    doctor->show(); chat->show(); streams->show(); streams->raise();
+    doctor->show(); activity->show(); chat->show(); streams->show();
+    activity->raise(); streams->raise();
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
@@ -611,12 +719,15 @@ static void frontendEvent(enum obs_frontend_event event, void *)
         dock->stopAll();
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {
         obs_frontend_remove_dock("forgecast-chat");
+        obs_frontend_remove_dock("forgecast-events");
         obs_frontend_remove_dock("forgecast-doctor");
         obs_frontend_remove_dock("forgecast-multistream");
         if (chatDock) delete chatDock.data();
+        if (eventsDock) delete eventsDock.data();
         if (doctorDock) delete doctorDock.data();
         if (multistreamDock) delete multistreamDock.data();
         chatDock.clear();
+        eventsDock.clear();
         doctorDock.clear();
         multistreamDock.clear();
         obs_frontend_remove_dock("forgecast-control");
@@ -632,11 +743,18 @@ bool obs_module_load(void)
 
 void obs_module_post_load(void)
 {
-    chatDock = new ChatDock();
+    chatDock = new ChatDock([](const QJsonObject &action) {
+        if (dock) dock->sendAction(action);
+    });
     if (!obs_frontend_add_dock_by_id("forgecast-chat", "ForgeCast Chat", chatDock.data())) {
         delete chatDock.data();
         chatDock.clear();
     } else showDocked(chatDock.data());
+    eventsDock = new EventsDock();
+    if (!obs_frontend_add_dock_by_id("forgecast-events", "ForgeCast Events", eventsDock.data())) {
+        delete eventsDock.data();
+        eventsDock.clear();
+    } else showDocked(eventsDock.data());
     doctorDock = new DoctorDock();
     if (!obs_frontend_add_dock_by_id("forgecast-doctor", "ForgeCast Stream Doctor", doctorDock.data())) {
         delete doctorDock.data();
@@ -657,11 +775,11 @@ void obs_module_post_load(void)
         multistreamDock.clear();
     } else showDocked(multistreamDock.data());
     QSettings settings("Forged Destiny Gaming", "ForgeCast");
-    if (!settings.value("arranged-layout-0.3.2", false).toBool()) {
+    if (!settings.value("arranged-layout-0.3.3", false).toBool()) {
         QTimer::singleShot(0, [] {
             arrangeForgeCastDocks();
             QSettings settings("Forged Destiny Gaming", "ForgeCast");
-            settings.setValue("arranged-layout-0.3.2", true);
+            settings.setValue("arranged-layout-0.3.3", true);
         });
     }
     obs_frontend_add_tools_menu_item("ForgeCast: Arrange docks", [](void *) {

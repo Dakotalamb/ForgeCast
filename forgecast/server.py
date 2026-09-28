@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.3.2-preview', demo=self.demo,
+        return dict(schema_version=1, app='ForgeCast', version='0.3.3-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -81,6 +81,20 @@ class State:
                     hub_events=self.hub_events,
                     secret_persistence='Windows DPAPI' if not self.vault.memory else 'Session memory only',
                     hub_url=self.config.get('hub_url', ''), obs_port=self.config.get('obs_port', 4455))
+
+
+def combined_events(s):
+    """Bounded activity available from connected accounts and local OBS telemetry."""
+    rows = [dict(time=e['time'], source='OBS / ForgeCast', text=e['text'])
+            for e in s.events]
+    rows.extend(dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
+                     text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'),
+                     kind=m.get('kind', 'activity'))
+                for m in s.chat.messages if m.get('kind') != 'chat' and not m.get('deleted'))
+    rows.extend(dict(time=i['time'], source='STREAM DOCTOR', text=i['title']+' · '+i['evidence'])
+                for i in s.doctor.incidents)
+    rows.sort(key=lambda row: row['time'], reverse=True)
+    return rows[:80]
 
 
 @web.middleware
@@ -337,6 +351,7 @@ async def native(request):
     return web.json_response({
         'commands': commands,
         'messages': list(s.chat.messages)[-80:],
+        'events': combined_events(s),
         'issues': s.current_issues[:12],
         'stats': {key: s.stats.get(key) for key in
                   ('activeFps', 'cpuUsage', 'renderSkippedFrames', 'renderTotalFrames',
@@ -374,7 +389,16 @@ async def native_action(request):
             user32.FlashWindow(hwnd, True)
         return web.json_response({'ok': True})
     async with s.lock:
-        if op == 'save':
+        if op == 'chat_send':
+            platform = str(data.get('platform', '')).lower()
+            message = str(data.get('text', '')).strip()
+            if platform not in ('twitch', 'youtube') or not message or len(message) > 200:
+                raise ValueError('Choose Twitch or YouTube and type a message of 1–200 characters.')
+            if platform not in s.adapters:
+                raise ValueError('Connect '+platform.title()+' in the ForgeCast app first.')
+            await s.adapters[platform].send(message)
+            s.event('Message sent to '+platform.title()+'.')
+        elif op == 'save':
             if any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
             name = str(data.get('name', '')).strip()

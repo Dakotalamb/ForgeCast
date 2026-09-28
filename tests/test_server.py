@@ -61,6 +61,36 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.state.native_key,str(payload))
         self.assertNotIn(self.state.browser_key,str(payload))
 
+    async def test_native_combined_events_include_activity_and_diagnostics_without_chat(self):
+        from forgecast.server import combined_events
+        self.state.chat.add(dict(id='chat',platform='twitch',kind='chat',time=10,text='private chat'))
+        self.state.chat.add(dict(id='raid',platform='twitch',origin='Box_Beard',user='Raider',
+                                 kind='raid',time=20,text='raid incoming'))
+        self.state.doctor.incidents.append(dict(time=30,title='Network drops',evidence='2 dropped frames'))
+        result=combined_events(self.state)
+        self.assertTrue(any('raid incoming' in e['text'] for e in result))
+        self.assertTrue(any('2 dropped frames' in e['text'] for e in result))
+        self.assertFalse(any('private chat' in e['text'] for e in result))
+
+    async def test_native_chat_send_targets_selected_connected_platform(self):
+        class Sender:
+            def __init__(self): self.messages=[]
+            async def send(self,text): self.messages.append(text)
+        self.state.demo=False
+        sender=Sender()
+        self.state.adapters['youtube']=sender
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        request={'action':'chat_send','platform':'youtube','text':'  hello stream  '}
+        r=await self.client.post('/native/action',headers=headers,json=request)
+        self.assertEqual(r.status,200)
+        self.assertEqual(sender.messages,['hello stream'])
+        self.assertFalse(any('hello stream' in e['text'] for e in self.state.events))
+        r=await self.client.post('/native/action',headers=headers,
+                                 json={**request,'platform':'kick'})
+        self.assertEqual(r.status,400)
+        self.assertEqual(sender.messages,['hello stream'])
+        self.state.adapters.pop('youtube')
+
     async def test_native_destination_action_needs_auth_and_live_mode(self):
         target={'action':'save','name':'YouTube','server':'rtmps://example.com/live','key':'TEST-KEY'}
         r=await self.client.post('/native/action',headers=self.headers,json=target)
