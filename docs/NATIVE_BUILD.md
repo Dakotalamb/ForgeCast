@@ -1,7 +1,8 @@
 # Native OBS module: build and live-test gate
 
-A Windows build has compiled the native module and installer against OBS 32.2.2
-in GitHub Actions. Live installation and streaming tests have not been completed.
+A previous Windows build compiled the native module and installer against OBS
+32.2.2 in GitHub Actions. The renamed FDGCast build needs its own CI run.
+Live installation and streaming tests have not been completed.
 Do not claim this source is production-ready. Runtime and ABI compatibility must
 be checked against the exact OBS version you use.
 
@@ -34,7 +35,7 @@ Close OBS. On Windows the installer places the staged DLL at
 `C:\ProgramData\obs-studio\plugins\forgecast\bin\64bit\forgecast.dll`.
 For isolated testing, copy the staged DLL into a separate test OBS installation's
 matching plugin directory. Do not replace any standard OBS DLLs or bundle an
-incompatible Qt runtime. Start the test OBS, verify Docks → ForgeCast Control,
+incompatible Qt runtime. Start the test OBS, verify Docks → FDGCast Control,
 then start the local companion. The bridge token's default location is fixed;
 do not use `--data-dir` with the native module without modifying its path.
 
@@ -64,7 +65,7 @@ output state before pressing Start again. There is no unattended start automatio
 
 `packaging/build-windows.ps1` compiles the DLL against supplied OBS SDK and Qt6
 development prefixes, freezes the companion with PyInstaller, then invokes Inno
-Setup 6 to create `release/ForgeCast-0.2.0-preview-win-x64-setup.exe`. The OBS
+Setup 6 to create `release/FDGCast-0.4.0-preview-win-x64-setup.exe`. The OBS
 development artifacts must export `OBS::libobs` and `OBS::obs-frontend-api`; a
 normal OBS desktop installation alone is insufficient. Example, in PowerShell:
 

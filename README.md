@@ -1,37 +1,48 @@
-# ForgeCast 0.3.4 preview
+# FDGCast 0.4.0 preview
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
-**This is a developer preview, not a finished Aitum replacement.** GitHub Actions
-compiled a Windows installer and an OBS 32.2.2 native module. Installation in
+**This is a developer preview, not a finished Aitum replacement.** A previous
+version compiled a Windows installer and an OBS 32.2.2 native module. Installation in
 OBS and live streaming still need validation. The local companion runs with Python;
 all implemented platform adapters also need testing with your authorized accounts.
 The Hub backend is maintained in its separate repository.
 
 The Windows Actions workflow compiles the OBS module and companion and bundles
-them with `packaging/ForgeCast.iss`. Download the preview installer from the
+them with `packaging/FDGCast.iss`. Download the preview installer from the
 successful workflow run's artifact. Close OBS before running the EXE, install,
-then start the ForgeCast desktop app from the Start menu. In OBS, open Docks →
-ForgeCast Chat, ForgeCast Stream Doctor, ForgeCast Multistream, or ForgeCast Control.
+then start the FDGCast desktop app from the Start menu. In OBS, open Docks →
+FDGCast Chat, FDGCast Stream Doctor, FDGCast Multistream, or FDGCast Control.
 The desktop app runs the local account and telemetry companion; daily chat,
 diagnostics, and multistream controls are available in OBS. Test privately before
 using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
 
-The first launch of 0.3.4 places Stream Doctor beside Sources, ForgeCast Events
-in the Event List area with Chat beside it, and Multistream beside Outputs. ForgeCast Control shares the
-Multistream space as a tab. In OBS, use the Control dock's **Arrange ForgeCast
+The first launch of 0.4.0 places Stream Doctor beside Sources, FDGCast Events
+in the Event List area with Chat beside it, and Multistream beside Outputs. FDGCast Control shares the
+Multistream space as a tab. In OBS, use the Control dock's **Arrange FDGCast
 docks** button to restore that layout. To drag docks elsewhere, turn off
 **Docks → Lock Docks**. OBS saves subsequent manual arrangements. Other plugins'
 Outputs and Event List docks stay available; close them yourself if preferred.
-Platform sign-in happens in the Hub. ForgeCast's Connections tab pairs to the
+Platform sign-in happens in the Hub. FDGCast's Connections tab pairs to the
 Hub and syncs your accounts; raw API IDs/tokens live under Advanced for testing.
 Chat in OBS includes Twitch, YouTube and Kick message targets; choose which
 connected channel receives your message. Kick requires a linked Hub account
-and a fresh account sync; the Hub must grant `chat:write`. ForgeCast
+and a fresh account sync; the Hub must grant `chat:write`. FDGCast
 Events collects available platform activity, OBS status, and Stream Doctor
 incidents. Twitch follows and Kick alerts require additional platform scopes
 and integrations; they are not included in this preview.
+
+YouTube chat reading works with the Hub's current read-only permission. Sending
+YouTube chat needs a broader Google scope and will require creators to reconnect
+after Google approves it. This desktop build already includes the reply action
+and a specific error when the current authorization rejects it. Keep the public
+Hub on its verified scope until the broader scope is approved.
+
+The display name is FDGCast. For upgrades, the OBS module and dock IDs still use
+`forgecast` and the desktop companion still reads `%LOCALAPPDATA%\ForgeCast`
+so existing dock positions, destinations and DPAPI-protected credentials survive.
+The installer reuses the previous Inno Setup AppId and removes legacy shortcuts.
 
 ## Start with the safe demo
 
@@ -50,12 +61,12 @@ Run only one companion instance at a time. The fixed local port is 17654.
 
 1. Start OBS and enable Tools → WebSocket Server Settings → Enable WebSocket server.
    Keep authentication enabled; note the local port and password.
-2. Run `Start-ForgeCast.cmd` (without `--demo`).
+2. Run `Start-FDGCast.cmd` (without `--demo`).
 3. Open Connections → OBS WebSocket and enter the port/password locally.
 4. Run Preflight and inspect Stream Doctor. Stream/record/replay actions require
    confirmation. Do not test with a public live stream until verified privately.
 5. Optional: add the URL printed in the console to OBS → Docks → Custom Browser
-   Docks. Name it ForgeCast. Re-copy the printed URL after restarting the companion.
+   Docks. Name it FDGCast. Re-copy the printed URL after restarting the companion.
    **This is a private operator dock, NOT a browser source/overlay.**
 
 No native module is needed for main-output diagnostics, main OBS controls, or chat.
@@ -64,7 +75,7 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 
 | Area | This package | Verification |
 |---|---|---|
-| Desktop app | Dedicated ForgeCast window for initial Hub, account and OBS connection setup | Windows app still needs live testing |
+| Desktop app | Dedicated FDGCast window for initial Hub, account and OBS connection setup | Windows app still needs live testing |
 | Shared chat provenance | Platform + original broadcaster + chatter; dedup by source message ID | Unit tested with fixtures |
 | Twitch adapter | EventSub messages/chat notifications/deletes/clears; send to configured receiving channel | Code implemented; live OAuth test needed |
 | YouTube adapter | API polling with server interval; chat/activity/deletion; send | Code implemented; live token/quota test needed |
@@ -97,7 +108,7 @@ authorization and are deliberately not simulated.
 
 **Never send account passwords, access tokens, or stream keys to this chat.**
 Deploy the included Hub update, connect Twitch/YouTube/Kick in Hub Settings, generate
-a ForgeCast pairing token there, and enter it with the HTTPS Hub URL in the local dock.
+a FDGCast pairing token there, and enter it with the HTTPS Hub URL in the local dock.
 Click Sync Hub accounts. The Hub refreshes access tokens; the dock re-fetches them
 periodically. You can also enter tokens manually in the local dashboard for testing.
 
@@ -139,7 +150,7 @@ the test. Additional destinations reuse these encoders and the same scene/output
 format; no separate bitrate or vertical composition. Each destination uses its
 own upload bandwidth. Start one at a time and verify arrival on each platform.
 
-Stopping the main OBS stream also stops all ForgeCast secondary streams. Closing
+Stopping the main OBS stream also stops all FDGCast secondary streams. Closing
 the companion or losing its connection **does not stop ongoing native streams**;
 the native dock includes a local stop button. Closing OBS stops all outputs.
 Do not remove the plugin DLL while OBS is running.

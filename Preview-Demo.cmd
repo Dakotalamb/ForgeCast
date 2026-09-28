@@ -1,2 +1,2 @@
 @echo off
-call "%~dp0Start-ForgeCast.cmd" --demo
+call "%~dp0Start-FDGCast.cmd" --demo

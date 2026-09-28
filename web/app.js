@@ -8,7 +8,7 @@ function error(message) { $('error').textContent = message; $('error').hidden = 
 $('error').onclick = () => $('error').hidden = true;
 async function api(path, data) {
   const response = await fetch(path, {method:data?'POST':'GET', headers:{'Authorization':'Bearer '+key, 'Content-Type':'application/json'}, body:data?JSON.stringify(data):undefined});
-  if (!response.ok) { let message; try { message = (await response.json()).error; } catch {} throw Error(message || 'Local session expired. Reopen the URL printed by ForgeCast.'); }
+  if (!response.ok) { let message; try { message = (await response.json()).error; } catch {} throw Error(message || 'Local session expired. Reopen the URL printed by FDGCast.'); }
   return response.json();
 }
 async function action(op, data={}) { return api('/api/action', {op,...data}); }
@@ -23,9 +23,9 @@ bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind(
 $('send').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;run(async()=>{await action('chat_send',Object.fromEntries(new FormData(f)));f.elements.text.value='';},f.querySelector('button'));};
 document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>action('chat_disconnect',{platform:b.dataset.disconnect,forget:true}),b));
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
-$('stopAll').onclick=()=>{if(confirm('Stop all ForgeCast secondary outputs? The main OBS stream stays running.'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
+$('stopAll').onclick=()=>{if(confirm('Stop all FDGCast secondary outputs? The main OBS stream stays running.'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
 $('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
-$('report').onclick=()=>run(async()=>{const data=await api('/api/report');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='ForgeCast-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},$('report'));
+$('report').onclick=()=>run(async()=>{const data=await api('/api/report');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='FDGCast-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},$('report'));
 $('hubFetch').onclick=()=>run(()=>action('hub_fetch'),$('hubFetch'));
 $('hubSync').onclick=()=>run(()=>action('hub_sync'),$('hubSync'));
 $('setupSync').onclick=()=>run(()=>action('hub_sync'),$('setupSync'));
@@ -43,7 +43,7 @@ function renderChat() {
 let lastChat='', lastDest='';
 function render(s) {
  state=s;
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.3.4';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.4.0';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('scene').textContent=s.scene;
  const stats=s.stats, fresh=s.obs_connected||s.demo;
@@ -68,4 +68,4 @@ function render(s) {
 }
 async function refresh(){render(await api('/api/state'));}
 async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';error(e.message);}setTimeout(loop,1500);}
-if(key)loop();else error('Open the dashboard URL printed by Start-ForgeCast. Its private session key is missing.');
+if(key)loop();else error('Open the dashboard URL printed by Start-FDGCast. Its private session key is missing.');

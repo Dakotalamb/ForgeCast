@@ -1,4 +1,4 @@
-// ForgeCast native output module. Alpha: build and validate against your OBS SDK.
+// FDGCast native output module. Alpha: build and validate against your OBS SDK.
 // No credentials are written to OBS logs or the configuration directory.
 #include <obs-module.h>
 #include <obs-frontend-api.h>
@@ -16,6 +16,7 @@
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -42,7 +43,7 @@
 OBS_DECLARE_MODULE()
 MODULE_EXPORT const char *obs_module_description(void)
 {
-    return "ForgeCast by Forged Destiny Gaming: multistream output control";
+    return "FDGCast by Forged Destiny Gaming: multistream output control";
 }
 
 struct Destination {
@@ -80,7 +81,7 @@ public:
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }"
                       "QLabel { color: #ff7549; padding: 8px; }");
         auto *layout = new QVBoxLayout(this);
-        connection = new QLabel("FORGECAST CHAT · Start ForgeCast to connect", this);
+        connection = new QLabel("FDGCAST CHAT · Start FDGCast to connect", this);
         connection->setWordWrap(true);
         connection->setMinimumWidth(0);
         connection->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -135,13 +136,13 @@ public:
 
     void disconnected()
     {
-        connection->setText("FORGECAST CHAT · Companion offline");
+        connection->setText("FDGCAST CHAT · Companion offline");
     }
 
     void update(const QJsonObject &payload)
     {
         const auto statuses = payload.value("statuses").toObject();
-        connection->setText("FORGECAST CHAT · Twitch: " + statuses.value("twitch").toString("offline") +
+        connection->setText("FDGCAST CHAT · Twitch: " + statuses.value("twitch").toString("offline") +
                             " · YouTube: " + statuses.value("youtube").toString("offline") +
                             " · Kick: " + statuses.value("kick").toString("offline"));
         const auto messages = payload.value("messages").toArray();
@@ -176,7 +177,7 @@ public:
                       "QTextBrowser { background:#1d2022;border:0;padding:8px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("FORGECAST EVENTS", this);
+        auto *heading = new QLabel("FDGCAST EVENTS", this);
         heading->setStyleSheet("font-weight:700");
         feed = new QTextBrowser(this);
         feed->setOpenExternalLinks(false);
@@ -188,7 +189,7 @@ public:
         layout->addWidget(note);
         disconnected();
     }
-    void disconnected() { feed->setHtml("<p>Start the ForgeCast app to see activity.</p>"); }
+    void disconnected() { feed->setHtml("<p>Start the FDGCast app to see activity.</p>"); }
     void update(const QJsonObject &payload)
     {
         const auto events = payload.value("events").toArray();
@@ -219,7 +220,7 @@ public:
         setStyleSheet("QWidget { background: #151719; color: #f4f4f4; }"
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("STREAM DOCTOR · FORGECAST", this);
+        auto *heading = new QLabel("STREAM DOCTOR · FDGCAST", this);
         heading->setStyleSheet("color:#ff7549;font-weight:700;padding:8px");
         report = new QTextBrowser(this);
         report->setOpenExternalLinks(false);
@@ -230,13 +231,13 @@ public:
 
     void disconnected()
     {
-        report->setHtml("<p>Start the ForgeCast companion to see OBS frame diagnostics.</p>");
+        report->setHtml("<p>Start the FDGCast companion to see OBS frame diagnostics.</p>");
     }
 
     void update(const QJsonObject &payload)
     {
         if (!payload.value("obs_connected").toBool()) {
-            report->setHtml("<p>OBS telemetry is disconnected. Open ForgeCast setup in the Control dock "
+            report->setHtml("<p>OBS telemetry is disconnected. Open FDGCast setup in the Control dock "
                             "and connect OBS WebSocket.</p>");
             return;
         }
@@ -285,9 +286,9 @@ public:
                       "QPushButton#stopAll { background:#342421;color:#ff9576; }"
                       "QLabel { padding:3px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("FORGECAST MULTISTREAM", this);
+        auto *heading = new QLabel("FDGCAST MULTISTREAM", this);
         heading->setStyleSheet("color:#ff7549;font-weight:700");
-        status = new QLabel("Start the ForgeCast app to connect.", this);
+        status = new QLabel("Start the FDGCast app to connect.", this);
         status->setWordWrap(true);
         list = new QListWidget(this);
         list->setMinimumHeight(95);
@@ -324,7 +325,7 @@ public:
         });
         connect(add, &QPushButton::clicked, this, [this] {
             QDialog dialog(this);
-            dialog.setWindowTitle("Add ForgeCast destination");
+            dialog.setWindowTitle("Add FDGCast destination");
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
             key.setEchoMode(QLineEdit::Password);
@@ -399,7 +400,7 @@ static QPointer<ChatDock> chatDock;
 static QPointer<EventsDock> eventsDock;
 static QPointer<DoctorDock> doctorDock;
 static QPointer<MultistreamDock> multistreamDock;
-static void arrangeForgeCastDocks();
+static void arrangeFDGCastDocks();
 
 class ForgeDock : public QWidget {
     QNetworkAccessManager network;
@@ -419,22 +420,22 @@ public:
                       "border-radius: 5px; padding: 10px; font-weight: 700; }"
                       "QPushButton:hover { background: #ff7549; }");
         auto *layout = new QVBoxLayout(this);
-        label = new QLabel("FORGECAST · FORGED DESTINY GAMING\nStart the local companion to connect.\n"
+        label = new QLabel("FDGCAST · FORGED DESTINY GAMING\nStart the local companion to connect.\n"
                            "Secondary outputs reuse OBS main H.264 + AAC encoders.\n"
                            "Start the main OBS stream first. No automatic starts.", this);
         label->setWordWrap(true);
         layout->addWidget(label);
-        auto *stop = new QPushButton("Stop ForgeCast secondary outputs", this);
+        auto *stop = new QPushButton("Stop FDGCast secondary outputs", this);
         layout->addWidget(stop);
         connect(stop, &QPushButton::clicked, this, [this] { stopAll(); });
-        auto *setup = new QPushButton("Open ForgeCast app", this);
+        auto *setup = new QPushButton("Open FDGCast app", this);
         layout->addWidget(setup);
         connect(setup, &QPushButton::clicked, this, [this] {
             sendAction(QJsonObject{{"action", "focus"}});
         });
-        auto *arrange = new QPushButton("Arrange ForgeCast docks", this);
+        auto *arrange = new QPushButton("Arrange FDGCast docks", this);
         layout->addWidget(arrange);
-        connect(arrange, &QPushButton::clicked, this, [] { arrangeForgeCastDocks(); });
+        connect(arrange, &QPushButton::clicked, this, [] { arrangeFDGCastDocks(); });
         layout->addStretch();
 #ifdef _WIN32
         bridgePath = qEnvironmentVariable("LOCALAPPDATA") + "/ForgeCast/bridge-token";
@@ -460,8 +461,8 @@ public:
         QFile tokenFile(bridgePath);
         if (!tokenFile.open(QIODevice::ReadOnly)) {
             if (action.value("action") == "chat_send" && chatDock)
-                chatDock->sendResult(false, "Start the ForgeCast app before sending chat.");
-            if (multistreamDock) multistreamDock->message("Start the ForgeCast companion first.");
+                chatDock->sendResult(false, "Start the FDGCast app before sending chat.");
+            if (multistreamDock) multistreamDock->message("Start the FDGCast companion first.");
             return;
         }
         QNetworkRequest request(QUrl("http://127.0.0.1:17654/native/action"));
@@ -480,8 +481,8 @@ public:
                 chatDock->sendResult(success, error);
             if (multistreamDock) {
                 if (!success) {
-                    if (focusing) label->setText(error.isEmpty() ? "Open ForgeCast from the Start menu." : error);
-                    else if (!sendingChat) multistreamDock->message(error.isEmpty() ? "Action failed. Check ForgeCast connection." : error);
+                    if (focusing) label->setText(error.isEmpty() ? "Open FDGCast from the Start menu." : error);
+                    else if (!sendingChat) multistreamDock->message(error.isEmpty() ? "Action failed. Check FDGCast connection." : error);
                 } else if (!focusing && !sendingChat) multistreamDock->message("Request accepted. Waiting for OBS output status.");
             }
             reply->deleteLater();
@@ -536,7 +537,7 @@ public:
         obs_data_set_string(settings, "server", server.constData());
         obs_data_set_string(settings, "key", key.constData());
         obs_data_set_bool(settings, "use_auth", false);
-        QByteArray name = ("ForgeCast-" + id).toUtf8();
+        QByteArray name = ("FDGCast-" + id).toUtf8();
         d->service = obs_service_create("rtmp_custom", name.constData(), settings, nullptr);
         obs_data_release(settings);
         key.fill('\0');
@@ -598,8 +599,8 @@ public:
             if (chatDock) chatDock->disconnected();
             if (eventsDock) eventsDock->disconnected();
             if (doctorDock) doctorDock->disconnected();
-            if (multistreamDock) multistreamDock->message("Start the ForgeCast companion to manage destinations.");
-            label->setText("FORGECAST · Companion not running\n"
+            if (multistreamDock) multistreamDock->message("Start the FDGCast companion to manage destinations.");
+            label->setText("FDGCAST · Companion not running\n"
                            "Secondary streams, if active, can be stopped below.");
             return;
         }
@@ -644,15 +645,15 @@ public:
                 if (multistreamDock) multistreamDock->update(payload);
                 for (const auto &value : payload.value("commands").toArray())
                     command(value.toObject());
-                label->setText("FORGECAST · Companion connected\n"
-                               "Control destinations and read diagnostics in your ForgeCast browser dock.\n"
+                label->setText("FDGCAST · Companion connected\n"
+                               "Control destinations and read diagnostics in your FDGCast browser dock.\n"
                                "Stopping the main OBS stream also stops secondary outputs.");
             } else {
                 if (chatDock) chatDock->disconnected();
                 if (eventsDock) eventsDock->disconnected();
                 if (doctorDock) doctorDock->disconnected();
-                if (multistreamDock) multistreamDock->message("ForgeCast companion disconnected.");
-                label->setText("FORGECAST · Companion disconnected\n"
+                if (multistreamDock) multistreamDock->message("FDGCast companion disconnected.");
+                label->setText("FDGCAST · Companion disconnected\n"
                                "Active streams are not stopped by a dashboard outage. Use the button below.");
             }
             reply->deleteLater();
@@ -689,7 +690,7 @@ static void placeBeside(QMainWindow *main, QDockWidget *anchor, QDockWidget *tar
     main->splitDockWidget(anchor, target, Qt::Horizontal);
     target->show();
 }
-static void arrangeForgeCastDocks()
+static void arrangeFDGCastDocks()
 {
     if (!chatDock || !eventsDock || !doctorDock || !multistreamDock || !dock) return;
     auto *chat = qobject_cast<QDockWidget *>(chatDock->parentWidget());
@@ -700,7 +701,7 @@ static void arrangeForgeCastDocks()
     if (!chat || !activity || !doctor || !streams || !control) return;
     auto *main = qobject_cast<QMainWindow *>(chat->parentWidget());
     if (!main) return;
-    // Match the OBS workspace: Doctor beside Sources, ForgeCast Events in the
+    // Match the OBS workspace: Doctor beside Sources, FDGCast Events in the
     // existing Event List area with Chat next to it, and Multistream by Outputs.
     auto *sources = findObsDock(main, {"Sources"});
     auto *events = findObsDock(main, {"Event List"});
@@ -757,22 +758,22 @@ void obs_module_post_load(void)
     chatDock = new ChatDock([](const QJsonObject &action) {
         if (dock) dock->sendAction(action);
     });
-    if (!obs_frontend_add_dock_by_id("forgecast-chat", "ForgeCast Chat", chatDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-chat", "FDGCast Chat", chatDock.data())) {
         delete chatDock.data();
         chatDock.clear();
     } else showDocked(chatDock.data());
     eventsDock = new EventsDock();
-    if (!obs_frontend_add_dock_by_id("forgecast-events", "ForgeCast Events", eventsDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-events", "FDGCast Events", eventsDock.data())) {
         delete eventsDock.data();
         eventsDock.clear();
     } else showDocked(eventsDock.data());
     doctorDock = new DoctorDock();
-    if (!obs_frontend_add_dock_by_id("forgecast-doctor", "ForgeCast Stream Doctor", doctorDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-doctor", "FDGCast Stream Doctor", doctorDock.data())) {
         delete doctorDock.data();
         doctorDock.clear();
     } else showDocked(doctorDock.data());
     dock = new ForgeDock();
-    if (!obs_frontend_add_dock_by_id("forgecast-control", "ForgeCast Control", dock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-control", "FDGCast Control", dock.data())) {
         delete dock.data();
         dock.clear();
         return;
@@ -781,20 +782,31 @@ void obs_module_post_load(void)
     multistreamDock = new MultistreamDock([](const QJsonObject &action) {
         if (dock) dock->sendAction(action);
     });
-    if (!obs_frontend_add_dock_by_id("forgecast-multistream", "ForgeCast Multistream", multistreamDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-multistream", "FDGCast Multistream", multistreamDock.data())) {
         delete multistreamDock.data();
         multistreamDock.clear();
     } else showDocked(multistreamDock.data());
+    // OBS retains the historical dock IDs so existing workspace layouts survive upgrades.
+    // Apply the FDG shield when a dock is floated into its own window.
+    char *iconPath = obs_module_file("FDGCast.ico");
+    if (iconPath) {
+        const QIcon icon(QString::fromUtf8(iconPath));
+        bfree(iconPath);
+        for (QWidget *content : {chatDock.data(), eventsDock.data(), doctorDock.data(),
+                                 multistreamDock.data(), dock.data()}) {
+            if (content && content->parentWidget()) content->parentWidget()->setWindowIcon(icon);
+        }
+    }
     QSettings settings("Forged Destiny Gaming", "ForgeCast");
     if (!settings.value("arranged-layout-0.3.3", false).toBool()) {
         QTimer::singleShot(0, [] {
-            arrangeForgeCastDocks();
+            arrangeFDGCastDocks();
             QSettings settings("Forged Destiny Gaming", "ForgeCast");
             settings.setValue("arranged-layout-0.3.3", true);
         });
     }
-    obs_frontend_add_tools_menu_item("ForgeCast: Arrange docks", [](void *) {
-        arrangeForgeCastDocks();
+    obs_frontend_add_tools_menu_item("FDGCast: Arrange docks", [](void *) {
+        arrangeFDGCastDocks();
     }, nullptr);
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }

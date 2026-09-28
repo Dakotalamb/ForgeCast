@@ -23,21 +23,22 @@ if ($LASTEXITCODE -ne 0) { throw 'OBS plugin compilation failed.' }
 & cmake --install $nativeBuild --config Release --prefix $stage
 if ($LASTEXITCODE -ne 0) { throw 'OBS plugin staging failed.' }
 $dll = Join-Path $stage 'forgecast\bin\64bit\forgecast.dll'
-if (-not (Test-Path $dll)) { throw 'ForgeCast DLL was not staged.' }
+if (-not (Test-Path $dll)) { throw 'FDGCast DLL was not staged.' }
 
 & py -3 -m venv $venv
 if ($LASTEXITCODE -ne 0) { throw 'Virtual environment creation failed.' }
 $python = Join-Path $venv 'Scripts\python.exe'
 & $python -m pip install -r (Join-Path $root 'requirements.txt') 'pyinstaller==6.16.0' 'pywebview==6.2.1'
 if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
-& $python -m PyInstaller --noconfirm --clean --windowed --onedir --name ForgeCast `
-  --icon (Join-Path $root 'packaging/ForgeCast.ico') `
+& $python -m PyInstaller --noconfirm --clean --windowed --onedir --name FDGCast `
+  --icon (Join-Path $root 'packaging/FDGCast.ico') `
   --paths $root --add-data "$(Join-Path $root 'web');web" `
+  --add-data "$(Join-Path $root 'packaging/FDGCast.ico');packaging" `
   --distpath (Join-Path $root 'dist') --workpath (Join-Path $root 'build-pyinstaller') `
   --specpath (Join-Path $root 'build-pyinstaller') (Join-Path $root 'launcher.py')
-if ($LASTEXITCODE -ne 0) { throw 'ForgeCast companion freeze failed.' }
-if (-not (Test-Path (Join-Path $root 'dist\ForgeCast\ForgeCast.exe'))) { throw 'Companion executable missing.' }
+if ($LASTEXITCODE -ne 0) { throw 'FDGCast companion freeze failed.' }
+if (-not (Test-Path (Join-Path $root 'dist\FDGCast\FDGCast.exe'))) { throw 'Companion executable missing.' }
 
-& $IsccPath (Join-Path $PSScriptRoot 'ForgeCast.iss')
+& $IsccPath (Join-Path $PSScriptRoot 'FDGCast.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 Write-Host "Installer created in $(Join-Path $root 'release'). Test it on a separate OBS installation before offering it."

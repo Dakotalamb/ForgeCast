@@ -1,4 +1,4 @@
-# ForgeCast Windows installer status
+# FDGCast Windows installer status
 
 ## Prepared in source
 
@@ -12,16 +12,15 @@
 
 ## Windows preview build
 
-The GitHub Actions Windows runner compiled the native module against OBS
-32.2.2, froze the companion, and produced an Inno Setup installer on
-2026-09-27. The successful build is linked from the repository's Actions tab.
-It has not yet been installed or exercised inside OBS on a creator PC.
+The earlier ForgeCast preview compiled against OBS 32.2.2. The FDGCast 0.4.0
+preview needs its own Windows Actions run before an installer can be linked.
+The resulting build still needs to be tested in OBS on a creator PC.
 
 ## What is still required before public distribution
 
 1. Install the generated EXE on a clean Windows OBS test machine. Check that
-   OBS opens, that Docks → ForgeCast Control appears, and that a reinstall and
-   uninstall do not remove the user's saved OBS settings or ForgeCast secrets.
+   OBS opens, that Docks → FDGCast Control appears, and that a reinstall and
+   uninstall do not remove the user's saved OBS settings or FDGCast secrets.
 2. Test Twitch Shared Chat with multiple broadcasters; YouTube and Kick live
    events; start/stop/reconnect of secondary RTMP outputs; and Stream Doctor
    while gaming. Verify OBS logs and installer antivirus/SmartScreen behavior.
@@ -39,8 +38,8 @@ changes the companion to a desktop window. Its Windows build passed native
 compilation, desktop startup and installation-path checks. OBS runtime and
 live-streaming tests on a creator PC remain. The 0.2.0 artifact lacks these docks.
 
-The 0.3.4 preview places Stream Doctor beside Sources, ForgeCast Events in the
+The 0.4.0 preview places Stream Doctor beside Sources, FDGCast Events in the
 Event List area, Chat beside Events, and Multistream beside Outputs on first
 launch; subsequent OBS rearrangements
 are preserved. The Control panel can bring the desktop app forward and reset
-the ForgeCast dock layout. The companion uses Hub pairing for account setup.
+the FDGCast dock layout. The companion uses Hub pairing for account setup.

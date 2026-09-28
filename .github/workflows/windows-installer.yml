@@ -1,4 +1,4 @@
-name: Build ForgeCast Windows installer
+name: Build FDGCast Windows installer
 
 on:
   push:
@@ -13,7 +13,7 @@ jobs:
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
-      - name: Check out ForgeCast
+      - name: Check out FDGCast
         uses: actions/checkout@v4
       - name: Check out official OBS plugin build template
         uses: actions/checkout@v4
@@ -31,11 +31,12 @@ jobs:
           $locale = Join-Path $template 'data/locale'
           New-Item -ItemType Directory -Force $locale | Out-Null
           Copy-Item 'packaging/en-US.ini' (Join-Path $locale 'en-US.ini') -Force
+          Copy-Item 'packaging/FDGCast.ico' (Join-Path $template 'data/FDGCast.ico') -Force
           $specPath = Join-Path $template 'buildspec.json'
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
-          $spec.displayName = 'ForgeCast'
-          $spec.version = '0.3.4'
+          $spec.displayName = 'FDGCast'
+          $spec.version = '0.4.0'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -62,20 +63,20 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Freeze ForgeCast companion
+      - name: Freeze FDGCast companion
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
           python -m pip install -r requirements.txt 'pyinstaller==6.16.0' 'pywebview==6.2.1'
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-          python -m PyInstaller --noconfirm --clean --windowed --onedir --name ForgeCast --icon "$env:GITHUB_WORKSPACE/packaging/ForgeCast.ico" --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name FDGCast --icon "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico" --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --add-data "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico;packaging" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
           if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
-          if (-not (Test-Path 'dist/ForgeCast/ForgeCast.exe')) { throw 'Companion EXE missing' }
+          if (-not (Test-Path 'dist/FDGCast/FDGCast.exe')) { throw 'Companion EXE missing' }
       - name: Smoke test packaged local service
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $app = (Resolve-Path 'dist/ForgeCast/ForgeCast.exe').Path
+          $app = (Resolve-Path 'dist/FDGCast/FDGCast.exe').Path
           $process = Start-Process $app -ArgumentList '--headless' -PassThru
           try {
             $ready = $false
@@ -84,34 +85,34 @@ jobs:
               try {
                 $response = Invoke-WebRequest 'http://127.0.0.1:17654/' -TimeoutSec 2
                 if ($response.StatusCode -eq 200) { $ready = $true; break }
-              } catch { if ($process.HasExited) { throw 'ForgeCast packaged service exited on startup' } }
+              } catch { if ($process.HasExited) { throw 'FDGCast packaged service exited on startup' } }
             }
-            if (-not $ready) { throw 'ForgeCast packaged service did not become ready' }
+            if (-not $ready) { throw 'FDGCast packaged service did not become ready' }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
-      - name: Smoke test ForgeCast desktop window
+      - name: Smoke test FDGCast desktop window
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $app = (Resolve-Path 'dist/ForgeCast/ForgeCast.exe').Path
+          $app = (Resolve-Path 'dist/FDGCast/FDGCast.exe').Path
           $process = Start-Process $app -PassThru
           try {
             $opened = $false
             for ($i = 0; $i -lt 25; $i++) {
               Start-Sleep -Seconds 1
               $process.Refresh()
-              if ($process.HasExited) { throw 'ForgeCast desktop app exited before showing a window' }
+              if ($process.HasExited) { throw 'FDGCast desktop app exited before showing a window' }
               if ($process.MainWindowHandle -ne [IntPtr]::Zero) { $opened = $true; break }
             }
-            if (-not $opened) { throw 'ForgeCast desktop window did not open' }
+            if (-not $opened) { throw 'FDGCast desktop window did not open' }
             $bridge = Join-Path $env:LOCALAPPDATA 'ForgeCast/bridge-token'
-            if (-not (Test-Path $bridge)) { throw 'ForgeCast OBS bridge token missing' }
+            if (-not (Test-Path $bridge)) { throw 'FDGCast OBS bridge token missing' }
             $token = (Get-Content $bridge -Raw).Trim()
             $response = Invoke-RestMethod 'http://127.0.0.1:17654/native/action' -Method Post `
               -Headers @{Authorization="Bearer $token"} -ContentType 'application/json' `
               -Body '{"action":"focus"}'
-            if (-not $response.ok) { throw 'OBS Open ForgeCast app action failed' }
+            if (-not $response.ok) { throw 'OBS Open FDGCast app action failed' }
           } finally {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
           }
@@ -123,14 +124,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Inno Setup installation failed' }
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
-          & $iscc 'packaging/ForgeCast.iss'
+          & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/ForgeCast-0.3.4-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-0.4.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/ForgeCast-0.3.4-preview-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-0.4.0-preview-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -141,6 +142,6 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: ForgeCast-0.3.4-OBS-32.2.2-Windows-preview-installer
-          path: release/ForgeCast-0.3.4-preview-win-x64-setup.exe
+          name: FDGCast-0.4.0-OBS-32.2.2-Windows-preview-installer
+          path: release/FDGCast-0.4.0-preview-win-x64-setup.exe
           if-no-files-found: error

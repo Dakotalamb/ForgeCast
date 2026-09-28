@@ -1,4 +1,4 @@
-# ForgeCast ↔ Forge Creator Hub API v1
+# FDGCast ↔ Forge Creator Hub API v1
 
 The companion Hub source in `../../hub-work` implements this API. Deploy that
 Hub update and run its migration before pairing. It is not live until deployed.

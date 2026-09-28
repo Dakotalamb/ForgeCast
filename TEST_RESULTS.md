@@ -1,11 +1,11 @@
-# Verification record — September 27, 2026
+# Verification record — September 28, 2026
 
 Environment: Linux, Python 3.12.14, aiohttp 3.13.5, Node 24.19.0.
 
 ## Passed
 
-- 44 automated Python tests (`python3 -m unittest discover -s tests -v`).
-- Python source compilation (`python3 -m compileall -q forgecast`).
+- 52 automated Python tests (`python3 -m unittest discover -s tests -q`).
+- Python source compilation (`python3 -m compileall -q launcher.py forgecast`).
 - JavaScript syntax validation (`node --check web/app.js`).
 - Aiohttp application startup/cleanup and local HTTP security tests.
 - Mock OBS WebSocket authentication, event delivery, request routing, failure and
@@ -28,7 +28,7 @@ native queue expiry, Hub HTTPS enforcement and adapter request construction.
   tests or Windows DPAPI round-trip test.
 - No live Twitch/YouTube OAuth, Shared Chat or RTMP broadcast tests. Account
   credentials were not available and no public streams/messages were sent.
-- No existing Hub endpoints were changed, deployed or verified.
+- The Hub API and Google OAuth changes still need a deployed end-to-end check.
 
 Automated local success does not establish live production readiness. Follow
 `docs/NATIVE_BUILD.md` before installing the native module in a live OBS setup.

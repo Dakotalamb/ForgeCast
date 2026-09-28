@@ -64,7 +64,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='ForgeCast', version='0.3.4-preview', demo=self.demo,
+        return dict(schema_version=1, app='FDGCast', version='0.4.0-preview', demo=self.demo,
                     generated_at=time.time(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -85,7 +85,7 @@ class State:
 
 def combined_events(s):
     """Bounded activity available from connected accounts and local OBS telemetry."""
-    rows = [dict(time=e['time'], source='OBS / ForgeCast', text=e['text'])
+    rows = [dict(time=e['time'], source='OBS / FDGCast', text=e['text'])
             for e in s.events]
     rows.extend(dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
                      text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'),
@@ -105,14 +105,19 @@ async def send_chat(s, platform, text):
         token = s.vault.get('kick_token')
         channel = s.config.get('kick', {}).get('channel_id')
         if not token or not channel:
-            raise ValueError('Link Kick in the Hub, then Sync linked accounts in ForgeCast.')
+            raise ValueError('Link Kick in the Hub, then Sync linked accounts in FDGCast.')
         await api(s.session, 'POST', 'https://api.kick.com/public/v1/chat',
                   headers={'Authorization':'Bearer '+token},
                   json={'type':'user', 'broadcaster_user_id':int(channel), 'content':message})
     else:
         if platform not in s.adapters:
-            raise ValueError('Connect '+platform.title()+' in ForgeCast first.')
-        await s.adapters[platform].send(message)
+            raise ValueError('Connect '+platform.title()+' in FDGCast first.')
+        try:
+            await s.adapters[platform].send(message)
+        except ApiError as exc:
+            if platform == 'youtube' and 'HTTP 403' in str(exc):
+                raise ValueError('YouTube declined this reply. The Hub connection needs a chat-writing scope; reconnect after Google approves it.') from exc
+            raise
     s.event('Message sent to '+platform.title()+'.')
 
 
@@ -215,7 +220,7 @@ async def action(request):
             s.save()
         elif op == 'native_command':
             if time.time()-s.native_seen > 5:
-                raise ValueError('Native ForgeCast module is not connected. Build/install it first.')
+                raise ValueError('Native FDGCast module is not connected. Build/install it first.')
             if not data.get('confirmed'):
                 raise ValueError('Explicit confirmation required.')
             if data.get('command') not in ('start', 'stop', 'stop_all'):
@@ -273,7 +278,7 @@ async def action(request):
                 raise ValueError('Hub base URL must be HTTPS, without credentials, query or fragment.')
             token = data.get('token') or s.vault.get('hub_token')
             if not token:
-                raise ValueError('A dedicated ForgeCast Hub integration token is required.')
+                raise ValueError('A dedicated FDGCast Hub integration token is required.')
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
             s.save()
@@ -351,7 +356,7 @@ async def action(request):
 
 
 async def report(request):
-    return web.json_response(request.app['state'].report(), headers={'Content-Disposition':'attachment; filename="ForgeCast-diagnostics.json"'})
+    return web.json_response(request.app['state'].report(), headers={'Content-Disposition':'attachment; filename="FDGCast-diagnostics.json"'})
 
 
 async def native(request):
@@ -396,7 +401,7 @@ async def native_action(request):
         raise ValueError('Live actions are disabled in demo mode.')
     if op == 'focus':
         if os.name != 'nt':
-            raise ValueError('ForgeCast desktop window is available in the Windows installer.')
+            raise ValueError('FDGCast desktop window is available in the Windows installer.')
         import ctypes
         user32 = ctypes.windll.user32
         user32.FindWindowW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
@@ -404,9 +409,9 @@ async def native_action(request):
         user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
         user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
         user32.FlashWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
-        hwnd = user32.FindWindowW(None, 'ForgeCast · Forged Destiny Gaming')
+        hwnd = user32.FindWindowW(None, 'FDGCast · Forged Destiny Gaming')
         if not hwnd:
-            raise ValueError('ForgeCast app is not open. Start it from the Windows Start menu.')
+            raise ValueError('FDGCast app is not open. Start it from the Windows Start menu.')
         user32.ShowWindow(hwnd, 9)  # SW_RESTORE
         if not user32.SetForegroundWindow(hwnd):
             user32.FlashWindow(hwnd, True)
@@ -580,7 +585,7 @@ def create_app(state):
 
 
 def main(on_ready=None):
-    parser = argparse.ArgumentParser(description='ForgeCast local OBS companion · alpha')
+    parser = argparse.ArgumentParser(description='FDGCast local OBS companion · alpha')
     parser.add_argument('--demo', action='store_true')
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--data-dir', type=Path, default=data_directory())
@@ -596,13 +601,13 @@ def main(on_ready=None):
         listener.setblocking(False)
     except OSError:
         listener.close()
-        parser.exit(1, 'ForgeCast port 17654 is already occupied. Close the other instance first.\n')
+        parser.exit(1, 'FDGCast port 17654 is already occupied. Close the other instance first.\n')
     # A demo cannot replace a running production bridge token.
     s = State(args.data_dir/'demo' if args.demo else args.data_dir, args.demo)
     app = create_app(s)
     async def announce(app):
         url = f'http://127.0.0.1:{PORT}/#'+s.browser_key
-        print('ForgeCast dashboard / OBS Custom Browser Dock URL:\n'+url)
+        print('FDGCast dashboard / OBS Custom Browser Dock URL:\n'+url)
         print('Keep this local URL private. Do not add this dock as a broadcast source.')
         if on_ready:
             on_ready(url)
