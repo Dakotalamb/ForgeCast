@@ -31,6 +31,50 @@ $('hubFetch').onclick=()=>run(()=>action('hub_fetch'),$('hubFetch'));
 $('hubSync').onclick=()=>run(()=>action('hub_sync'),$('hubSync'));
 $('setupSync').onclick=()=>run(()=>action('hub_sync'),$('setupSync'));
 $('hubReport').onclick=()=>{if(confirm('Have you reviewed the downloaded report? Send diagnostic measurements and output names to your configured Hub?'))run(()=>action('hub_report',{confirmed:true}),$('hubReport'));};
+$('audioSnooze').onclick=()=>run(()=>action('audio_snooze'),$('audioSnooze'));
+$('audioAck').onclick=()=>run(()=>action('audio_ack'),$('audioAck'));
+$('audioForm').onsubmit=e=>{e.preventDefault();run(async()=>{
+ const sources=[];
+ for(const [id,role] of [['audioMic','microphone'],['audioGame','game_audio']]){
+   const uuid=$(id).value;if(uuid){const name=$(id).selectedOptions[0].textContent;sources.push({uuid,name,role});}
+ }
+ await action('audio_settings',{settings:{sources,enabled:$('audioEnabled').checked,notifications:$('audioNotify').checked,
+   sound:$('audioSound').checked,quiet_scenes:$('audioQuiet').value.split('\n'),silence_seconds:Number($('audioSilence').value)}});
+},e.currentTarget.querySelector('button'));};
+let audioSettingsShown='',audioOptionsShown='';
+function renderAudio(s){
+ const audio=s.audio_guard||{state:'unknown',title:'Audio telemetry unavailable.',issues:[],sources:[]};
+ $('audioHome').textContent=audio.title;$('audioState').textContent=audio.state.toUpperCase();
+ $('audioIssues').replaceChildren(...audio.issues.map(i=>{
+   const box=el('article',undefined,'issue');box.append(el('h3',i.title),el('small',i.source_name),el('p',i.evidence));
+   if(i.acknowledged)box.append(el('small','Acknowledged until this condition clears.'));
+   if(i.snoozed)box.append(el('small','Notifications snoozed. Monitoring continues.'));
+   if(i.action)box.append(button(i.action==='unmute'?'UNMUTE':'FIX STREAM ROUTING',()=>action('audio_fix',{source_uuid:i.source_uuid,fix:i.action})));
+   return box;
+ }));if(!audio.issues.length)$('audioIssues').append(el('p',audio.title,'muted'));
+ if(audio.history_error)$('audioIssues').append(el('p',audio.history_error,'danger'));
+ const settings=s.audio_settings||{}, options=JSON.stringify((audio.sources||[]).map(r=>[r.uuid,r.name]));
+ if(options!==audioOptionsShown&&!$('audioForm').contains(document.activeElement)){
+   audioOptionsShown=options;
+   for(const [id,role,label] of [['audioMic','microphone','Choose microphone…'],['audioGame','game_audio','Not monitored']]){
+     const chosen=$(id).value||(settings.sources||[]).find(r=>r.role===role)?.uuid||'';
+     const rows=new Map((audio.sources||[]).map(r=>[r.uuid,r.name]));
+     for(const saved of settings.sources||[])if(!rows.has(saved.uuid))rows.set(saved.uuid,saved.name+' (missing)');
+     $(id).replaceChildren(new Option(label,''),...Array.from(rows,([uid,name])=>new Option(name,uid)));$(id).value=chosen;
+   }
+ }
+ const signature=JSON.stringify(settings);
+ if(signature!==audioSettingsShown&&!$('audioForm').contains(document.activeElement)){
+   audioSettingsShown=signature;
+   $('audioEnabled').checked=settings.enabled!==false;$('audioNotify').checked=settings.notifications!==false;
+   $('audioSound').checked=!!settings.sound;$('audioSilence').value=settings.silence_seconds||90;
+   $('audioQuiet').value=(settings.quiet_scenes||[]).join('\n');
+   for(const [id,role] of [['audioMic','microphone'],['audioGame','game_audio']])$(id).value=(settings.sources||[]).find(r=>r.role===role)?.uuid||'';
+ }
+ $('audioHistory').replaceChildren(...(s.audio_history||[]).slice(-30).reverse().map(e=>el('p',
+   new Date(e.time*1000).toLocaleString()+' · '+e.kind.replaceAll('_',' ')+(e.title?' · '+e.title:'')+(e.duration?' · '+e.duration+' sec':''),'muted')));
+ if(!s.audio_history?.length)$('audioHistory').append(el('p','No audio incidents recorded yet.','muted'));
+}
 function issue(i) { const d=el('article',undefined,'issue');d.append(el('h3',i.title),el('small',i.confidence.toUpperCase()+' confidence · symptom classification'),el('p',i.evidence),el('p',i.suggestion));return d; }
 function platformIcon(platform) {
  const image=el('img');image.className='platform-icon';image.alt=platform;image.title=platform;
@@ -74,6 +118,7 @@ function outputStatus(s,d){
 let lastChat='', lastDest='';
 function render(s) {
  state=s;
+ renderAudio(s);
  $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.4.0';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('scene').textContent=s.scene;

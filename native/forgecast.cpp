@@ -1,6 +1,7 @@
 // FDGCast native output module. Alpha: build and validate against your OBS SDK.
 // No credentials are written to OBS logs or the configuration directory.
 #include <obs-module.h>
+#include <obs-audio-controls.h>
 #include <obs-frontend-api.h>
 #include <QApplication>
 #include <QByteArray>
@@ -52,6 +53,9 @@
 #include <memory>
 #include <cstring>
 #include <functional>
+#include <atomic>
+#include <chrono>
+#include <cmath>
 
 OBS_DECLARE_MODULE()
 MODULE_EXPORT const char *obs_module_description(void)
@@ -76,6 +80,32 @@ struct Destination {
         }
         if (service)
             obs_service_release(service);
+    }
+};
+
+static qint64 audioClock()
+{
+    return std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+struct AudioMeter {
+    obs_source_t *source;
+    obs_volmeter_t *meter;
+    std::atomic<qint64> lastMeter{0}, lastSignal{0};
+    explicit AudioMeter(obs_source_t *input) : source(obs_source_get_ref(input)), meter(obs_volmeter_create(OBS_FADER_LOG))
+    {
+        if (source && meter) { obs_volmeter_add_callback(meter, updated, this); obs_volmeter_attach_source(meter, source); }
+    }
+    static void updated(void *data, const float *, const float *, const float inputPeak[MAX_AUDIO_CHANNELS])
+    {
+        auto *self = static_cast<AudioMeter *>(data);
+        const auto now = audioClock(); self->lastMeter.store(now);
+        for (size_t channel=0; channel<MAX_AUDIO_CHANNELS; ++channel)
+            if (std::isfinite(inputPeak[channel]) && inputPeak[channel] > -60.0f) { self->lastSignal.store(now); break; }
+    }
+    ~AudioMeter()
+    {
+        if (meter) { obs_volmeter_remove_callback(meter, updated, this); obs_volmeter_destroy(meter); }
+        if (source) obs_source_release(source);
     }
 };
 
@@ -307,7 +337,7 @@ public:
         heading->setStyleSheet("font-weight:700");
         feed = new QTextBrowser(this);
         feed->setOpenExternalLinks(false);
-        auto *note = new QLabel("Twitch/YouTube activity · OBS status · Stream Doctor. "
+        auto *note = new QLabel("Audience activity from Twitch/YouTube. "
                                 "Kick alerts and Twitch follows need additional platform support.", this);
         note->setWordWrap(true);
         layout->addWidget(heading);
@@ -340,8 +370,13 @@ public:
 
 class DoctorDock : public QWidget {
     QTextBrowser *report;
+    QLabel *audioStatus;
+    QLabel *audioFeedback;
+    QPushButton *fixButton;
+    QJsonObject audioIssue;
+    std::function<void(const QJsonObject &)> send;
 public:
-    DoctorDock() : QWidget()
+    explicit DoctorDock(std::function<void(const QJsonObject &)> submit) : QWidget(), send(std::move(submit))
     {
         setStyleSheet("QWidget { background: #151719; color: #f4f4f4; }"
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }");
@@ -351,17 +386,53 @@ public:
         report = new QTextBrowser(this);
         report->setOpenExternalLinks(false);
         layout->addWidget(heading);
+        audioStatus = new QLabel("Audio Guard · Connect Companion", this);
+        audioStatus->setWordWrap(true); audioStatus->setMinimumWidth(0);
+        audioStatus->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        layout->addWidget(audioStatus);
+        audioFeedback = new QLabel(this); audioFeedback->setWordWrap(true);
+        audioFeedback->setMinimumWidth(0); audioFeedback->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
+        layout->addWidget(audioFeedback);
+        fixButton = new QPushButton("Fix audio", this); fixButton->setEnabled(false);
+        layout->addWidget(fixButton);
+        auto *quiet = new QHBoxLayout();
+        auto *snooze = new QPushButton("Snooze 10 min", this);
+        auto *ack = new QPushButton("I Know", this);
+        quiet->addWidget(snooze); quiet->addWidget(ack); layout->addLayout(quiet);
+        connect(fixButton,&QPushButton::clicked,this,[this] {
+            send(QJsonObject{{"action","audio_fix"},{"source_uuid",audioIssue.value("source_uuid")},{"fix",audioIssue.value("action")}});
+        });
+        connect(snooze,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","audio_snooze"}}); });
+        connect(ack,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","audio_ack"}}); });
+        auto *details = new QPushButton("Audio Guard settings in Companion", this);
+        layout->addWidget(details);
+        connect(details,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","focus"}}); });
         layout->addWidget(report);
         disconnected();
     }
 
+    void message(const QString &text) { audioFeedback->setText(text); }
+
     void disconnected()
     {
+        audioStatus->setText("Audio Guard · Companion disconnected; monitoring unavailable.");
+        fixButton->setEnabled(false);
         report->setHtml("<p>Start the FDGCast companion to see OBS frame diagnostics.</p>");
     }
 
     void update(const QJsonObject &payload)
     {
+        const auto audio = payload.value("audio_guard").toObject();
+        const auto audioIssues = audio.value("issues").toArray();
+        audioStatus->setText("AUDIO GUARD · "+audio.value("title").toString("Choose your microphone in Companion."));
+        audioStatus->setStyleSheet(audio.value("state").toString() == "warning" ? "color:#ffd166" : "color:#a8afb8");
+        audioIssue = QJsonObject();
+        for (const auto &issue : audioIssues)
+            if (!issue.toObject().value("action").toString().isEmpty()) { audioIssue=issue.toObject(); break; }
+        fixButton->setEnabled(!audioIssue.isEmpty());
+        const bool unmute=audioIssue.value("action").toString() == "unmute";
+        fixButton->setText(unmute ? "UNMUTE" : "FIX STREAM ROUTING");
+        fixButton->setToolTip(audioIssue.value("source_name").toString()+" · "+audioIssue.value("evidence").toString());
         if (!payload.value("obs_connected").toBool()) {
             report->setHtml("<p>OBS telemetry is disconnected. Open FDGCast setup in the Control dock "
                             "and connect OBS WebSocket.</p>");
@@ -565,6 +636,8 @@ class ForgeDock : public QWidget {
     QJsonArray results;
     QJsonArray bulkStarts;
     int bulkTicks = 0;
+    QJsonObject audioSettings;
+    std::map<QString, std::unique_ptr<AudioMeter>> audioMeters;
     bool pending = false;
     QString bridgePath;
 public:
@@ -634,12 +707,14 @@ public:
         auto *reply = network.post(request, QJsonDocument(action).toJson());
         const bool focusing = action.value("action").toString() == "focus";
         const bool sendingChat = action.value("action").toString() == "chat_send";
-        connect(reply, &QNetworkReply::finished, this, [this, reply, focusing, sendingChat] {
+        const bool audioAction = action.value("action").toString().startsWith("audio_");
+        connect(reply, &QNetworkReply::finished, this, [this, reply, focusing, sendingChat, audioAction] {
             const bool success = reply->error() == QNetworkReply::NoError;
             const auto error = success ? QString() :
                 QJsonDocument::fromJson(reply->readAll()).object().value("error").toString();
             if (sendingChat && chatDock)
                 chatDock->sendResult(success, error);
+            if (audioAction && doctorDock) doctorDock->message(success ? "Audio Guard request accepted. Waiting for updated OBS readings." : error);
             if (multistreamDock) {
                 if (!success) {
                     if (focusing) label->setText(error.isEmpty() ? "Open FDGCast from the Start menu." : error);
@@ -659,6 +734,77 @@ public:
             reply->abort();
         }
         destinations.clear();
+    }
+
+    QJsonObject audioSnapshot()
+    {
+        QJsonArray rows;
+        QSet<QString> selected, seen;
+        if (audioSettings.value("enabled").toBool(true))
+            for (const auto &row : audioSettings.value("sources").toArray()) selected.insert(row.toObject().value("uuid").toString());
+        struct Scan { ForgeDock *self; QJsonArray *rows; QSet<QString> *selected; QSet<QString> *seen; } scan{this, &rows, &selected, &seen};
+        obs_enum_sources([](void *data, obs_source_t *source) {
+            auto &scan = *static_cast<Scan *>(data);
+            if (!(obs_source_get_output_flags(source) & OBS_SOURCE_AUDIO) || obs_source_removed(source)) return true;
+            const QString uuid = QString::fromUtf8(obs_source_get_uuid(source));
+            scan.seen->insert(uuid);
+            auto &meters = scan.self->audioMeters;
+            if (scan.selected->contains(uuid) && meters.find(uuid) == meters.end()) meters.emplace(uuid, std::make_unique<AudioMeter>(source));
+            QJsonObject row{{"uuid",uuid},{"name",QString::fromUtf8(obs_source_get_name(source))},
+                {"active",obs_source_active(source)},{"muted",obs_source_muted(source)},
+                {"mixers",static_cast<int>(obs_source_get_audio_mixers(source))},
+                {"volume",obs_source_get_volume(source)},
+                {"monitor_only",obs_source_get_monitoring_type(source) == OBS_MONITORING_TYPE_MONITOR_ONLY}};
+            auto found = meters.find(uuid);
+            if (found != meters.end()) {
+                const auto now = audioClock(), sample = found->second->lastMeter.load(), signal = found->second->lastSignal.load();
+                row.insert("meter_age", sample ? QJsonValue((now-sample)/1000.0) : QJsonValue());
+                row.insert("signal_age", signal ? QJsonValue((now-signal)/1000.0) : QJsonValue());
+            }
+            if (scan.rows->size() < 128) scan.rows->append(row);
+            return true;
+        }, &scan);
+        for (auto it=audioMeters.begin(); it!=audioMeters.end();)
+            if (!seen.contains(it->first) || !selected.contains(it->first)) it=audioMeters.erase(it); else ++it;
+        int track = 0;
+        auto *output = obs_frontend_get_streaming_output();
+        if (output) {
+            auto *encoder = obs_output_get_audio_encoder(output,0);
+            if (encoder) track = static_cast<int>(obs_encoder_get_mixer_index(encoder))+1;
+            obs_output_release(output);
+        }
+        auto *scene = obs_frontend_get_current_scene();
+        const QString sceneName = scene ? QString::fromUtf8(obs_source_get_name(scene)) : QString();
+        if (scene) obs_source_release(scene);
+        return QJsonObject{{"sources",rows},{"stream_track",track},{"track_verified",obs_frontend_streaming_active() && track>=1 && track<=6},
+            {"stream_active",obs_frontend_streaming_active()},{"scene",sceneName}};
+    }
+
+    QString fixAudio(const QJsonObject &cmd)
+    {
+        const QString uuid = cmd.value("source_uuid").toString();
+        bool selected=false;
+        for (const auto &row : audioSettings.value("sources").toArray())
+            if (row.toObject().value("uuid").toString() == uuid) selected=true;
+        if (!selected) return "audio_source_not_selected";
+        auto *source = obs_get_source_by_uuid(uuid.toUtf8().constData());
+        if (!source) return "audio_source_missing";
+        const auto action = cmd.value("fix").toString();
+        QString result="audio_action_unsupported";
+        if (action == "unmute") { obs_source_set_muted(source,false); result="audio_unmute_applied"; }
+        else if (action == "route") {
+            auto *output = obs_frontend_get_streaming_output();
+            auto *encoder = output ? obs_output_get_audio_encoder(output,0) : nullptr;
+            const size_t mix = encoder ? obs_encoder_get_mixer_index(encoder) : 6;
+            if (encoder && mix<6) {
+                obs_source_set_audio_mixers(source,obs_source_get_audio_mixers(source) | (1u << mix));
+                if (obs_source_get_monitoring_type(source) == OBS_MONITORING_TYPE_MONITOR_ONLY)
+                    obs_source_set_monitoring_type(source,OBS_MONITORING_TYPE_MONITOR_AND_OUTPUT);
+                result="audio_stream_routing_applied";
+            } else result="audio_stream_track_unavailable";
+            if (output) obs_output_release(output);
+        }
+        obs_source_release(source); return result;
     }
 
     QString start(const QJsonObject &obj)
@@ -727,7 +873,17 @@ public:
     {
         QString action = cmd.value("action").toString();
         QString result = "unsupported_command";
-        if (action == "start") {
+        if (action == "audio_fix") {
+            result = fixAudio(cmd);
+            if (doctorDock) {
+                QString message;
+                if (result == "audio_unmute_applied") message="Audio source unmuted. Check the meter for signal.";
+                else if (result == "audio_stream_routing_applied") message="Source enabled on the current stream track. Other tracks preserved.";
+                else if (result == "audio_stream_track_unavailable") message="OBS stream track is unavailable. Start streaming and try again.";
+                else message="Audio fix could not be applied. Check your selected source in Companion.";
+                doctorDock->message(message);
+            }
+        } else if (action == "start") {
             result = start(cmd.value("destination").toObject());
         } else if (action == "start_all") {
             if (!bulkStarts.isEmpty()) result = "already_active_or_busy";
@@ -820,13 +976,14 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"outputs", outputs}, {"results", results}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"outputs", outputs}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
             if (reply->error() == QNetworkReply::NoError) {
                 for (int i = 0; i < sentResults && !results.isEmpty(); ++i) results.removeAt(0);
                 auto payload = QJsonDocument::fromJson(reply->readAll()).object();
+                audioSettings = payload.value("audio_settings").toObject();
                 if (chatDock) chatDock->update(payload);
                 if (eventsDock) eventsDock->update(payload);
                 if (doctorDock) doctorDock->update(payload);
@@ -994,7 +1151,7 @@ void obs_module_post_load(void)
         delete eventsDock.data();
         eventsDock.clear();
     } else showDocked(eventsDock.data());
-    doctorDock = new DoctorDock();
+    doctorDock = new DoctorDock([](const QJsonObject &action) { if (dock) dock->sendAction(action); });
     if (!obs_frontend_add_dock_by_id("forgecast-doctor", "FDGCast Stream Doctor", doctorDock.data())) {
         delete doctorDock.data();
         doctorDock.clear();

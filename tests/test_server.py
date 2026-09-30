@@ -183,6 +183,40 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.get('/icons/unknown.svg',headers={'Host':'127.0.0.1:17654'})
         self.assertEqual(r.status,404)
 
+    async def test_audio_settings_and_fixes_require_known_selected_sources(self):
+        self.state.demo=False
+        self.state.audio_snapshot={'sources':[{'uuid':'mic','name':'Private Microphone','active':True}],
+                                   'track_verified':True,'stream_track':2}
+        self.state.audio_seen=time.time()
+        settings={'sources':[{'uuid':'mic','name':'Private Microphone','role':'microphone'}]}
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_settings','settings':settings})
+        self.assertEqual(r.status,200)
+        native={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/action',headers=native,
+            json={'action':'audio_fix','source_uuid':'mic','fix':'route'})
+        self.assertEqual(r.status,200)
+        self.assertEqual(self.state.commands[-1]['action'],'audio_fix')
+        self.assertEqual(self.state.commands[-1]['source_uuid'],'mic')
+        r=await self.client.post('/native/action',headers=native,
+            json={'action':'audio_fix','source_uuid':'other','fix':'unmute'})
+        self.assertEqual(r.status,400)
+        self.state.audio_seen=0
+        r=await self.client.post('/native/action',headers=native,
+            json={'action':'audio_fix','source_uuid':'mic','fix':'unmute'})
+        self.assertEqual(r.status,400)
+        report=self.state.report()
+        self.assertNotIn('Private Microphone',str(report))
+
+    async def test_audio_preflight_reports_unknown_track_and_mute_without_blocking(self):
+        from forgecast.server import audio_preflight
+        self.state.audio.configure({'sources':[{'uuid':'mic','name':'Microphone','role':'microphone'}]})
+        self.state.audio_snapshot={'sources':[{'uuid':'mic','name':'Microphone','active':True,'muted':True}],
+                                   'track_verified':False,'stream_track':0}
+        self.state.audio_seen=time.time()
+        checks=audio_preflight(self.state)
+        self.assertTrue(any('muted' in c['result'] for c in checks))
+        self.assertTrue(any('not verified' in c['result'] for c in checks))
+
     async def test_unknown_action(self):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'execute_shell'})

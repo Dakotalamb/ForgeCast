@@ -18,6 +18,7 @@ from .core import ChatStore, Doctor, validate_destination, kick_message, usernam
 from .storage import Vault, atomic_json, data_directory
 from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
+from .audio import AudioGuard, validate_settings, notify_windows
 
 PORT = 17654
 WEB = Path(__file__).resolve().parent.parent/'web'
@@ -54,6 +55,10 @@ class State:
         self.paused_platforms = set(self.config.get('paused_platforms', []))
         self.kick_verified = False
         self.kick_received = 0
+        self.audio = AudioGuard(self.directory, self.config.get("audio_guard"), demo)
+        self.audio_snapshot = None
+        self.audio_seen = 0
+        self.audio_notice_queue = asyncio.Queue(maxsize=20)
 
     def status(self, platform, message):
         if self.statuses.get(platform) != message:
@@ -113,7 +118,7 @@ class State:
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
         return dict(schema_version=1, app='FDGCast', version='0.4.0-preview', demo=self.demo,
-                    generated_at=time.time(), incidents=list(self.doctor.incidents),
+                    generated_at=time.time(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
                         'No unique-audience estimate; no GPU process attribution.',
@@ -123,6 +128,7 @@ class State:
         return dict(demo=self.demo, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
+                    audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
@@ -185,6 +191,75 @@ def queue_outputs(s, command, dest_id=None):
     if len(s.commands) >= 30: raise ValueError('Command queue is full.')
     s.commands.append(cmd)
     s.event('Stream command queued: '+command+'. Waiting for OBS acknowledgement.')
+
+
+async def audio_action(s, data):
+    op = data.get('op') or data.get('action')
+    if op == 'audio_settings':
+        settings = validate_settings(data.get('settings', {}))
+        # UUIDs are stable OBS identities. Allow a saved missing source to remain selected
+        # so Audio Guard can report it instead of silently dropping the expectation.
+        known = {row['uuid'] for row in (s.audio_snapshot or {}).get('sources', [])}
+        previous = {row['uuid'] for row in s.audio.settings['sources']}
+        if any(row['uuid'] not in known | previous for row in settings['sources']):
+            raise ValueError('Choose audio sources that OBS has reported. Connect the native plugin first.')
+        s.audio.configure(settings); s.config['audio_guard'] = settings; s.save()
+    elif op == 'audio_snooze': s.audio.acknowledge(snooze=True)
+    elif op == 'audio_ack': s.audio.acknowledge()
+    elif op == 'audio_fix':
+        uid, fix = data.get('source_uuid'), data.get('fix')
+        if time.time()-s.audio_seen > 5: raise ValueError('Current OBS audio telemetry is unavailable.')
+        if uid not in {row['uuid'] for row in s.audio.settings['sources']} or fix not in ('unmute','route'):
+            raise ValueError('Choose a selected Audio Guard source and supported fix.')
+        if fix == 'route' and not (s.audio_snapshot or {}).get('track_verified'):
+            raise ValueError('OBS has not reported the actual stream track yet. Start OBS streaming, then check routing.')
+        if len(s.commands) >= 30: raise ValueError('Command queue is full.')
+        s.commands.append(dict(id=uuid.uuid4().hex, action='audio_fix', source_uuid=uid, fix=fix, created=time.time()))
+        s.audio.record('fix_requested', fix=fix, source_uuid=uid)
+    else: raise ValueError('Unsupported Audio Guard action.')
+
+
+def audio_preflight(s):
+    fresh = time.time()-s.audio_seen < 5
+    if not s.audio.settings['enabled']: return [{'label':'Audio Guard','result':'Disabled in settings.'}]
+    if not s.audio.settings['sources']: return [{'label':'Audio Guard','result':'Choose your microphone in Audio Guard settings.'}]
+    if not fresh: return [{'label':'Audio Guard','result':'Native audio telemetry unavailable; audio cannot be verified.'}]
+    rows = s.audio.evaluate(s.audio_snapshot, time.monotonic())
+    checks = [{'label':row['source_name'],'result':row['title']+' '+row['evidence']} for row in rows]
+    checks.append({'label':'Stream audio track','result':
+        'OBS stream encoder uses Track '+str(s.audio_snapshot['stream_track'])+'. Source routing checked; viewer playback is not verified.'
+        if s.audio_snapshot.get('track_verified') else 'Actual stream track not available yet; routing is not verified.'})
+    if not rows: checks.append({'label':'Selected audio sources','result':'No mute/routing issue found. Meter activity does not prove what viewers hear.'})
+    return checks
+
+
+async def poll_audio(s):
+    while True:
+        fresh = time.time()-s.audio_seen < 5
+        snapshot = s.audio_snapshot if fresh else None
+        notices = s.audio.sample(snapshot, bool(snapshot and snapshot.get('stream_active')),
+                                 (snapshot or {}).get('scene', s.scene))
+        for notice in notices:
+            if not s.audio_notice_queue.full(): s.audio_notice_queue.put_nowait(notice)
+        await asyncio.sleep(1)
+
+
+async def audio_notifications(s):
+    while True:
+        notice = await s.audio_notice_queue.get()
+        # Do not deliver a stale warning after recovery, stop, scene pause or acknowledgement.
+        issue = next((i for i in s.audio.current['issues'] if i['key'] == notice['key']), None)
+        if (not issue or notice['key'] in s.audio.acknowledged or time.monotonic() < s.audio.snoozed_until
+            or not s.audio.settings['enabled'] or not s.audio_snapshot or not s.audio_snapshot.get('stream_active')
+            or s.audio.is_quiet_scene(s.audio_snapshot.get('scene', '')) or time.time()-s.audio_seen>5):
+            continue
+        try:
+            if await notify_windows(notice):
+                s.audio.record('notification_submitted', code=notice['code'])
+            else:
+                s.audio.record('notification_unavailable', code=notice['code'])
+        except Exception as exc:
+            s.audio.record('notification_failed', error_type=type(exc).__name__)
 
 
 async def send_chat(s, platform, text):
@@ -263,7 +338,9 @@ async def action(request):
     if s.demo:
         raise ValueError('Demo mode never connects accounts or changes OBS. Restart without --demo.')
     async with s.lock:
-        if op == 'obs_connect':
+        if op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
+            await audio_action(s, data)
+        elif op == 'obs_connect':
             port = int(data.get('port', 4455))
             if not 1 <= port <= 65535:
                 raise ValueError('Invalid port.')
@@ -284,7 +361,7 @@ async def action(request):
             await s.obs.request(command)
             s.event(command+' requested.')
         elif op == 'preflight':
-            checks = []
+            checks = audio_preflight(s)
             try:
                 inputs = await s.obs.request('GetInputList')
                 for item in inputs.get('inputs', []):
@@ -419,6 +496,10 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     s.native_outputs = data.get('outputs', [])[:8]
+    if isinstance(data.get('audio'), dict):
+        s.audio_snapshot = data['audio']
+        s.audio_snapshot['sources'] = s.audio_snapshot.get('sources', [])[:128]
+        s.audio_seen = time.time()
     for result in data.get('results', [])[:30]:
         # Only codes are accepted; raw ingest error strings could reveal keys.
         code = str(result.get('status', 'unknown'))[:80]
@@ -427,6 +508,8 @@ async def native(request):
             if code in OUTPUT_ERRORS: s.output_errors[destination] = OUTPUT_ERRORS[code]
             elif code in ('start_requested_not_yet_confirmed_live', 'already_active_or_busy', 'stop_requested'):
                 s.output_errors.pop(destination, None)
+        if code.startswith('audio_'):
+            s.audio.record('fix_result', result=code)
         s.event('Stream output: '+OUTPUT_ERRORS.get(code, code.replace('_', ' ')))
     commands = []
     while s.commands:
@@ -442,6 +525,8 @@ async def native(request):
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') == 'chat'][-80:],
         'events': combined_events(s),
         'issues': s.current_issues[:12],
+        'audio_guard': s.audio.current,
+        'audio_settings': s.audio.settings,
         'stats': {key: s.stats.get(key) for key in
                   ('activeFps', 'cpuUsage', 'renderSkippedFrames', 'renderTotalFrames',
                    'outputSkippedFrames', 'outputTotalFrames', 'stream_active')},
@@ -480,7 +565,9 @@ async def native_action(request):
             user32.FlashWindow(hwnd, True)
         return web.json_response({'ok': True})
     async with s.lock:
-        if op == 'chat_send':
+        if op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
+            await audio_action(s, data)
+        elif op == 'chat_send':
             await send_chat(s, data.get('platform'), data.get('text', ''))
         elif op == 'save':
             if any(o.get('active') or o.get('busy') for o in s.native_outputs):
@@ -750,6 +837,8 @@ async def lifecycle(app):
             seed_demo(s)
         task = asyncio.create_task(poll(s)) if not s.demo else None
         hub_task = asyncio.create_task(poll_hub(s)) if not s.demo else None
+        audio_task = asyncio.create_task(poll_audio(s)) if not s.demo else None
+        notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
         yield
         for adapter in s.adapters.values():
             adapter.task.cancel()
@@ -760,6 +849,10 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
+        for background in (audio_task, notify_task):
+            if background:
+                background.cancel()
+                await asyncio.gather(background, return_exceptions=True)
         await s.obs.close()
         if not s.demo:
             with contextlib.suppress(FileNotFoundError):

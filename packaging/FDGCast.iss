@@ -28,8 +28,8 @@ Source: "{#SourcePath}FDGCast.ico"; DestDir: "{commonappdata}\obs-studio\plugins
 Source: "{#SourcePath}..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
 [Icons]
-Name: "{group}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"
-Name: "{autodesktop}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"; Tasks: desktopicon
+Name: "{group}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"; AppUserModelID: "ForgedDestinyGaming.FDGCast"
+Name: "{autodesktop}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"; AppUserModelID: "ForgedDestinyGaming.FDGCast"; Tasks: desktopicon
 
 [Tasks]
 Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription: "Shortcuts:"; Flags: unchecked
