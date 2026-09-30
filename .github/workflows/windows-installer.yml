@@ -36,7 +36,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'FDGCast'
-          $spec.version = '0.5.0'
+          $spec.version = '0.5.1'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -86,7 +86,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.5.0-UI-quality-check
+          name: FDGCast-0.5.1-UI-quality-check
           path: qa/*.png
           if-no-files-found: error
       - name: Freeze FDGCast companion
@@ -164,12 +164,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-0.5.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-0.5.1-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-0.5.0-preview-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-0.5.1-preview-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -182,6 +182,6 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.5.0-OBS-32.2.2-Windows-preview-installer
-          path: release/FDGCast-0.5.0-preview-win-x64-setup.exe
+          name: FDGCast-0.5.1-OBS-32.2.2-Windows-preview-installer
+          path: release/FDGCast-0.5.1-preview-win-x64-setup.exe
           if-no-files-found: error

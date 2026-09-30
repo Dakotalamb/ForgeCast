@@ -140,7 +140,7 @@ function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.0';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.1';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('scene').textContent=s.scene;
  const stats=s.stats, fresh=s.obs_connected||s.demo;

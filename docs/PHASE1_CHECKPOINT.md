@@ -73,3 +73,13 @@ Scope stops at roadmap Phase 4. Vertical streaming and native overlays are defer
 - 110 local Python tests pass; Python and JavaScript compile/syntax checks pass.
 - Windows CI now runs Python checks, Chromium Companion UI checks and screenshot capture, native compilation, packaged service/window/icon/focus/duplicate-instance smoke tests, and installed module/registered Companion-path checks.
 - The installer build is now authorized. Platform playback, OBS live-output/Audio Guard integration, full-screen notification display and the controlled performance benchmark remain manual acceptance work.
+
+## 0.5.1 Preview: compact, flexible OBS docks
+
+- Removed repeated dock headings and persistent explanatory footers. Chat connection states now use short labels with full details on hover; reply feedback appears only while sending or on failure. Chat origin channel remains visible by default, beside the username.
+- Per-dock ⋮ menus persist compact spacing, 11/13/15/17px text, connection-status visibility and extra-control visibility. Chat also permits hiding its composer or origin labels; origins remain available in username hover details.
+- Doctor shows a compact audio state, concise destination/frame warnings and conditional audio fix button. Full evidence is available on hover or by opening Companion; Snooze/I Know/Open Companion remain in its menu. Expanded controls/details remain selectable.
+- Multistream defaults to Start All/Stop All and a flexible destination list; add/remove and selected-output controls stay available in the menu, or can be shown inline.
+- Scrollable content removes the old stacked-control and 95px-list height floor. Dock content can shrink to 100×60px with scrolling when necessary; OBS title bars and neighboring docks still affect the overall layout limit.
+- Fixed stale Events status after reconnect, and marks Multistream rows UNKNOWN while Companion is offline. Preferences persist independently of OBS's dock positions.
+- Python tests and JS checks retain coverage; Windows compilation/package tests validate the release. Live docking/resize acceptance still needs OBS.

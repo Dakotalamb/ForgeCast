@@ -36,6 +36,10 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMenu>
+#include <QAction>
+#include <QScrollArea>
+#include <QToolButton>
 #include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
@@ -197,7 +201,84 @@ public:
     }
 };
 
+// Each dock keeps its own visual preferences; no OBS layout or stream settings change.
+class DockView : public QObject {
+    QWidget *owner;
+    QWidget *body;
+    QVBoxLayout *content;
+    QString prefix;
+    std::function<void()> changed;
+    void save(const QString &key, const QVariant &value) {
+        QSettings settings("Forged Destiny Gaming", "ForgeCast");
+        settings.setValue(prefix+key,value);
+        apply();
+        if (changed) changed();
+    }
+    void toggle(QMenu *menu,const QString &label,const QString &key,bool current) {
+        auto *action=menu->addAction(label); action->setCheckable(true); action->setChecked(current);
+        connect(action,&QAction::triggered,owner,[this,key](bool value) { save(key,value); });
+    }
+public:
+    bool compact=true, showStatus=true, showControls=true, showOrigins=true;
+    int pixels=13;
+    QMenu *menu;
+    DockView(QWidget *dock,QVBoxLayout *layout,const QString &id,bool controls,std::function<void()> refresh)
+        : QObject(dock),owner(dock),content(layout),prefix("dock-ui/"+id+"/"),changed(std::move(refresh)) {
+        QSettings settings("Forged Destiny Gaming", "ForgeCast");
+        showControls=settings.value(prefix+"controls",controls).toBool();
+        body=new QWidget(dock);
+        body->setLayout(content); // Qt transfers the existing layout from the dock.
+        auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
+        auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
+        auto *options=new QToolButton(dock);options->setText("⋮");options->setToolTip("Dock appearance and controls");
+        options->setFixedSize(22,20);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
+        bar->addWidget(options);outer->addLayout(bar);
+        auto *scroll=new QScrollArea(dock);scroll->setFrameShape(QFrame::NoFrame);scroll->setWidgetResizable(true);
+        scroll->setWidget(body);scroll->setMinimumSize(0,0);scroll->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
+        outer->addWidget(scroll,1);dock->setMinimumSize(100,60);
+        connect(menu,&QMenu::aboutToShow,dock,[this,id] {
+            menu->clear();
+            toggle(menu,"Compact spacing","compact",compact);
+            if (id!="events") {
+                toggle(menu,"Show connection status","status",showStatus);
+                toggle(menu,"Show extra controls","controls",showControls);
+            }
+            if (id=="chat") toggle(menu,"Show origin channels","origins",showOrigins);
+            auto *sizes=menu->addMenu("Text size");
+            for (int size : {11,13,15,17}) {
+                auto *item=sizes->addAction(QString::number(size)+" px");item->setCheckable(true);item->setChecked(size==pixels);
+                connect(item,&QAction::triggered,owner,[this,size] { save("font",size); });
+            }
+            menu->addSeparator();
+            // Controls remain reachable even when hidden from the compact dock.
+            for (auto *button : body->findChildren<QPushButton *>()) {
+                if (button->property("dockMenuAction").toBool()) {
+                    auto *item=menu->addAction(button->text());item->setEnabled(button->isEnabled());
+                    connect(item,&QAction::triggered,button,[button] { button->click(); });
+                }
+            }
+        });
+        dock->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(dock,&QWidget::customContextMenuRequested,dock,[this](const QPoint &point) { menu->popup(owner->mapToGlobal(point)); });
+        apply();
+    }
+    void apply() {
+        QSettings settings("Forged Destiny Gaming", "ForgeCast");
+        compact=settings.value(prefix+"compact",true).toBool();
+        showStatus=settings.value(prefix+"status",true).toBool();
+        showControls=settings.value(prefix+"controls",showControls).toBool();
+        showOrigins=settings.value(prefix+"origins",true).toBool();
+        pixels=qBound(11,settings.value(prefix+"font",13).toInt(),17);
+        QFont font=owner->font();font.setPixelSize(pixels);owner->setFont(font);
+        content->setContentsMargins(compact?4:9,compact?2:9,compact?4:9,compact?2:9);
+        content->setSpacing(compact?3:7);
+    }
+};
+
 class ChatDock : public QWidget {
+    DockView *view;
+    QWidget *composerRow;
+    QJsonObject lastPayload;
     QLabel *connection;
     ChatFeed *feed;
     QComboBox *sendTo;
@@ -214,15 +295,16 @@ public:
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }"
                       "QLabel { color: #ff7549; padding: 8px; }");
         auto *layout = new QVBoxLayout(this);
-        connection = new QLabel("FDGCAST CHAT · Start FDGCast to connect", this);
-        connection->setWordWrap(true);
+        connection = new QLabel("Companion offline", this);
+        connection->setWordWrap(false);
         connection->setMinimumWidth(0);
         connection->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
         feed = new ChatFeed(this);
         feed->setOpenExternalLinks(false);
-        feed->setMinimumWidth(0);
+        feed->setMinimumSize(0,0);
+        feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         layout->addWidget(connection);
-        layout->addWidget(feed);
+        layout->addWidget(feed,1);
         auto *composer = new QHBoxLayout();
         sendTo = new QComboBox(this);
         sendTo->addItem("Twitch", "twitch");
@@ -239,8 +321,9 @@ public:
         composer->addWidget(sendTo);
         composer->addWidget(compose, 1);
         composer->addWidget(sendButton);
-        layout->addLayout(composer);
-        sendStatus = new QLabel("Choose a connected channel to reply.", this);
+        composerRow=new QWidget(this);composerRow->setLayout(composer);composer->setContentsMargins(0,0,0,0);
+        layout->addWidget(composerRow);
+        sendStatus = new QLabel(this);sendStatus->hide();
         sendStatus->setWordWrap(true);
         sendStatus->setMinimumWidth(0);
         sendStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
@@ -250,34 +333,48 @@ public:
             if (value.isEmpty() || !sendButton->isEnabled()) return;
             pendingText = compose->text();
             sendButton->setEnabled(false);
+            sendStatus->show();
             sendStatus->setText("Sending to " + sendTo->currentText() + "…");
             send(QJsonObject{{"action", "chat_send"}, {"platform", sendTo->currentData().toString()},
                              {"text", value}});
         };
         connect(sendButton, &QPushButton::clicked, this, submitMessage);
         connect(compose, &QLineEdit::returnPressed, this, submitMessage);
+        view=new DockView(this,layout,"chat",true,[this] {
+            connection->setVisible(view->showStatus);composerRow->setVisible(view->showControls);
+            lastMessages.clear();if(!lastPayload.isEmpty()) update(lastPayload);
+        });
+        connection->setVisible(view->showStatus);composerRow->setVisible(view->showControls);
     }
 
     void sendResult(bool success, const QString &error)
     {
         sendButton->setEnabled(true);
         if (success && compose->text() == pendingText) compose->clear();
-        sendStatus->setText(success ? "Message sent to your selected channel." :
+        sendStatus->setVisible(!success);
+        sendStatus->setText(success ? "Sent" :
                             (error.isEmpty() ? "Message could not be sent. Check your connection." : error));
         pendingText.clear();
     }
 
     void disconnected()
     {
-        connection->setText("FDGCAST CHAT · Companion offline");
+        lastPayload=QJsonObject();
+        connection->setText("Companion offline");
     }
 
     void update(const QJsonObject &payload)
     {
         const auto statuses = payload.value("statuses").toObject();
-        connection->setText("FDGCAST CHAT · Twitch: " + statuses.value("twitch").toString("offline") +
-                            " · YouTube: " + statuses.value("youtube").toString("offline") +
-                            " · Kick: " + statuses.value("kick").toString("offline"));
+        lastPayload=payload;
+        QStringList shortStates,details;
+        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick")}) {
+            const QString full=statuses.value(platform).toString("offline");
+            const QString state=full=="connected"?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
+            shortStates.append(platform.left(1).toUpper()+platform.mid(1)+" "+state);
+            details.append(platform+": "+full);
+        }
+        connection->setText(shortStates.join(" · "));connection->setToolTip(details.join("\n"));
         const auto messages = payload.value("messages").toArray();
         const auto bytes = QJsonDocument(messages).toJson(QJsonDocument::Compact);
         if (bytes == lastMessages) return;
@@ -312,13 +409,12 @@ public:
             if (row.value("fragments").toArray().isEmpty()) body = row.value("text").toString().toHtmlEscaped();
             body.replace("\n", "<br>");
             const QString identity = QString::fromUtf8(QUrl::toPercentEncoding(name+" · "+platform+" · "+row.value("origin").toString()+"'s channel"));
-            html += "<p style='margin:0 0 12px'><img width='18' height='18' src='platform:"+platform.toHtmlEscaped()+"'> "+avatar+
+            html += "<p style='margin:0 0 "+QString::number(view->compact?6:12)+"px'><img width='18' height='18' src='platform:"+platform.toHtmlEscaped()+"'> "+avatar+
                     "<a href='identity:"+identity+"' style='text-decoration:none;color:"+color+"'><b>"+shortName.toHtmlEscaped()+"</b></a>"+
                     (row.value("is_creator").toBool() ? " <small>CREATOR</small>" : "")+
-                    "<br><small style='color:#a8afb8'>"+row.value("origin").toString().toHtmlEscaped()+"'s channel"+
-                    (row.value("shared").toBool() ? " · SHARED" : "")+"</small><br>"+body+"</p>";
+                    (view->showOrigins ? "<small style='color:#a8afb8'> · "+row.value("origin").toString().toHtmlEscaped()+"</small>" : QString())+"<br>"+body+"</p>";
         }
-        if (messages.isEmpty()) html += "<p>Messages will appear here when accounts are connected and live.</p>";
+        if (messages.isEmpty()) html += "<p style='color:#a8afb8'>No messages yet.</p>";
         feed->setVisibleImages(visible);
         feed->setHtml(html + "</div>");
         feed->verticalScrollBar()->setValue(atBottom ? feed->verticalScrollBar()->maximum() : scroll);
@@ -326,6 +422,8 @@ public:
 };
 
 class EventsDock : public QWidget {
+    DockView *view;
+    QJsonObject lastPayload;
     QTextBrowser *feed;
     QByteArray lastEvents;
 public:
@@ -335,21 +433,17 @@ public:
                       "QTextBrowser { background:#1d2022;border:0;padding:8px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("FDGCAST EVENTS", this);
-        heading->setStyleSheet("font-weight:700");
-        feed = new QTextBrowser(this);
-        feed->setOpenExternalLinks(false);
-        auto *note = new QLabel("Audience activity from Twitch/YouTube. "
-                                "Kick alerts and Twitch follows need additional platform support.", this);
-        note->setWordWrap(true);
-        layout->addWidget(heading);
-        layout->addWidget(feed);
-        layout->addWidget(note);
+        feed = new QTextBrowser(this);feed->setOpenExternalLinks(false);
+        feed->setMinimumSize(0,0);feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
+        feed->setToolTip("Audience activity from Twitch/YouTube. Kick alerts and Twitch follows need additional platform support.");
+        layout->addWidget(feed,1);
+        view=new DockView(this,layout,"events",false,[this] { lastEvents.clear();if(!lastPayload.isEmpty()) update(lastPayload); });
         disconnected();
     }
-    void disconnected() { feed->setHtml("<p>Start the FDGCast app to see activity.</p>"); }
+    void disconnected() { lastPayload=QJsonObject();lastEvents.clear();feed->setHtml("<p>Companion offline</p>"); }
     void update(const QJsonObject &payload)
     {
+        lastPayload=payload;
         const auto events = payload.value("events").toArray();
         const auto bytes = QJsonDocument(events).toJson(QJsonDocument::Compact);
         if (bytes == lastEvents) return;
@@ -361,16 +455,21 @@ public:
             const auto description = row.value("text").toString().toHtmlEscaped();
             const auto timestamp = QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble()))
                                        .toLocalTime().toString("h:mm AP");
-            html += "<p style='margin:0 0 12px'><b style='color:#ff7549'>" + source +
+            html += "<p style='margin:0 0 "+QString::number(view->compact?6:12)+"px'><b style='color:#ff7549'>" + source +
                     "</b> · <span style='color:#a9adb0'>" + timestamp +
                     "</span><br>" + description + "</p>";
         }
-        if (events.isEmpty()) html += "<p>Activity from your connected platforms will appear here.</p>";
+        if (events.isEmpty()) html += "<p style='color:#a8afb8'>No events yet.</p>";
         feed->setHtml(html + "</div>");
     }
 };
 
 class DoctorDock : public QWidget {
+    DockView *view;
+    QJsonObject lastPayload;
+    QPushButton *snooze;
+    QPushButton *ack;
+    QPushButton *details;
     QTextBrowser *report;
     QLabel *audioStatus;
     QLabel *audioFeedback;
@@ -383,13 +482,12 @@ public:
         setStyleSheet("QWidget { background: #151719; color: #f4f4f4; }"
                       "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("STREAM DOCTOR · FDGCAST", this);
-        heading->setStyleSheet("color:#ff7549;font-weight:700;padding:8px");
+
         report = new QTextBrowser(this);
         report->setOpenExternalLinks(false);
-        layout->addWidget(heading);
+        report->setMinimumSize(0,0);report->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         audioStatus = new QLabel("Audio Guard · Connect Companion", this);
-        audioStatus->setWordWrap(true); audioStatus->setMinimumWidth(0);
+        audioStatus->setWordWrap(false); audioStatus->setMinimumWidth(0);
         audioStatus->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
         layout->addWidget(audioStatus);
         audioFeedback = new QLabel(this); audioFeedback->setWordWrap(true);
@@ -398,48 +496,60 @@ public:
         fixButton = new QPushButton("Fix audio", this); fixButton->setEnabled(false);
         layout->addWidget(fixButton);
         auto *quiet = new QHBoxLayout();
-        auto *snooze = new QPushButton("Snooze 10 min", this);
-        auto *ack = new QPushButton("I Know", this);
+        snooze = new QPushButton("Snooze 10 min", this);
+        ack = new QPushButton("I Know", this);
         quiet->addWidget(snooze); quiet->addWidget(ack); layout->addLayout(quiet);
         connect(fixButton,&QPushButton::clicked,this,[this] {
             send(QJsonObject{{"action","audio_fix"},{"source_uuid",audioIssue.value("source_uuid")},{"fix",audioIssue.value("action")}});
         });
         connect(snooze,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","audio_snooze"}}); });
         connect(ack,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","audio_ack"}}); });
-        auto *details = new QPushButton("Audio Guard settings in Companion", this);
+        details = new QPushButton("Open Companion", this);
         layout->addWidget(details);
         connect(details,&QPushButton::clicked,this,[this] { send(QJsonObject{{"action","focus"}}); });
-        layout->addWidget(report);
+        layout->addWidget(report,1);
+        for (auto *button : {snooze,ack,details}) button->setProperty("dockMenuAction",true);
+        audioFeedback->hide();fixButton->hide();
+        view=new DockView(this,layout,"doctor",false,[this] {
+            snooze->setVisible(view->showControls);ack->setVisible(view->showControls);details->setVisible(view->showControls);
+            audioStatus->setVisible(view->showStatus);if(!lastPayload.isEmpty()) update(lastPayload);
+        });
+        snooze->setVisible(view->showControls);ack->setVisible(view->showControls);details->setVisible(view->showControls);
+        audioStatus->setVisible(view->showStatus);
         disconnected();
     }
 
-    void message(const QString &text) { audioFeedback->setText(text); }
+    void message(const QString &text) { audioFeedback->setText(text); audioFeedback->setToolTip(text); audioFeedback->show(); QTimer::singleShot(8000,audioFeedback,[this] { audioFeedback->hide(); }); }
 
     void disconnected()
     {
-        audioStatus->setText("Audio Guard · Companion disconnected; monitoring unavailable.");
-        fixButton->setEnabled(false);
-        report->setHtml("<p>Start the FDGCast companion to see OBS frame diagnostics.</p>");
+        lastPayload=QJsonObject();
+        audioStatus->setText("Audio · offline");
+        fixButton->setEnabled(false);fixButton->hide();
+        report->setHtml("<p>Companion offline</p>");
     }
 
     void update(const QJsonObject &payload)
     {
+        lastPayload=payload;
         const auto audio = payload.value("audio_guard").toObject();
         const auto audioIssues = audio.value("issues").toArray();
-        audioStatus->setText("AUDIO GUARD · "+audio.value("title").toString("Choose your microphone in Companion."));
+        audioStatus->setText("Audio · "+audio.value("state").toString("setup"));
+        audioStatus->setToolTip(audio.value("title").toString("Choose your microphone in Companion."));
         audioStatus->setStyleSheet(audio.value("state").toString() == "warning" ? "color:#ffd166" : "color:#a8afb8");
         audioIssue = QJsonObject();
         for (const auto &issue : audioIssues)
             if (!issue.toObject().value("action").toString().isEmpty()) { audioIssue=issue.toObject(); break; }
-        fixButton->setEnabled(!audioIssue.isEmpty());
+        fixButton->setEnabled(!audioIssue.isEmpty());fixButton->setVisible(!audioIssue.isEmpty());
         const bool unmute=audioIssue.value("action").toString() == "unmute";
         fixButton->setText(unmute ? "UNMUTE" : "FIX STREAM ROUTING");
         fixButton->setToolTip(audioIssue.value("source_name").toString()+" · "+audioIssue.value("evidence").toString());
         const bool statsConnected = payload.value("obs_connected").toBool();
         const auto stats = payload.value("stats").toObject();
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>"
-                       "<p>Scene: <b>" + payload.value("scene").toString().toHtmlEscaped() + "</b></p>";
-        if (!statsConnected) html += "<p>Frame/encoder statistics unavailable. Connect OBS WebSocket in Companion.</p>";
+                       ;
+        if (!view->compact) html += "<p>Scene: <b>"+payload.value("scene").toString().toHtmlEscaped()+"</b></p>";
+        if (!statsConnected) html += "<p>Frame stats offline</p>";
         for (const auto &entry : payload.value("destination_health").toArray()) {
             const auto health=entry.toObject();
             html += "<p><b>"+health.value("name").toString().toHtmlEscaped()+"</b> · "+health.value("state").toString().toHtmlEscaped()+"</p>";
@@ -447,20 +557,25 @@ public:
         if (statsConnected) html += "<p>OBS FPS: " + QString::number(stats.value("activeFps").toDouble(), 'f', 1) +
                 " · CPU: " + QString::number(stats.value("cpuUsage").toDouble(), 'f', 1) + "%</p>";
         const auto issues = payload.value("issues").toArray();
-        if (issues.isEmpty() && statsConnected) html += "<p style='color:#80d6a0'>No frame drops detected in the latest sample.</p>";
+        if (issues.isEmpty() && statsConnected) html += "<p style='color:#80d6a0'>Frames ✓</p>";
         for (const auto &entry : issues) {
             const auto row = entry.toObject();
             html += "<p><b style='color:#ff7549'>" + row.value("title").toString().toHtmlEscaped() +
-                    "</b><br>" + row.value("evidence").toString().toHtmlEscaped() +
-                    "<br>Try: " + row.value("suggestion").toString().toHtmlEscaped() + "</p>";
+                    "</b>"+(view->compact?QString():"<br>"+row.value("evidence").toString().toHtmlEscaped()+"<br>Try: "+row.value("suggestion").toString().toHtmlEscaped())+"</p>";
         }
-        html += "<p style='color:#a9adb0'>Counter-based diagnosis; the faulty process or network hop "
-                "cannot be proven from OBS statistics alone.</p></div>";
-        report->setHtml(html);
+        if (!view->compact) html += "<p style='color:#a9adb0'>Counter-based diagnosis; the faulty process or network hop "
+                "cannot be proven from OBS statistics alone.</p>";
+        report->setHtml(html+"</div>");
+        QStringList tips;for(const auto &entry : issues) {const auto row=entry.toObject();tips.append(row.value("title").toString()+"\n"+row.value("evidence").toString()+"\n"+row.value("suggestion").toString());}
+        report->setToolTip(tips.join("\n\n"));
     }
 };
 
 class MultistreamDock : public QWidget {
+    DockView *view;
+    QPushButton *addButton;
+    QPushButton *startAllButton;
+    QPushButton *stopAllButton;
     QLabel *status;
     QLabel *actionStatus;
     QListWidget *list;
@@ -488,28 +603,26 @@ public:
                       "QPushButton#stopAll { background:#342421;color:#ff9576; }"
                       "QLabel { padding:3px; }");
         auto *layout = new QVBoxLayout(this);
-        auto *heading = new QLabel("FDGCAST MULTISTREAM", this);
-        heading->setStyleSheet("color:#ff7549;font-weight:700");
-        status = new QLabel("Start the FDGCast app to connect.", this);
-        status->setWordWrap(true);
+
+        status = new QLabel("Companion offline", this);
+        status->setWordWrap(false);status->setMinimumWidth(0);status->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Preferred);
         list = new QListWidget(this);
-        list->setMinimumHeight(95);
-        list->setMaximumHeight(220);
-        layout->addWidget(heading);
+        list->setMinimumSize(0,0);list->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         layout->addWidget(status);
-        layout->addWidget(list);
+        layout->addWidget(list,1);
         actionStatus = new QLabel(this);
         actionStatus->setWordWrap(true);
         actionStatus->setMinimumWidth(0);
         actionStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        actionStatus->hide();
         layout->addWidget(actionStatus);
-        auto *add = new QPushButton("+ Add stream", this);
+        auto *add = new QPushButton("+ Add stream", this);addButton=add;
         removeButton = new QPushButton("Remove", this);
         removeButton->setObjectName("secondary");
         startButton = new QPushButton("Start selected", this);
         stopButton = new QPushButton("Stop selected", this);
         stopButton->setObjectName("secondary");
-        auto *stopAll = new QPushButton("Stop all", this);
+        auto *stopAll = new QPushButton("Stop all", this);stopAllButton=stopAll;
         stopAll->setObjectName("stopAll");
         auto *management = new QHBoxLayout();
         management->addWidget(add);
@@ -519,18 +632,17 @@ public:
         controls->addWidget(startButton);
         controls->addWidget(stopButton);
         layout->addLayout(controls);
-        auto *startAll = new QPushButton("START ALL", this);
+        auto *startAll = new QPushButton("START ALL", this);startAllButton=startAll;
         auto *bulk = new QHBoxLayout(); bulk->addWidget(startAll); bulk->addWidget(stopAll);
         stopAll->setText("STOP ALL");
         startAll->setToolTip("Starts the main OBS stream, then every checked destination.");
         stopAll->setToolTip("Stops the main OBS stream and all secondary destinations.");
-        layout->insertLayout(2, bulk);
+        layout->insertLayout(1, bulk);
         connect(startAll, &QPushButton::clicked, this, [this] { send(QJsonObject{{"action", "start_all"}}); });
         connect(list, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
             if (!updating) send(QJsonObject{{"action", "destination_enabled"}, {"id", item->data(Qt::UserRole).toString()},
                                          {"enabled", item->checkState() == Qt::Checked}});
         });
-        layout->addStretch();
         startButton->setEnabled(false);
         stopButton->setEnabled(false);
         removeButton->setEnabled(false);
@@ -571,12 +683,31 @@ public:
         connect(removeButton, &QPushButton::clicked, this, [this] {
             if (!selectedId().isEmpty()) send(QJsonObject{{"action", "delete"}, {"id", selectedId()}});
         });
+        for (auto *button : {addButton,removeButton,startButton,stopButton}) button->setProperty("dockMenuAction",true);
+        view=new DockView(this,layout,"multistream",false,[this] {
+            for(auto *button : {addButton,removeButton,startButton,stopButton})button->setVisible(view->showControls);
+            status->setVisible(view->showStatus);
+            list->setStyleSheet(QString("QListWidget::item { padding:%1px; }").arg(view->compact?3:7));
+        });
+        for(auto *button : {addButton,removeButton,startButton,stopButton})button->setVisible(view->showControls);
+        status->setVisible(view->showStatus);list->setStyleSheet(QString("QListWidget::item { padding:%1px; }").arg(view->compact?3:7));
     }
 
-    void message(const QString &value) { actionStatus->setText(value); }
+    void disconnected() {
+        status->setText("Companion offline");actionStatus->hide();lastDestinations.clear();
+        startAllButton->setEnabled(false);stopAllButton->setEnabled(false);updating=true;
+        for (int i=0;i<list->count();++i) {
+            auto *item=list->item(i);item->setText(item->text().section("   ",0,0)+"   UNKNOWN");
+            item->setForeground(QColor("#a8afb8"));item->setToolTip("Companion offline. Output health is unknown.");
+        }
+        updating=false;
+    }
+
+    void message(const QString &value) { actionStatus->setText(value);actionStatus->setToolTip(value);actionStatus->show();QTimer::singleShot(6000,actionStatus,[this] { actionStatus->hide(); }); }
 
     void update(const QJsonObject &payload)
     {
+        startAllButton->setEnabled(true);stopAllButton->setEnabled(true);
         const auto destinations = payload.value("destinations").toArray();
         const auto outputs = payload.value("outputs").toArray();
         QJsonArray snapshot = destinations;
@@ -616,11 +747,11 @@ public:
             updating = false;
         }
         if (destinations.isEmpty())
-            status->setText("No extra streams yet. Add a destination to get started.");
+            status->setText("No destinations");
         else if (!payload.value("stream_active").toBool())
-            status->setText("Main stream offline · START ALL starts OBS and checked destinations (H.264/AAC).");
+            status->setText("Main · offline");
         else
-            status->setText("Main stream live · Select a destination to control it.");
+            status->setText("Main · live");
     }
 };
 
@@ -965,7 +1096,7 @@ public:
             if (chatDock) chatDock->disconnected();
             if (eventsDock) eventsDock->disconnected();
             if (doctorDock) doctorDock->disconnected();
-            if (multistreamDock) multistreamDock->message("Start the FDGCast companion to manage destinations.");
+            if (multistreamDock) multistreamDock->disconnected();
             label->setText("FDGCAST · Companion not running\n"
                            "Secondary streams, if active, can be stopped below.");
             return;
@@ -1034,7 +1165,7 @@ public:
                 if (chatDock) chatDock->disconnected();
                 if (eventsDock) eventsDock->disconnected();
                 if (doctorDock) doctorDock->disconnected();
-                if (multistreamDock) multistreamDock->message("FDGCast companion disconnected.");
+                if (multistreamDock) multistreamDock->disconnected();
                 label->setText("FDGCAST · Companion disconnected\n"
                                "Active streams are not stopped by a dashboard outage. Use the button below.");
             }
