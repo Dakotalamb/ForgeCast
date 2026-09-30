@@ -19,6 +19,7 @@ from .storage import Vault, atomic_json, data_directory
 from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
 from .audio import AudioGuard, validate_settings, notify_windows
+from .history import StreamHistory
 
 PORT = 17654
 WEB = Path(__file__).resolve().parent.parent/'web'
@@ -60,6 +61,10 @@ class State:
         self.audio_snapshot = None
         self.audio_seen = 0
         self.audio_notice_queue = asyncio.Queue(maxsize=20)
+        self.history = StreamHistory(self.directory, demo)
+        self.main_output = None
+        self.doctor_notice_queue = asyncio.Queue(maxsize=20)
+        self.audio_history_cursor = self.audio.history[-1] if self.audio.history else None
 
     def status(self, platform, message):
         if self.statuses.get(platform) != message:
@@ -119,7 +124,7 @@ class State:
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
         return dict(schema_version=1, app='FDGCast', version='0.4.0-preview', demo=self.demo,
-                    generated_at=time.time(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
+                    generated_at=time.time(), stream_history=self.history.report(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
                         'No unique-audience estimate; no GPU process attribution.',
@@ -130,6 +135,7 @@ class State:
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
+                    stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True),
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
@@ -192,6 +198,8 @@ def queue_outputs(s, command, dest_id=None):
         cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
     if len(s.commands) >= 30: raise ValueError('Command queue is full.')
     s.commands.append(cmd)
+    ids = [d['id'] for d in s.config.get('destinations', [])] if command.endswith('_all') else [dest_id]
+    s.history.command(command, ids)
     s.event('Stream command queued: '+command+'. Waiting for OBS acknowledgement.')
 
 
@@ -227,12 +235,80 @@ def audio_preflight(s):
     if not s.audio.settings['sources']: return [{'label':'Audio Guard','result':'Choose your microphone in Audio Guard settings.'}]
     if not fresh: return [{'label':'Audio Guard','result':'Native audio telemetry unavailable; audio cannot be verified.'}]
     rows = s.audio.evaluate(s.audio_snapshot, time.monotonic())
-    checks = [{'label':row['source_name'],'result':row['title']+' '+row['evidence']} for row in rows]
+    checks = [{'label':row['source_name'],'result':row['title']+' '+row['evidence'],
+               'fix':row.get('action') if row.get('action')!='route' or s.audio_snapshot.get('track_verified') else None,
+               'source_uuid':row['source_uuid']} for row in rows]
     checks.append({'label':'Stream audio track','result':
         'OBS stream encoder uses Track '+str(s.audio_snapshot['stream_track'])+'. Source routing checked; viewer playback is not verified.'
         if s.audio_snapshot.get('track_verified') else 'Actual stream track not available yet; routing is not verified.'})
     if not rows: checks.append({'label':'Selected audio sources','result':'No mute/routing issue found. Meter activity does not prove what viewers hear.'})
     return checks
+
+
+def preflight(s):
+    native_fresh = time.time()-s.native_seen < 5
+    checks = [{'label':'OBS plugin','result':'Connected' if native_fresh else 'Offline — open OBS with FDGCast installed.'},
+              {'label':'OBS statistics','result':'Connected' if s.obs and s.obs.connected else 'Connect OBS WebSocket for frame and encoder statistics.'}]
+    checks += audio_preflight(s)
+    for dest in s.config.get('destinations', []):
+        if not dest.get('enabled', True): continue
+        output = next((o for o in s.native_outputs if o.get('id')==dest['id']), {}) if native_fresh else {}
+        result = 'Live in OBS; viewer playback not verified.' if output.get('active') else 'Saved ingest/key; actual platform delivery not verified.' if s.vault.get('stream:'+dest['id']) else 'Missing stream key — open Destinations.'
+        if output.get('reconnecting'): result='Reconnecting — check Stream Doctor.'
+        if s.output_errors.get(dest['id']): result=s.output_errors[dest['id']]
+        checks.append({'label':dest['name'],'result':result})
+    for platform, status in s.statuses.items():
+        checks.append({'label':platform.title()+' chat','result':status})
+    if not s.config.get('destinations'): checks.append({'label':'Multistream destinations','result':'None saved — add destinations before Start All.'})
+    checks.append({'label':'Encoder','result':'Active H.264/AAC encoder compatibility is checked when secondary outputs start; not verified offline.'})
+    checks.append({'label':'Viewer picture / available upload','result':'Not measured. Check preview, platform dashboards and upload headroom.'})
+    return checks
+
+
+async def report_text(request):
+    s = request.app['state']
+    text = s.history.text_report()+'\nAudio Guard warnings: '+json.dumps(s.audio.summary()['warnings'])
+    return web.json_response({'text':text})
+
+
+async def poll_history(s):
+    while True:
+        fresh=time.time()-s.native_seen<5 and s.audio_snapshot is not None
+        live=bool(s.audio_snapshot.get('stream_active')) if fresh else None
+        outputs=([s.main_output] if s.main_output else [])+s.native_outputs if fresh else []
+        notices=s.history.sample(live,outputs)
+        for notice in notices:
+            notice['created']=time.time()
+            if not s.doctor_notice_queue.full(): s.doctor_notice_queue.put_nowait(notice)
+        # Audio journal objects are immutable after insertion; mirror new records once.
+        rows=list(s.audio.history)
+        new=[]
+        if s.audio_history_cursor is not None:
+            found=next((i for i,row in enumerate(rows) if row is s.audio_history_cursor),None)
+            new=rows[found+1:] if found is not None else rows
+        elif s.history.session: new=rows
+        for row in new:
+            if row['kind'] in ('warning','recovered','paused','notification_submitted','fix_requested','fix_result'):
+                s.history.record('audio_'+row['kind'],code=row.get('code'),title=row.get('title','Audio Guard '+row['kind'].replace('_',' ')),duration=row.get('duration'))
+        if rows: s.audio_history_cursor=rows[-1]
+        await asyncio.sleep(1)
+
+
+async def doctor_notifications(s):
+    while True:
+        notice=await s.doctor_notice_queue.get()
+        if not s.config.get('doctor_notifications',True) or time.time()-notice['created']>15 or not s.history.session: continue
+        if notice.get('telemetry_lost') and s.history.last_sample is not None: continue
+        if notice.get('frame_code') and notice['frame_code'] not in s.history.frame_conditions: continue
+        ids=notice.get('destination_ids') or ([notice['destination_id']] if notice.get('destination_id') else [])
+        if ids and not notice.get('recovery') and not any(uid in s.history.conditions for uid in ids): continue
+        if notice.get('recovery') and notice.get('destination_id') in s.history.conditions: continue
+        # The notifier never sends stream keys, chat, source captures or raw API errors.
+        try:
+            submitted=await notify_windows(notice)
+            s.history.record('notification_submitted' if submitted else 'notification_unavailable',title='Stream Doctor notification')
+        except Exception as exc:
+            s.history.record('notification_failed',title='Stream Doctor notification failed.',error_type=type(exc).__name__)
 
 
 async def poll_audio(s):
@@ -347,7 +423,10 @@ async def action(request):
     if s.demo:
         raise ValueError('Demo mode never connects accounts or changes OBS. Restart without --demo.')
     async with s.lock:
-        if op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
+        if op == 'doctor_settings':
+            if not isinstance(data.get('notifications'), bool): raise ValueError('Notifications must be true or false.')
+            s.config['doctor_notifications'] = data['notifications']; s.save()
+        elif op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
             await audio_action(s, data)
         elif op == 'obs_connect':
             port = int(data.get('port', 4455))
@@ -370,21 +449,7 @@ async def action(request):
             await s.obs.request(command)
             s.event(command+' requested.')
         elif op == 'preflight':
-            checks = audio_preflight(s)
-            try:
-                inputs = await s.obs.request('GetInputList')
-                for item in inputs.get('inputs', []):
-                    try:
-                        mute = await s.obs.request('GetInputMute', {'inputName':item['inputName']})
-                        checks.append({'label':item['inputName'], 'result':'Muted' if mute['inputMuted'] else 'Unmuted (not proof of audible sound)'})
-                    except RuntimeError:
-                        pass
-                checks.append({'label':'OBS memory / CPU', 'result':f"{s.stats.get('memoryUsage', 0):.0f} MB / {s.stats.get('cpuUsage', 0):.1f}%"})
-                checks.append({'label':'Disk space', 'result':f"{s.stats.get('availableDiskSpace', 0)/1024:.1f} GB (OBS-reported recording volume)"})
-                checks.append({'label':'Upload capacity / black capture / platform visibility', 'result':'Not automatically verified; manually check before going live.'})
-            except ConnectionError:
-                checks.append({'label':'OBS', 'result':'Disconnected'})
-            return web.json_response({'checks':checks})
+            return web.json_response({'checks':preflight(s), 'blocks_streaming':False})
         elif op == 'save_destination':
             if time.time()-s.native_seen < 5 and any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
@@ -511,6 +576,7 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     s.native_outputs = data.get('outputs', [])[:8]
+    s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
     if isinstance(data.get('audio'), dict):
         s.audio_snapshot = data['audio']
         s.audio_snapshot['sources'] = s.audio_snapshot.get('sources', [])[:128]
@@ -539,7 +605,8 @@ async def native(request):
         'commands': commands,
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') == 'chat'][-80:],
         'events': combined_events(s),
-        'issues': s.current_issues[:12],
+        'issues': (s.history.issues+s.current_issues)[:12],
+        'destination_health': s.history.health,
         'audio_guard': s.audio.current,
         'audio_settings': s.audio.settings,
         'stats': {key: s.stats.get(key) for key in
@@ -626,15 +693,21 @@ async def poll(s):
                 outputs = [dict(id='main', name='OBS main', active=stream['outputActive'],
                                 dropped=stream.get('outputSkippedFrames', 0), frames=stream.get('outputTotalFrames', 0))]
                 if time.time()-s.native_seen < 5:
+                    if s.main_output: outputs = [s.main_output]
                     outputs += s.native_outputs
                 s.stats = dict(stats, stream_active=stream['outputActive'], outputs=outputs)
                 s.current_issues = s.doctor.sample(s.stats)
+                for notice in s.history.frames(s.current_issues,stream['outputActive']):
+                    notice['created']=time.time()
+                    if not s.doctor_notice_queue.full(): s.doctor_notice_queue.put_nowait(notice)
                 scene = await s.obs.request('GetCurrentProgramScene')
                 s.scene = scene['currentProgramSceneName']
             else:
                 s.current_issues = []
+                s.history.frames_unavailable()
                 s.doctor.reset()
         except Exception:
+            s.history.frames_unavailable()
             s.current_issues = [dict(title='Telemetry unavailable', evidence='OBS did not answer the latest stats request.',
                                     confidence='high', suggestion='Reconnect OBS; old readings are not current.')]
         await asyncio.sleep(2)
@@ -856,6 +929,8 @@ async def lifecycle(app):
         hub_task = asyncio.create_task(poll_hub(s)) if not s.demo else None
         audio_task = asyncio.create_task(poll_audio(s)) if not s.demo else None
         notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
+        history_task = asyncio.create_task(poll_history(s)) if not s.demo else None
+        doctor_notify_task = asyncio.create_task(doctor_notifications(s)) if not s.demo else None
         yield
         for adapter in s.adapters.values():
             adapter.task.cancel()
@@ -866,7 +941,7 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
-        for background in (audio_task, notify_task):
+        for background in (audio_task, notify_task, history_task, doctor_notify_task):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)
@@ -888,6 +963,7 @@ def create_app(state):
     app.router.add_get('/api/pairing', pairing)
     app.router.add_post('/api/action', action)
     app.router.add_get('/api/report', report)
+    app.router.add_get('/api/report-text', report_text)
     app.router.add_post('/native/poll', native)
     app.router.add_post('/native/action', native_action)
     return app

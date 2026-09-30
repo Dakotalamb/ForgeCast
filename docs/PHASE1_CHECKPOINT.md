@@ -53,3 +53,16 @@ Validation: 85 local Python tests pass, including mute thresholds, actual non-de
 - 87 Python tests pass; Python compilation and JS syntax checks pass. Registry launch, single-instance behavior and UI rendering still require the deferred Windows/OBS build and live validation.
 
 Next: destination-specific Stream Doctor incidents and recovery history, followed by the combined session timeline and copyable diagnostic report.
+
+## Core release: Doctor, preflight, history and engine inspection
+
+Scope stops at roadmap Phase 4. Vertical streaming and native overlays are deferred to a later release.
+
+- Destination health now records reconnects, unexpected stops, failed starts and network-frame drops. Healthy destinations are described only as locally active with no new network drops; viewer playback is never claimed. Multiple problems produce a possible shared-issue diagnosis.
+- Windows Doctor notifications support a live-only setting, suppress intentional stops and stale queued alerts, and group simultaneous destination warnings. Recovery requires five seconds of stable samples. Telemetry gaps close measurement continuity without inventing recovery duration.
+- Native main output counters supplement secondary telemetry; frame/encoder counters still require OBS WebSocket. Doctor can show destination/audio health when WebSocket statistics are unavailable.
+- Local bounded stream history records sessions, controls, incidents, recoveries, telemetry gaps and Audio Guard entries. Restarting an unfinished session marks its final state unknown. Frame lag has separate stable-counter recovery and lost-statistics handling. Disk-write failure does not stop monitoring.
+- Existing Doctor page gains destination health, session filter, combined timeline and Copy Diagnostic Report. Clipboard failure exposes selectable text. Shared JSON history omits source identities, arbitrary error details, chat, URLs and credentials. User-entered names in local/text reports need review before sharing.
+- Preflight combines OBS/plugin, selected audio, routing, destination keys and chat state. Audio fixes require a click. Go Live Anyway retains explicit broadcast confirmation and does not hard-block the user. Encoder compatibility/delivery remain unverified offline.
+- `docs/ENGINE_VALIDATION.md` documents encoder reuse, independent output upload, service ownership, reconnects, Companion/OBS failure behavior, Windows acceptance tests and a matched FDGCast → Aitum → FDGCast benchmark. Source inspection is complete; the actual benchmark and native failure tests cannot run in this environment.
+- 108 Python tests pass, plus Python compilation and JavaScript syntax checks. Native compilation, Windows/OBS integration, toast display, visual UI checks and platform playback still require the deferred build. No installer or CI build was triggered.

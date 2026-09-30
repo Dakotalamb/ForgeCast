@@ -27,7 +27,11 @@ document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
 $('startAll').onclick=()=>{if(confirm('Start your main OBS stream and every checked destination?'))run(()=>action('native_command',{command:'start_all',confirmed:true}),$('startAll'));};
 $('stopAll').onclick=()=>{if(confirm('Stop your main OBS stream and all FDGCast destinations?'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
-$('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
+$('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));if(c.fix)d.append(button(c.fix==='unmute'?'Unmute':'Fix audio routing',()=>action('audio_fix',{source_uuid:c.source_uuid,fix:c.fix})));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
+$('goLiveAnyway').onclick=()=>{if(confirm('Start your main OBS stream and checked destinations despite the preflight warnings?'))run(()=>state.destinations.some(d=>d.enabled!==false)?action('native_command',{command:'start_all',confirmed:true}):action('obs_command',{command:'StartStream',confirmed:true}),$('goLiveAnyway'));};
+$('doctorNotify').onchange=()=>run(()=>action('doctor_settings',{notifications:$('doctorNotify').checked}),$('doctorNotify'));
+$('copyReport').onclick=()=>run(async()=>{const r=await api('/api/report-text');try{await navigator.clipboard.writeText(r.text);$('copyReport').textContent='Copied';}catch{const box=$('reportCopyFallback');box.hidden=false;box.value=r.text;box.focus();box.select();}},$('copyReport'));
+$('historySession').onchange=()=>{if(state)renderHistory(state);};
 $('report').onclick=()=>run(async()=>{const data=await api('/api/report');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='FDGCast-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},$('report'));
 $('hubFetch').onclick=()=>run(()=>action('hub_fetch'),$('hubFetch'));
 $('hubSync').onclick=()=>run(()=>action('hub_sync'),$('hubSync'));
@@ -118,9 +122,24 @@ function outputStatus(s,d){
  return {text:'OFFLINE',level:'offline'};
 }
 let lastChat='', lastDest='';
+function renderHistory(s){
+ const history=s.stream_history||{}, rows=history.events||[], filter=$('historySession');
+ const selected=filter.value;
+ const sessions=new Map(rows.filter(e=>e.session_id).map(e=>[e.session_id,e.session_id.slice(0,8)]));
+ filter.replaceChildren(new Option('Recent sessions','all'),...Array.from(sessions,([id,label])=>new Option('Session '+label,id)));
+ if(sessions.has(selected))filter.value=selected;
+ $('historyStorage').textContent=history.storage_error|| (history.session?'Live session · '+new Date(history.session.started_at*1000).toLocaleString():'No active observed stream session.');
+ $('streamTimeline').replaceChildren(...rows.filter(e=>filter.value==='all'||e.session_id===filter.value).slice(-100).reverse().map(e=>el('p',
+ new Date(e.time*1000).toLocaleString()+' · '+(e.title||e.kind.replaceAll('_',' '))+(e.duration!=null?' · '+e.duration+' sec':''))));
+ if(!rows.length)$('streamTimeline').append(el('p','Your stream incidents will appear here.','muted'));
+ $('destinationHealth').replaceChildren(...(history.health||[]).map(r=>{const row=el('div',undefined,'row');row.append(el('strong',r.name),el('span',r.state.toUpperCase()+(r.bitrate_kbps!=null?' · '+r.bitrate_kbps+' kbps':'')));return row;}));
+ if(!history.health?.length)$('destinationHealth').append(el('p','Go live to monitor destination health. Missing telemetry does not prove the stream stopped.','muted'));
+ $('doctorNotify').checked=s.doctor_notifications!==false;
+}
 function render(s) {
  state=s;
  renderAudio(s);
+ renderHistory(s);
  $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.4.0';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('scene').textContent=s.scene;
@@ -130,7 +149,7 @@ function render(s) {
  $('render').textContent=fresh&&stats.averageFrameRenderTime!==undefined?stats.averageFrameRenderTime.toFixed(1)+' ms':'—';
  $('outputCount').textContent=s.native_connected?s.outputs.filter(x=>x.active).length:'—';
  $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Platform tokens stay private. Your pairing code is available only in this local connection form.';
- $('health').replaceChildren(...(s.issues.length?s.issues.map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
+ $('health').replaceChildren(...((s.issues.length||s.stream_history?.issues?.length)?[...(s.stream_history?.issues||[]),...s.issues].map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
  $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
  $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
  const hubStatus=s.hub_connection==='connected'?'Connected':s.hub_connection==='attention'?'Connection needs attention':s.hub_paired?'Checking connection…':'Not paired';

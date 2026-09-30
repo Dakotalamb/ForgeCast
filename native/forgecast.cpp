@@ -435,18 +435,19 @@ public:
         const bool unmute=audioIssue.value("action").toString() == "unmute";
         fixButton->setText(unmute ? "UNMUTE" : "FIX STREAM ROUTING");
         fixButton->setToolTip(audioIssue.value("source_name").toString()+" · "+audioIssue.value("evidence").toString());
-        if (!payload.value("obs_connected").toBool()) {
-            report->setHtml("<p>OBS telemetry is disconnected. Open FDGCast setup in the Control dock "
-                            "and connect OBS WebSocket.</p>");
-            return;
-        }
+        const bool statsConnected = payload.value("obs_connected").toBool();
         const auto stats = payload.value("stats").toObject();
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>"
                        "<p>Scene: <b>" + payload.value("scene").toString().toHtmlEscaped() + "</b></p>";
-        html += "<p>OBS FPS: " + QString::number(stats.value("activeFps").toDouble(), 'f', 1) +
+        if (!statsConnected) html += "<p>Frame/encoder statistics unavailable. Connect OBS WebSocket in Companion.</p>";
+        for (const auto &entry : payload.value("destination_health").toArray()) {
+            const auto health=entry.toObject();
+            html += "<p><b>"+health.value("name").toString().toHtmlEscaped()+"</b> · "+health.value("state").toString().toHtmlEscaped()+"</p>";
+        }
+        if (statsConnected) html += "<p>OBS FPS: " + QString::number(stats.value("activeFps").toDouble(), 'f', 1) +
                 " · CPU: " + QString::number(stats.value("cpuUsage").toDouble(), 'f', 1) + "%</p>";
         const auto issues = payload.value("issues").toArray();
-        if (issues.isEmpty()) html += "<p style='color:#80d6a0'>No frame drops detected in the latest sample.</p>";
+        if (issues.isEmpty() && statsConnected) html += "<p style='color:#80d6a0'>No frame drops detected in the latest sample.</p>";
         for (const auto &entry : issues) {
             const auto row = entry.toObject();
             html += "<p><b style='color:#ff7549'>" + row.value("title").toString().toHtmlEscaped() +
@@ -972,10 +973,20 @@ public:
         QByteArray token = tokenFile.readAll().trimmed();
         if (token.size() < 32 || token.size() > 128)
             return;
+        QJsonObject mainTelemetry;
+        auto *mainStream = obs_frontend_get_streaming_output();
+        if (mainStream) {
+            mainTelemetry = QJsonObject{{"id","main"},{"name","OBS main"},{"active",obs_frontend_streaming_active()},
+                {"reconnecting",obs_output_reconnecting(mainStream)},
+                {"dropped",obs_output_get_frames_dropped(mainStream)},{"frames",obs_output_get_total_frames(mainStream)},
+                {"bytes",static_cast<double>(obs_output_get_total_bytes(mainStream))}};
+            obs_output_release(mainStream);
+        }
         QJsonArray outputs;
         for (auto &entry : destinations) {
             auto &d = *entry.second;
             bool active = obs_output_active(d.output);
+            const bool intentionalStop = d.stopping;
             if (active) { d.starting = false; d.wasLive = true; d.error.clear(); }
             if (!active && d.wasLive && !d.stopping && !d.starting) {
                 d.error = "Destination disconnected and stopped. Check its settings and OBS log.";
@@ -991,7 +1002,7 @@ public:
                 results.append(QJsonObject{{"destination_id", entry.first}, {"status", "start_timeout_stopped"}});
             }
             outputs.append(QJsonObject{{"id", entry.first}, {"name", d.name}, {"active", active},
-                {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
+                {"intentional_stop", intentionalStop}, {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
                 {"dropped", obs_output_get_frames_dropped(d.output)},
                 {"frames", obs_output_get_total_frames(d.output)},
                 {"bytes", static_cast<double>(obs_output_get_total_bytes(d.output))}});
@@ -1002,7 +1013,7 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"outputs", outputs}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;

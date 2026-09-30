@@ -43,6 +43,38 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         response = await self.client.get('/api/state', headers=self.headers)
         self.assertEqual((await response.json())['hub_connection'], 'connected')
 
+    async def test_history_and_text_report_require_browser_auth_and_exclude_secrets(self):
+        self.state.vault.set('hub_token','DO-NOT-SHARE')
+        self.state.history.record('incident',title='Test destination disruption.',code='reconnecting')
+        response=await self.client.get('/api/report-text',headers=self.headers)
+        self.assertEqual(response.status,200)
+        body=await response.json()
+        self.assertIn('FDGCast Diagnostic Report',body['text'])
+        self.assertNotIn('DO-NOT-SHARE',body['text'])
+        response=await self.client.get('/api/report-text',headers={'Host':'127.0.0.1:17654'})
+        self.assertEqual(response.status,401)
+        response=await self.client.get('/api/state',headers=self.headers)
+        self.assertIn('stream_history',await response.json())
+
+    async def test_preflight_warns_without_blocking_or_starting_outputs(self):
+        self.state.demo=False
+        response=await self.client.post('/api/action',headers=self.headers,json={'op':'preflight'})
+        self.assertEqual(response.status,200)
+        body=await response.json()
+        self.assertFalse(body['blocks_streaming'])
+        self.assertTrue(body['checks'])
+        self.assertEqual(len(self.state.commands),0)
+        self.state.demo=True
+
+    async def test_doctor_notification_setting_validates_boolean(self):
+        self.state.demo=False
+        response=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','notifications':'false'})
+        self.assertEqual(response.status,400)
+        response=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','notifications':False})
+        self.assertEqual(response.status,200)
+        self.assertFalse(self.state.config['doctor_notifications'])
+        self.state.demo=True
+
     async def test_state_auth(self):
         r=await self.client.get('/api/state',headers={'Host':'127.0.0.1:17654'})
         self.assertEqual(r.status,401)
