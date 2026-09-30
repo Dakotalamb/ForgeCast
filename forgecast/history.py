@@ -182,7 +182,7 @@ class StreamHistory:
             lines.append(row['name']+': '+row['state']+((' · '+str(row['bitrate_kbps'])+' kbps') if row['bitrate_kbps'] is not None else ''))
         rows=[e for e in self.events if self.session and e.get('session_id')==self.session['id']] if self.session else list(self.events)[-50:]
         for e in rows:
-            if e['kind'] in ('incident','recovered','audio_warning','audio_recovered','frame_incident','frame_recovered','telemetry_lost','session_ended'):
+            if e['kind'] in ('incident','output_failure','recovered','audio_warning','audio_recovered','frame_incident','frame_recovered','telemetry_lost','session_ended'):
                 lines.append(time.strftime('%H:%M:%S',time.localtime(e['time']))+' · '+e.get('title',e['kind']))
         lines += ['Observed telemetry only; viewer playback and exact root cause are not verified.','Output/source names may appear above. Review before sharing.']
         return '\n'.join(lines)

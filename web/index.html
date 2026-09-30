@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>FDGCast · Forged Destiny Gaming</title><link rel="icon" type="image/png" href="/favicon.png"><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
 <body>
-<header><div class="brand"><img class="brand-logo" src="/favicon.png" alt="Forged Destiny Gaming"><div>FDGCAST<small>FORGED DESTINY GAMING</small></div></div><span id="mode" class="pill">PREVIEW 0.4.0</span><span id="connection">Connecting to local companion…</span></header>
+<header><div class="brand"><img class="brand-logo" src="/favicon.png" alt="Forged Destiny Gaming"><div>FDGCAST<small>FORGED DESTINY GAMING</small></div></div><span id="mode" class="pill">PREVIEW 0.5.0</span><span id="connection">Connecting to local companion…</span></header>
 <div id="error" role="alert" hidden></div>
 <nav aria-label="Main"><button data-tab="live" class="selected">Live desk</button><button data-tab="outputs">Destinations</button><button data-tab="doctor">Stream Doctor</button><button data-tab="hub">Creator Hub</button><button data-tab="setup">Connections</button></nav>
 <main>
@@ -41,5 +41,5 @@ Intermission</textarea></label>
 <details class="panel advanced"><summary>Advanced: manual chat credentials for testing</summary><p>Only use this when testing without the Hub. Normally, connect your accounts in the Hub and sync above.</p><div class="setup-grid"><form id="twitchForm" class="panel form"><h2>Twitch chat</h2><label>Client ID <input name="client_id" required></label><label>Authorized user ID <input name="user_id" required></label><label>Receiving channel ID <input name="channel_id" required></label><label>OAuth access token <input name="token" type="password" autocomplete="off"></label><button>Connect Twitch</button><button type="button" data-disconnect="twitch">Disconnect and forget token</button><small>Read: user:read:chat. Send: user:write:chat. Origin-channel information comes from Twitch’s Shared Chat payload.</small></form>
 <form id="youtubeForm" class="panel form"><h2>YouTube chat</h2><p>Hub account sync discovers an active live chat. Manual credentials are available for testing.</p><label>Channel display name <input name="channel_name" required></label><label>Live chat ID <input name="live_chat_id" required></label><label>OAuth access token <input name="token" type="password" autocomplete="off"></label><button>Connect YouTube</button><button type="button" data-disconnect="youtube">Disconnect and forget token</button><small>Only the Hub handles OAuth refresh. The manual token must include a scope that permits live chat sending.</small></form>
 <article class="panel"><h2>Kick chat</h2><p>Kick chat arrives through the Hub after you link Kick and sync accounts. Send replies to your linked channel using its authorized connection.</p></article></div></details></div></section>
-</main><footer>FDGCAST 0.4.0 PREVIEW · Private operator dashboard · Not a broadcast overlay</footer>
+</main><footer>FDGCAST 0.5.0 PREVIEW · Private operator dashboard · Not a broadcast overlay</footer>
 </body></html>

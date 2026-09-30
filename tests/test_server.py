@@ -1,7 +1,8 @@
 import tempfile
 import unittest
 import time
-from unittest.mock import patch
+import asyncio
+from unittest.mock import patch, AsyncMock
 from aiohttp.test_utils import TestClient, TestServer
 from forgecast.server import State, create_app
 
@@ -296,3 +297,27 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'hub_save','url':'http://example.com','token':'fake'})
         self.assertEqual(r.status,400)
+
+    async def test_saved_obs_connection_restores_on_poll(self):
+        from forgecast.server import poll
+        self.state.config['obs_port']=4455
+        self.state.obs.connected=False
+        async def connect(port,password):
+            self.assertEqual(port,4455)
+            self.state.obs.connected=True
+        self.state.obs.connect=AsyncMock(side_effect=connect)
+        self.state.obs.request=AsyncMock(side_effect=[{}, {'outputActive':False}, {'currentProgramSceneName':'Test'}])
+        with patch('forgecast.server.asyncio.sleep',AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError): await poll(self.state)
+        self.state.obs.connect.assert_awaited_once()
+        self.assertEqual(self.state.scene,'Test')
+
+    async def test_saved_obs_connection_failure_keeps_monitor_running(self):
+        from forgecast.server import poll
+        self.state.config['obs_port']=4455
+        self.state.obs.connected=False
+        self.state.obs.connect=AsyncMock(side_effect=ConnectionError('offline'))
+        with patch('forgecast.server.asyncio.sleep',AsyncMock(side_effect=asyncio.CancelledError)):
+            with self.assertRaises(asyncio.CancelledError): await poll(self.state)
+        self.assertEqual(self.state.current_issues[0]['title'],'Telemetry unavailable')
+        self.assertEqual(len(self.state.commands),0)

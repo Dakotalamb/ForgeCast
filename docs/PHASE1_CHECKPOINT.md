@@ -66,3 +66,10 @@ Scope stops at roadmap Phase 4. Vertical streaming and native overlays are defer
 - Preflight combines OBS/plugin, selected audio, routing, destination keys and chat state. Audio fixes require a click. Go Live Anyway retains explicit broadcast confirmation and does not hard-block the user. Encoder compatibility/delivery remain unverified offline.
 - `docs/ENGINE_VALIDATION.md` documents encoder reuse, independent output upload, service ownership, reconnects, Companion/OBS failure behavior, Windows acceptance tests and a matched FDGCast → Aitum → FDGCast benchmark. Source inspection is complete; the actual benchmark and native failure tests cannot run in this environment.
 - 108 Python tests pass, plus Python compilation and JavaScript syntax checks. Native compilation, Windows/OBS integration, toast display, visual UI checks and platform playback still require the deferred build. No installer or CI build was triggered.
+
+## 0.5.0 Preview release quality pass
+
+- Review fixed automatic restoration of saved OBS WebSocket settings, with bounded reconnect retries after OBS restarts. It also records known output-start failure codes in the timeline when no native output was created.
+- 110 local Python tests pass; Python and JavaScript compile/syntax checks pass.
+- Windows CI now runs Python checks, Chromium Companion UI checks and screenshot capture, native compilation, packaged service/window/icon/focus/duplicate-instance smoke tests, and installed module/registered Companion-path checks.
+- The installer build is now authorized. Platform playback, OBS live-output/Audio Guard integration, full-screen notification display and the controlled performance benchmark remain manual acceptance work.

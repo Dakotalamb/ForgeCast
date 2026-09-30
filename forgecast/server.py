@@ -123,7 +123,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='FDGCast', version='0.4.0-preview', demo=self.demo,
+        return dict(schema_version=1, app='FDGCast', version='0.5.0-preview', demo=self.demo,
                     generated_at=time.time(), stream_history=self.history.report(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -586,7 +586,10 @@ async def native(request):
         code = str(result.get('status', 'unknown'))[:80]
         destination = result.get('destination_id')
         if destination in {d['id'] for d in s.config.get('destinations', [])}:
-            if code in OUTPUT_ERRORS: s.output_errors[destination] = OUTPUT_ERRORS[code]
+            if code in OUTPUT_ERRORS:
+                if s.output_errors.get(destination) != OUTPUT_ERRORS[code]:
+                    s.history.record('output_failure',destination_id=destination,code=code,title=OUTPUT_ERRORS[code])
+                s.output_errors[destination] = OUTPUT_ERRORS[code]
             elif code in ('start_requested_not_yet_confirmed_live', 'already_active_or_busy', 'stop_requested'):
                 s.output_errors.pop(destination, None)
         if code.startswith('audio_'):
@@ -685,8 +688,16 @@ async def native_action(request):
 
 
 async def poll(s):
+    next_reconnect = 0
     while True:
         try:
+            if not s.obs.connected and s.config.get('obs_port') and time.monotonic() >= next_reconnect:
+                next_reconnect = time.monotonic()+30
+                async with s.lock:
+                    if not s.obs.connected:
+                        await s.obs.connect(int(s.config['obs_port']),s.vault.get('obs_password'))
+                        s.doctor.reset()
+                        s.event('Saved OBS connection restored.')
             if s.obs.connected:
                 stats = await s.obs.request('GetStats')
                 stream = await s.obs.request('GetStreamStatus')

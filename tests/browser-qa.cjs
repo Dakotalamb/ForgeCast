@@ -7,7 +7,7 @@ const assert = require('node:assert/strict');
 const {chromium} = require(require.resolve('playwright', {paths:[process.env.CODEX_PRIMARY_RUNTIME_NODE_MODULES || process.cwd()]}));
 async function main(){
  const temp = fs.mkdtempSync(path.join(os.tmpdir(),'forgecast-qa-'));
- const server = spawn('python3',['-u','-m','forgecast.server','--demo','--no-browser','--data-dir',temp], {cwd:path.resolve(__dirname,'..')});
+ const server = spawn(process.env.PYTHON || 'python',['-u','-m','forgecast.server','--demo','--no-browser','--data-dir',temp], {cwd:path.resolve(__dirname,'..')});
  let browser;
  try {
   const url=await new Promise((resolve,reject)=>{
@@ -31,6 +31,17 @@ async function main(){
    await page.locator('[data-tab="'+tab+'"]').click();
    assert.equal(await page.locator('#'+tab).isVisible(),true);
   }
+  await page.locator('[data-tab="doctor"]').click();
+  assert.equal(await page.locator('#streamTimeline').isVisible(),true);
+  assert.equal(await page.locator('#copyReport').isVisible(),true);
+  await page.screenshot({path:path.join(output,'doctor-demo.png'),fullPage:true});
+  await page.locator('[data-tab="setup"]').click();
+  assert.equal(await page.locator('#showPairCode').isVisible(),true);
+  await page.locator('#showPairCode').click();
+  assert.equal(await page.locator('#hubForm input[name=token]').getAttribute('type'),'text');
+  await page.locator('#showPairCode').click();
+  await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
+  await page.locator('[data-tab="live"]').click();
   page.on('dialog',dialog=>dialog.accept());
   await page.locator('[data-command="StartStream"]').click();
   await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('Demo mode'));
