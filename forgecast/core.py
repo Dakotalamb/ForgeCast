@@ -1,6 +1,8 @@
 """Pure, testable chat normalization and evidence-based diagnostics."""
 from collections import OrderedDict, deque
 import time
+import hashlib
+import re
 
 
 def twitch_message(event):
@@ -13,6 +15,9 @@ def twitch_message(event):
                 user_id=event['chatter_user_id'], user=event['chatter_user_name'],
                 text=event['message']['text'], badges=event.get('source_badges') or event.get('badges', []),
                 shared=bool(event.get('source_broadcaster_user_id')),
+                is_creator=event['chatter_user_id'] == origin,
+                fragments=twitch_fragments(event['message']),
+                color=username_color('twitch', event['chatter_user_id']),
                 kind='chat', time=time.time())
 
 
@@ -22,6 +27,10 @@ def youtube_message(item, channel):
                 origin_id=snip.get('liveChatId', ''), received_in=snip.get('liveChatId', ''),
                 platform_message_id=item['id'], user_id=author.get('channelId', ''),
                 user=author.get('displayName', 'YouTube'), text=snip.get('displayMessage', ''),
+                avatar=author.get('profileImageUrl', '') if author.get('isChatOwner') else '',
+                is_creator=bool(author.get('isChatOwner')),
+                color=username_color('youtube', author.get('channelId') or author.get('displayName', '')),
+                fragments=[{'text':snip.get('displayMessage', '')}],
                 badges=[x for x in ['isChatOwner', 'isChatModerator', 'isChatSponsor'] if author.get(x)],
                 shared=False, kind='chat' if snip.get('type') == 'textMessageEvent' else snip.get('type', 'event'),
                 time=time.time())
@@ -34,7 +43,39 @@ def kick_message(item):
                 origin_id=origin_id, origin=broadcaster.get('channel_slug') or broadcaster.get('username') or origin_id,
                 received_in=origin_id, platform_message_id=str(item['message_id']),
                 user_id=str(sender.get('user_id', '')), user=sender.get('username', 'Kick'),
-                text=item.get('content', ''), badges=[], shared=False, kind='chat', time=time.time())
+                text=item.get('content', ''), fragments=kick_fragments(item.get('content', '')),
+                color=username_color('kick', str(sender.get('user_id') or sender.get('username', ''))),
+                is_creator=str(sender.get('user_id')) == origin_id,
+                avatar=sender.get('profile_picture', '') if str(sender.get('user_id')) == origin_id else '',
+                badges=(sender.get('identity') or {}).get('badges', []), shared=False, kind='chat', time=time.time())
+
+
+# A deterministic, readable palette; independent of platform/health colors.
+def username_color(platform, identity):
+    palette = ['#e6b3ff', '#8dd9f5', '#ffd28d', '#ffadca', '#b7d991', '#d3baff', '#91dfd3']
+    index = int(hashlib.sha256((platform+':'+identity).encode()).hexdigest()[:8], 16)
+    return palette[index % len(palette)]
+
+
+def twitch_fragments(message):
+    rows = []
+    for fragment in message.get('fragments', [])[:200]:
+        row = {'text':fragment.get('text', '')}
+        emote = fragment.get('emote') or {}
+        if re.fullmatch(r'[A-Za-z0-9_-]{1,100}', str(emote.get('id', ''))):
+            row['image'] = 'https://static-cdn.jtvnw.net/emoticons/v2/'+emote['id']+'/default/dark/1.0'
+        rows.append(row)
+    return rows or [{'text':message.get('text', '')}]
+
+
+def kick_fragments(text):
+    rows, cursor = [], 0
+    for match in re.finditer(r'\[emote:(\d{1,20}):([^\]]{1,100})\]', text):
+        if match.start() > cursor: rows.append({'text':text[cursor:match.start()]})
+        rows.append({'text':match.group(2), 'image':'https://files.kick.com/emotes/'+match.group(1)+'/fullsize'})
+        cursor = match.end()
+    if cursor < len(text): rows.append({'text':text[cursor:]})
+    return rows or [{'text':text}]
 
 
 class ChatStore:
@@ -62,6 +103,7 @@ class ChatStore:
             if user_id and m['user_id'] != user_id:
                 continue
             m['text'], m['deleted'] = '[Message removed]', True
+            m['fragments'] = [{'text':'[Message removed]'}]
 
 
 class Doctor:

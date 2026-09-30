@@ -21,6 +21,7 @@
 #include <QLineEdit>
 #include <QListWidget>
 #include <QMainWindow>
+#include <QMessageBox>
 #include <QNetworkAccessManager>
 #include <QNetworkReply>
 #include <QNetworkRequest>
@@ -401,6 +402,7 @@ static QPointer<EventsDock> eventsDock;
 static QPointer<DoctorDock> doctorDock;
 static QPointer<MultistreamDock> multistreamDock;
 static void arrangeFDGCastDocks();
+static bool tryArrangeFDGCastDocks();
 
 class ForgeDock : public QWidget {
     QNetworkAccessManager network;
@@ -662,10 +664,16 @@ public:
 };
 
 static QPointer<ForgeDock> dock;
+static QDockWidget *dockHost(QWidget *content)
+{
+    for (QWidget *parent = content; parent; parent = parent->parentWidget())
+        if (auto *host = qobject_cast<QDockWidget *>(parent)) return host;
+    return nullptr;
+}
 static void showDocked(QWidget *content)
 {
     // OBS registers new docks hidden and floating; show the existing host.
-    auto *host = qobject_cast<QDockWidget *>(content->parentWidget());
+    auto *host = dockHost(content);
     if (host) {
         host->setAllowedAreas(Qt::AllDockWidgetAreas);
         host->show();
@@ -685,22 +693,31 @@ static void placeBeside(QMainWindow *main, QDockWidget *anchor, QDockWidget *tar
     if (!anchor || !target || anchor == target) return;
     const auto area = main->dockWidgetArea(anchor);
     if (area == Qt::NoDockWidgetArea) return;
+    target->setFloating(false);
     main->removeDockWidget(target);
     main->addDockWidget(area, target);
     main->splitDockWidget(anchor, target, Qt::Horizontal);
     target->show();
 }
-static void arrangeFDGCastDocks()
+static bool tryArrangeFDGCastDocks()
 {
-    if (!chatDock || !eventsDock || !doctorDock || !multistreamDock || !dock) return;
-    auto *chat = qobject_cast<QDockWidget *>(chatDock->parentWidget());
-    auto *activity = qobject_cast<QDockWidget *>(eventsDock->parentWidget());
-    auto *doctor = qobject_cast<QDockWidget *>(doctorDock->parentWidget());
-    auto *streams = qobject_cast<QDockWidget *>(multistreamDock->parentWidget());
-    auto *control = qobject_cast<QDockWidget *>(dock->parentWidget());
-    if (!chat || !activity || !doctor || !streams || !control) return;
-    auto *main = qobject_cast<QMainWindow *>(chat->parentWidget());
-    if (!main) return;
+    auto *main = static_cast<QMainWindow *>(obs_frontend_get_main_window());
+    auto *chat = dockHost(chatDock.data());
+    auto *activity = dockHost(eventsDock.data());
+    auto *doctor = dockHost(doctorDock.data());
+    auto *streams = dockHost(multistreamDock.data());
+    auto *control = dockHost(dock.data());
+    blog(LOG_INFO, "[FDGCast] Arrange docks: main=%d chat=%d events=%d doctor=%d streams=%d control=%d",
+         main != nullptr, chat != nullptr, activity != nullptr, doctor != nullptr, streams != nullptr, control != nullptr);
+    if (!main || !chat || !activity || !doctor || !streams || !control) return false;
+    main->setDockNestingEnabled(true);
+    QDockWidget *hosts[] = {chat, activity, doctor, streams, control};
+    for (auto *host : hosts) {
+        host->setAllowedAreas(Qt::AllDockWidgetAreas);
+        host->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable | QDockWidget::DockWidgetFloatable);
+        host->setFloating(false);
+        host->show();
+    }
     // Match the OBS workspace: Doctor beside Sources, FDGCast Events in the
     // existing Event List area with Chat next to it, and Multistream by Outputs.
     auto *sources = findObsDock(main, {"Sources"});
@@ -721,9 +738,33 @@ static void arrangeFDGCastDocks()
     if (outputs && main->dockWidgetArea(outputs) != Qt::NoDockWidgetArea)
         placeBeside(main, outputs, streams);
     else main->addDockWidget(Qt::BottomDockWidgetArea, streams);
+    main->addDockWidget(main->dockWidgetArea(streams), control);
     main->tabifyDockWidget(streams, control);
     doctor->show(); activity->show(); chat->show(); streams->show();
     activity->raise(); streams->raise();
+    blog(LOG_INFO, "[FDGCast] Arrange docks completed (sources=%d event-list=%d outputs=%d)",
+         sources != nullptr, events != nullptr, outputs != nullptr);
+    return true;
+}
+static void arrangeFDGCastDocks()
+{
+    auto *retry = new QTimer(qApp);
+    retry->setInterval(250);
+    auto attempts = std::make_shared<int>(0);
+    QObject::connect(retry, &QTimer::timeout, retry, [retry, attempts] {
+        if (tryArrangeFDGCastDocks()) {
+            QSettings settings("Forged Destiny Gaming", "ForgeCast");
+            settings.setValue("arranged-layout-0.3.3", true);
+            retry->stop(); retry->deleteLater();
+        } else if (++*attempts >= 12) {
+            retry->stop(); retry->deleteLater();
+            blog(LOG_WARNING, "[FDGCast] Could not arrange docks: one or more hosts are unavailable.");
+            QMessageBox::warning(static_cast<QWidget *>(obs_frontend_get_main_window()), "FDGCast docks",
+                "OBS could not find all five FDGCast docks. Open them from the Docks menu and try Arrange again. "
+                "The OBS log lists which docks were found.");
+        }
+    });
+    retry->start();
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
@@ -802,8 +843,6 @@ void obs_module_post_load(void)
     if (!settings.value("arranged-layout-0.3.3", false).toBool()) {
         QTimer::singleShot(0, [] {
             arrangeFDGCastDocks();
-            QSettings settings("Forged Destiny Gaming", "ForgeCast");
-            settings.setValue("arranged-layout-0.3.3", true);
         });
     }
     obs_frontend_add_tools_menu_item("FDGCast: Arrange docks", [](void *) {

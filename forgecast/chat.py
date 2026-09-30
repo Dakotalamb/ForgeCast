@@ -7,14 +7,42 @@ from .core import twitch_message, youtube_message
 
 
 class ApiError(RuntimeError):
-    pass
+    def __init__(self, message, status=None, reason=None):
+        super().__init__(message)
+        self.status, self.reason = status, reason
 
 
 async def api(session, method, url, **kwargs):
     # Never expose a URL, header or raw platform response in an error: tokens may be present.
     async with session.request(method, url, allow_redirects=False, **kwargs) as response:
         if response.status >= 300:
-            raise ApiError(f'Platform request returned HTTP {response.status}. Check credentials, scopes and quota.')
+            # Only expose known reason codes, never raw messages or response bodies.
+            reason = None
+            try:
+                body = await response.json()
+                candidate = body.get('error', {}).get('errors', [{}])[0].get('reason')
+                if candidate in ('quotaExceeded', 'dailyLimitExceeded', 'insufficientPermissions',
+                                  'liveChatEnded', 'liveChatNotFound', 'liveChatDisabled',
+                                  'invalidPageToken', 'rateLimitExceeded', 'forbidden'):
+                    reason = candidate
+            except (ValueError, AttributeError, IndexError, TypeError):
+                pass
+            tips = {'quotaExceeded':'YouTube API quota is exhausted; chat will retry later.',
+                    'dailyLimitExceeded':'YouTube daily API limit reached.',
+                    'insufficientPermissions':'Account permission is missing; reconnect in Hub settings.',
+                    'liveChatEnded':'The YouTube broadcast has ended; looking for your next broadcast.',
+                    'liveChatNotFound':'The YouTube live chat is unavailable; rediscovering the broadcast.',
+                    'liveChatDisabled':'Live chat is disabled for this YouTube broadcast.',
+                    'invalidPageToken':'YouTube chat cursor expired; restarting polling.',
+                    'rateLimitExceeded':'Platform rate limit reached; slowing down.'}
+            message = tips.get(reason) or {
+                401:'Account authorization expired. Reconnect in Hub settings.',
+                403:'Platform denied this request. Check account permissions, API access and quota.',
+                404:'Platform resource was not found. Check the connected channel or broadcast.',
+                429:'Platform rate limit reached; retrying later.'
+            }.get(response.status, 'Platform request failed; check connection and try again.')
+            raise ApiError(f'{message} (HTTP {response.status}' + (f'; {reason}' if reason else '') + ')',
+                           response.status, reason)
         return await response.json()
 
 
@@ -92,7 +120,9 @@ class Twitch:
 
     def handle(self, topic, event):
         if topic == 'channel.chat.message':
-            self.store.add(twitch_message(event))
+            message = twitch_message(event)
+            if message.get('is_creator'): message['avatar'] = self.config.get('avatar', '')
+            self.store.add(message)
         elif topic == 'channel.chat.notification':
             # Notification IDs vary: retain events without pretending they are chat messages.
             origin = event.get('source_broadcaster_user_name') or event.get('broadcaster_user_name', 'Twitch')
@@ -121,10 +151,16 @@ class YouTube:
 
     async def run(self):
         page = None
+        chat_id = None
         delay = 5
         while True:
             try:
-                params = dict(liveChatId=self.config['live_chat_id'], part='snippet,authorDetails', maxResults=200)
+                if not self.config.get('live_chat_id'):
+                    await asyncio.sleep(10)
+                    continue
+                if chat_id != self.config['live_chat_id']:
+                    chat_id, page = self.config['live_chat_id'], None
+                params = dict(liveChatId=chat_id, part='snippet,authorDetails', maxResults=200)
                 if page:
                     params['pageToken'] = page
                 result = await api(self.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveChat/messages',
@@ -140,13 +176,22 @@ class YouTube:
                 page = result.get('nextPageToken')
                 self.status('youtube', 'connected')
                 if result.get('offlineAt'):
-                    self.status('youtube', 'Broadcast ended; configure the next live chat ID.')
-                    return
+                    self.config['live_chat_id'] = ''
+                    page = None
+                    self.status('youtube', 'Broadcast ended; waiting for your next broadcast.')
                 delay = 5
                 await asyncio.sleep(max(1, result.get('pollingIntervalMillis', 5000)/1000))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                if isinstance(exc, ApiError):
+                    if exc.reason in ('liveChatEnded', 'liveChatNotFound'):
+                        self.config['live_chat_id'] = ''
+                        page = None
+                    elif exc.reason == 'invalidPageToken':
+                        page = None
+                    elif exc.status in (403, 429):
+                        delay = max(delay, 60)
                 self.status('youtube', str(exc) if isinstance(exc, ApiError) else 'Disconnected; check network and authorization.')
                 await asyncio.sleep(delay)
                 delay = min(delay*2, 120)

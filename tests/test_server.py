@@ -62,7 +62,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(self.state.native_key,str(payload))
         self.assertNotIn(self.state.browser_key,str(payload))
 
-    async def test_native_combined_events_include_activity_and_diagnostics_without_chat(self):
+    async def test_native_combined_events_exclude_chat_and_diagnostics(self):
         from forgecast.server import combined_events
         self.state.chat.add(dict(id='chat',platform='twitch',kind='chat',time=10,text='private chat'))
         self.state.chat.add(dict(id='raid',platform='twitch',origin='Box_Beard',user='Raider',
@@ -70,7 +70,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.state.doctor.incidents.append(dict(time=30,title='Network drops',evidence='2 dropped frames'))
         result=combined_events(self.state)
         self.assertTrue(any('raid incoming' in e['text'] for e in result))
-        self.assertTrue(any('2 dropped frames' in e['text'] for e in result))
+        self.assertFalse(any('2 dropped frames' in e['text'] for e in result))
         self.assertFalse(any('private chat' in e['text'] for e in result))
 
     async def test_native_chat_send_targets_selected_connected_platform(self):

@@ -1,8 +1,10 @@
 import argparse
 import asyncio
-from collections import deque
+from collections import deque, OrderedDict
 import contextlib
 import json
+import hashlib
+import logging
 import os
 from pathlib import Path
 import secrets
@@ -44,12 +46,56 @@ class State:
         self.hub_events = []
         self.kick_after = 0
         self.lock = asyncio.Lock()
+        self.status_details = {}
+        self.hub_sync_lock = asyncio.Lock()
+        self.media = OrderedDict()
+        self.media_cache = OrderedDict()
+        self.paused_platforms = set(self.config.get('paused_platforms', []))
+        self.kick_verified = False
+        self.kick_received = 0
 
     def status(self, platform, message):
+        if self.statuses.get(platform) != message:
+            self.event(platform.title()+': '+message)
         self.statuses[platform] = message
+        previous = self.status_details.get(platform, {})
+        self.status_details[platform] = dict(message=message, updated_at=time.time(),
+            last_message_at=previous.get('last_message_at'), channel=previous.get('channel', ''),
+            state='connected' if message == 'connected' else
+                  'waiting' if any(x in message.lower() for x in ('waiting', 'broadcast ended', 'connecting', 'ready')) else
+                  'offline' if message in ('not connected', 'disconnected') else 'attention')
 
     def event(self, text):
         self.events.append(dict(time=time.time(), text=text))
+
+    def media_url(self, url):
+        try:
+            parsed = urlparse(url)
+            port = parsed.port
+        except ValueError:
+            return ''
+        allowed = {'static-cdn.jtvnw.net', 'files.kick.com', 'yt3.ggpht.com',
+                   'yt3.googleusercontent.com', 'lh3.googleusercontent.com'}
+        if parsed.scheme != 'https' or parsed.hostname not in allowed or port not in (None, 443) or parsed.username or parsed.password:
+            return ''
+        key = hashlib.sha256(url.encode()).hexdigest()
+        self.media[key] = url
+        self.media.move_to_end(key)
+        while len(self.media) > 500: self.media.popitem(last=False)
+        return '/media/'+key
+
+    def chat_view(self):
+        rows = []
+        for original in list(self.chat.messages)[-500:]:
+            row = dict(original)
+            if row.get('avatar'): row['avatar'] = self.media_url(row['avatar'])
+            row['fragments'] = [dict(text=f.get('text', ''), image=self.media_url(f['image']) if f.get('image') else '')
+                                for f in row.get('fragments', [{'text':row.get('text', '')}])]
+            detail = self.status_details.get(row.get('platform'))
+            if detail:
+                detail['last_message_at'] = max(detail.get('last_message_at') or 0, row.get('time', 0))
+            rows.append(row)
+        return rows
 
     def save(self):
         atomic_json(self.config_path, self.config)
@@ -77,7 +123,8 @@ class State:
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
-                    messages=list(self.chat.messages), events=list(self.events), incidents=list(self.doctor.incidents),
+                    status_details=self.status_details, combined_events=combined_events(self),
+                    messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
                     hub_events=self.hub_events,
                     secret_persistence='Windows DPAPI' if not self.vault.memory else 'Session memory only',
                     hub_url=self.config.get('hub_url', ''), obs_port=self.config.get('obs_port', 4455))
@@ -85,14 +132,14 @@ class State:
 
 def combined_events(s):
     """Bounded activity available from connected accounts and local OBS telemetry."""
-    rows = [dict(time=e['time'], source='OBS / FDGCast', text=e['text'])
-            for e in s.events]
-    rows.extend(dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
-                     text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'),
-                     kind=m.get('kind', 'activity'))
-                for m in s.chat.messages if m.get('kind') != 'chat' and not m.get('deleted'))
-    rows.extend(dict(time=i['time'], source='STREAM DOCTOR', text=i['title']+' · '+i['evidence'])
-                for i in s.doctor.incidents)
+    audience_kinds = {'sub', 'resub', 'sub_gift', 'community_sub_gift', 'gift_paid_upgrade',
+        'prime_paid_upgrade', 'raid', 'unraid', 'pay_it_forward', 'announcement', 'bits_badge_tier',
+        'charity_donation', 'cheer', 'follow', 'redeem', 'superChatEvent', 'superStickerEvent',
+        'newSponsorEvent', 'memberMilestoneChatEvent', 'membershipGiftingEvent',
+        'giftMembershipReceivedEvent'}
+    rows = [dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
+                 text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'), kind=m.get('kind'))
+            for m in s.chat.messages if m.get('kind') in audience_kinds and not m.get('deleted')]
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
 
@@ -115,7 +162,7 @@ async def send_chat(s, platform, text):
         try:
             await s.adapters[platform].send(message)
         except ApiError as exc:
-            if platform == 'youtube' and 'HTTP 403' in str(exc):
+            if platform == 'youtube' and exc.reason == 'insufficientPermissions':
                 raise ValueError('YouTube declined this reply. The Hub connection needs a chat-writing scope; reconnect after Google approves it.') from exc
             raise
     s.event('Message sent to '+platform.title()+'.')
@@ -135,11 +182,15 @@ async def secure(request, handler):
             raise web.HTTPUnauthorized(text='Open the dashboard from the running launcher.')
     try:
         response = await handler(request)
+    except web.HTTPException as exc:
+        response = exc
     except (ValueError, KeyError) as exc:
         response = web.json_response({'error':str(exc)}, status=400)
     except (ApiError, ConnectionError, asyncio.TimeoutError) as exc:
         response = web.json_response({'error':str(exc) or 'Request timed out.'}, status=502)
-    except Exception:
+    except Exception as exc:
+        logging.getLogger('fdgcast').error('Operation failed: %s %s', request.path, type(exc).__name__)
+        state.event('Operation failed: '+request.path+' ('+type(exc).__name__+'). Check configuration and connections.')
         response = web.json_response({'error':'Operation failed. Check connection, configuration and credentials.'}, status=500)
     response.headers.update({'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff',
                              'Referrer-Policy':'no-referrer',
@@ -237,6 +288,8 @@ async def action(request):
             s.event('Secondary output command queued; wait for native acknowledgement.')
         elif op == 'chat_connect':
             platform = data['platform']
+            s.paused_platforms.discard(platform)
+            s.config['paused_platforms'] = sorted(s.paused_platforms)
             required = {'twitch':['client_id','user_id','channel_id'], 'youtube':['live_chat_id','channel_name']}
             if platform not in required:
                 raise ValueError('This chat adapter is not implemented.')
@@ -260,6 +313,9 @@ async def action(request):
             adapter.task = asyncio.create_task(adapter.run())
         elif op == 'chat_disconnect':
             platform = data['platform']
+            s.paused_platforms.add(platform)
+            s.config['paused_platforms'] = sorted(s.paused_platforms)
+            s.save()
             adapter = s.adapters.pop(platform, None)
             if adapter:
                 adapter.task.cancel()
@@ -279,6 +335,9 @@ async def action(request):
             token = data.get('token') or s.vault.get('hub_token')
             if not token:
                 raise ValueError('A dedicated FDGCast Hub integration token is required.')
+            if s.config.get('hub_url') != url or s.vault.get('hub_token') != token:
+                s.kick_after = 0
+                s.kick_verified = False
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
             s.save()
@@ -286,51 +345,11 @@ async def action(request):
             url = s.config.get('hub_url')
             if not url or not s.vault.get('hub_token'):
                 raise ValueError('Save your Hub URL and pairing token first.')
-            headers = {'Authorization':'Bearer '+s.vault.get('hub_token')}
-            result = await api(s.session, 'GET', url+'/api/forgecast/v1/connections', headers=headers)
-            for conn in result.get('connections', []):
-                platform, token = conn.get('platform'), conn.get('access_token')
-                if not token:
-                    if platform in s.statuses: s.status(platform, conn.get('error', 'Reconnect in Hub settings.'))
-                    continue
-                if platform == 'kick':
-                    user_id = str(conn.get('user_id') or '').strip()
-                    if not user_id.isdigit() or int(user_id) <= 0:
-                        s.status('kick', 'Kick channel ID unavailable; reconnect Kick in Hub settings.')
-                        continue
-                    s.vault.set('kick_token', token)
-                    s.config['kick'] = {'channel_id':user_id}
-                    s.save()
-                    s.status('kick', 'Hub chat and replies ready')
-                    continue
-                if platform == 'twitch':
-                    user_id, client_id = conn.get('user_id'), conn.get('client_id')
-                    if not user_id or not client_id:
-                        s.status('twitch', 'Account ID unavailable; reconnect in Hub settings.')
-                        continue
-                    config = {'client_id':client_id,'user_id':user_id,'channel_id':user_id}
-                elif platform == 'youtube':
-                    broadcasts = await api(s.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveBroadcasts',
-                        headers={'Authorization':'Bearer '+token},params={'part':'snippet','broadcastStatus':'active'})
-                    active = next((b for b in broadcasts.get('items', []) if b.get('snippet', {}).get('liveChatId')), None)
-                    if not active:
-                        s.status('youtube', 'No active broadcast with live chat. Go live, then Sync Hub accounts.')
-                        continue
-                    config = {'live_chat_id':active['snippet']['liveChatId'],'channel_name':conn.get('username') or 'YouTube'}
-                else:
-                    continue
-                existing = s.adapters.pop(platform, None)
-                if existing:
-                    existing.task.cancel()
-                    await asyncio.gather(existing.task, return_exceptions=True)
-                adapter = (Twitch if platform == 'twitch' else YouTube)(s.session, config, token, s.chat, s.status)
-                if platform == 'twitch': await adapter.validate()
-                s.adapters[platform] = adapter
-                s.status(platform, 'connecting')
-                adapter.task = asyncio.create_task(adapter.run())
-            events = await api(s.session,'GET',url+'/api/forgecast/v1/events',headers=headers)
-            s.hub_events = events.get('events', [])[:50]
-            s.event('Hub accounts and schedule synced. Refresh periodically to renew access tokens.')
+            s.paused_platforms.clear()
+            s.config['paused_platforms'] = []
+            await sync_hub_accounts(s)
+            await fetch_hub_events(s)
+            s.event('Hub accounts synced. Linked accounts refresh automatically.')
         elif op in ('hub_fetch', 'hub_report'):
             url = s.config.get('hub_url')
             if not url:
@@ -341,10 +360,7 @@ async def action(request):
                 s.hub_events = result.get('events', [])[:50]
                 kick = await api(s.session,'GET',url+'/api/forgecast/v1/kick',headers=headers,
                                  params={'after':str(s.kick_after)})
-                for row in kick.get('messages', []):
-                    s.chat.add(kick_message(row['payload']))
-                    s.kick_after = max(s.kick_after,int(row['id']))
-                if kick.get('messages'): s.status('kick', 'Hub webhook relay connected')
+                accept_kick_rows(s, kick)
             else:
                 if not data.get('confirmed'):
                     raise ValueError('Review the local report and explicitly confirm upload.')
@@ -378,13 +394,14 @@ async def native(request):
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
         'commands': commands,
-        'messages': list(s.chat.messages)[-80:],
+        'messages': [m for m in s.chat_view() if m.get('kind', 'chat') == 'chat'][-80:],
         'events': combined_events(s),
         'issues': s.current_issues[:12],
         'stats': {key: s.stats.get(key) for key in
                   ('activeFps', 'cpuUsage', 'renderSkippedFrames', 'renderTotalFrames',
                    'outputSkippedFrames', 'outputTotalFrames', 'stream_active')},
         'statuses': s.statuses,
+        'status_details': s.status_details,
         'destinations': s.config.get('destinations', []),
         'outputs': s.native_outputs,
         'stream_active': bool(s.stats.get('stream_active')),
@@ -484,37 +501,179 @@ async def poll(s):
         await asyncio.sleep(2)
 
 
+async def fetch_hub_events(s):
+    result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/events',
+                       headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
+    s.hub_events = result.get('events', [])[:50]
+
+
+async def ensure_kick_subscription(s, token, channel):
+    headers = {'Authorization':'Bearer '+token}
+    endpoint = 'https://api.kick.com/public/v1/events/subscriptions'
+    s.kick_verified = False
+    result = await api(s.session, 'GET', endpoint, headers=headers, params={'broadcaster_user_id':channel})
+    subscribed = any(str(row.get('broadcaster_user_id')) == channel and
+                     row.get('event') == 'chat.message.sent' for row in result.get('data', []))
+    if not subscribed:
+        result = await api(s.session, 'POST', endpoint, headers=headers,
+            json={'broadcaster_user_id':int(channel), 'events':[{'name':'chat.message.sent','version':1}], 'method':'webhook'})
+        rows = result.get('data', [])
+        if not any(row.get('name') == 'chat.message.sent' and row.get('subscription_id') and not row.get('error') for row in rows):
+            raise ValueError('Kick chat subscription failed. Reconnect Kick in Hub settings and check its webhook URL.')
+    s.kick_verified = True
+    s.status('kick', 'connected' if s.kick_received else 'Subscription ready; waiting for the first Hub webhook message.')
+
+
+async def sync_hub_accounts(s):
+    async with s.hub_sync_lock:
+        result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/connections',
+                           headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
+        for conn in result.get('connections', []):
+            platform, token = conn.get('platform'), conn.get('access_token')
+            if platform not in s.statuses or platform in s.paused_platforms: continue
+            if not token:
+                old = s.adapters.pop(platform, None)
+                if old:
+                    old.task.cancel()
+                    await asyncio.gather(old.task, return_exceptions=True)
+                s.vault.delete(platform+'_token')
+                if platform == 'kick': s.kick_verified = False
+                s.status(platform, conn.get('error') or 'Reconnect this account in Hub settings.')
+                continue
+            try:
+                if platform == 'kick':
+                    channel = str(conn.get('user_id') or '').strip()
+                    if not channel.isdigit() or int(channel) <= 0:
+                        raise ValueError('Kick channel ID is missing. Reconnect Kick in Hub settings.')
+                    if s.config.get('kick', {}).get('channel_id') != channel:
+                        s.kick_after, s.kick_received = 0, 0
+                    s.vault.set('kick_token', token)
+                    s.config['kick'] = {'channel_id':channel, 'channel_name':conn.get('username') or 'Kick'}
+                    await ensure_kick_subscription(s, token, channel)
+                    continue
+                if platform == 'twitch':
+                    user = str(conn.get('user_id') or '')
+                    if not user or not conn.get('client_id'):
+                        raise ValueError('Twitch account identity is missing. Reconnect in Hub settings.')
+                    config = {'client_id':conn['client_id'], 'user_id':user, 'channel_id':user}
+                    existing = s.adapters.get(platform)
+                    if existing and existing.config.get('channel_id') == user and existing.config.get('client_id') == conn['client_id']:
+                        existing.token = token
+                        s.vault.set(platform+'_token', token)
+                        continue
+                    users = await api(s.session, 'GET', 'https://api.twitch.tv/helix/users',
+                                      headers={'Authorization':'Bearer '+token,'Client-Id':conn['client_id']}, params={'id':user})
+                    config['avatar'] = next((u.get('profile_image_url', '') for u in users.get('data', []) if u.get('id') == user), '')
+                else:
+                    existing = s.adapters.get(platform)
+                    user = str(conn.get('user_id') or conn.get('username') or 'YouTube')
+                    if existing and existing.config.get('account_id') == user:
+                        existing.token = token
+                        config = existing.config
+                    else:
+                        config = {'live_chat_id':'', 'channel_name':conn.get('username') or 'YouTube', 'account_id':user}
+                    # Once a broadcast ends the adapter clears its ID and discovery resumes.
+                    if not config.get('live_chat_id'):
+                        broadcasts = await api(s.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveBroadcasts',
+                            headers={'Authorization':'Bearer '+token},
+                            params={'part':'snippet,status', 'broadcastStatus':'active', 'broadcastType':'all', 'maxResults':50})
+                        active = next((b for b in broadcasts.get('items', []) if b.get('snippet', {}).get('liveChatId')), None)
+                        if active:
+                            config['live_chat_id'] = active['snippet']['liveChatId']
+                            s.status('youtube', 'connecting')
+                        else:
+                            s.status('youtube', 'Waiting for an active YouTube broadcast with chat; checking automatically.')
+                    if existing and existing.config is config:
+                        s.vault.set(platform+'_token', token)
+                        s.config[platform] = dict(config)
+                        continue
+                old = s.adapters.pop(platform, None)
+                if old:
+                    old.task.cancel()
+                    await asyncio.gather(old.task, return_exceptions=True)
+                adapter = (Twitch if platform == 'twitch' else YouTube)(s.session, config, token, s.chat, s.status)
+                if platform == 'twitch': await adapter.validate()
+                s.adapters[platform] = adapter
+                s.vault.set(platform+'_token', token)
+                s.config[platform] = dict(config)
+                s.status_details.setdefault(platform, {})['channel'] = conn.get('username') or ''
+                adapter.task = asyncio.create_task(adapter.run())
+            except (ApiError, ValueError, ConnectionError, asyncio.TimeoutError) as exc:
+                s.status(platform, str(exc) or 'Connection timed out; retrying automatically.')
+            except Exception as exc:
+                s.status(platform, 'Account setup failed ('+type(exc).__name__+'). Reconnect in Hub settings.')
+        s.save()
+
+
+def accept_kick_rows(s, result):
+    for row in result.get('messages', []):
+        cursor = int(row['id'])
+        try:
+            payload = row['payload']
+            if str(payload.get('broadcaster', {}).get('user_id')) != s.config.get('kick', {}).get('channel_id'):
+                continue
+            s.chat.add(kick_message(payload))
+            s.kick_received = time.time()
+            s.status('kick', 'connected')
+        except (KeyError, TypeError, ValueError):
+            s.status('kick', 'Hub delivered an invalid chat message; skipped it. Check Hub webhook logs.')
+        finally:
+            s.kick_after = max(s.kick_after, cursor)
+
+
 async def poll_hub(s):
-    last_sync = 0
+    next_accounts, next_events = 0, 0
     while True:
         url, token = s.config.get('hub_url'), s.vault.get('hub_token')
         if url and token:
-            headers = {'Authorization':'Bearer '+token}
-            try:
-                result = await api(s.session,'GET',url+'/api/forgecast/v1/kick',headers=headers,
-                                   params={'after':str(s.kick_after)})
-                for row in result.get('messages', []):
-                    s.chat.add(kick_message(row['payload']))
-                    s.kick_after = max(s.kick_after,int(row['id']))
-                if result.get('messages'): s.status('kick','Hub webhook relay connected')
-                if time.monotonic()-last_sync > 300:
-                    accounts = await api(s.session,'GET',url+'/api/forgecast/v1/connections',headers=headers)
-                    for conn in accounts.get('connections', []):
-                        platform = conn.get('platform')
-                        if platform == 'kick' and s.config.get('kick'):
-                            if conn.get('access_token'):
-                                s.vault.set('kick_token', conn['access_token'])
-                            elif conn.get('error'):
-                                s.status('kick', conn['error'])
-                        if platform in s.adapters:
-                            if conn.get('access_token'): s.adapters[platform].token = conn['access_token']
-                            elif conn.get('error'): s.status(platform,conn['error'])
-                    events = await api(s.session,'GET',url+'/api/forgecast/v1/events',headers=headers)
-                    s.hub_events = events.get('events', [])[:50]
-                    last_sync = time.monotonic()
-            except Exception:
-                s.status('kick','Hub relay unavailable; checking again soon')
+            now = time.monotonic()
+            if now >= next_accounts:
+                try:
+                    async with s.lock: await sync_hub_accounts(s)
+                except Exception as exc:
+                    for platform in s.statuses:
+                        if platform not in s.paused_platforms:
+                            s.status(platform, str(exc) if isinstance(exc, ApiError) else 'Hub account sync failed; retrying automatically.')
+                next_accounts = now + 60
+            if s.config.get('kick') and s.vault.get('kick_token') and 'kick' not in s.paused_platforms:
+                try:
+                    result = await api(s.session, 'GET', url+'/api/forgecast/v1/kick',
+                                       headers={'Authorization':'Bearer '+token}, params={'after':str(s.kick_after)})
+                    accept_kick_rows(s, result)
+                    if s.kick_verified and s.kick_received:
+                        s.status('kick', 'connected')
+                    if s.kick_verified and not s.kick_received:
+                        s.status('kick', 'Subscription ready; no messages received yet. Send a test message; if absent, check the Hub webhook URL.')
+                except Exception as exc:
+                    s.status('kick', str(exc) if isinstance(exc, ApiError) else 'Hub chat relay failed; checking again soon.')
+            if now >= next_events:
+                try: await fetch_hub_events(s)
+                except Exception as exc: s.event('Hub schedule unavailable ('+type(exc).__name__+'); chat continues independently.')
+                next_events = now + 300
         await asyncio.sleep(5)
+
+
+async def media(request):
+    s = request.app['state']
+    key = request.match_info['key']
+    if key not in s.media: raise web.HTTPNotFound()
+    if key in s.media_cache:
+        body, content_type = s.media_cache[key]
+        s.media_cache.move_to_end(key)
+    else:
+        async with s.session.get(s.media[key], allow_redirects=False) as response:
+            if response.status != 200: raise web.HTTPNotFound()
+            content_type = response.headers.get('Content-Type', '').split(';')[0]
+            if content_type not in ('image/png','image/gif','image/jpeg','image/webp'): raise web.HTTPNotFound()
+            chunks, size = [], 0
+            async for chunk in response.content.iter_chunked(65536):
+                size += len(chunk)
+                if size > 1048576: raise web.HTTPRequestEntityTooLarge(max_size=1048576, actual_size=size)
+                chunks.append(chunk)
+            body = b''.join(chunks)
+            s.media_cache[key] = (body, content_type)
+            while len(s.media_cache) > 40: s.media_cache.popitem(last=False)
+    return web.Response(body=body, content_type=content_type)
 
 
 def seed_demo(s):
@@ -576,6 +735,7 @@ def create_app(state):
     app.cleanup_ctx.append(lifecycle)
     for path in ('/', '/app.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
+    app.router.add_get('/media/{key}', media)
     app.router.add_get('/api/state', get_state)
     app.router.add_post('/api/action', action)
     app.router.add_get('/api/report', report)
