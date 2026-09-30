@@ -27,6 +27,9 @@ Source: "{#SourcePath}en-US.ini"; DestDir: "{commonappdata}\obs-studio\plugins\f
 Source: "{#SourcePath}FDGCast.ico"; DestDir: "{commonappdata}\obs-studio\plugins\forgecast\data"; Flags: ignoreversion
 Source: "{#SourcePath}..\README.md"; DestDir: "{app}"; Flags: ignoreversion
 
+[Registry]
+Root: HKLM; Subkey: "Software\Forged Destiny Gaming\FDGCast"; ValueType: string; ValueName: "CompanionPath"; ValueData: "{app}\FDGCast.exe"; Flags: uninsdeletekey
+
 [Icons]
 Name: "{group}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"; AppUserModelID: "ForgedDestinyGaming.FDGCast"
 Name: "{autodesktop}\FDGCast"; Filename: "{app}\FDGCast.exe"; IconFilename: "{app}\FDGCast.exe"; AppUserModelID: "ForgedDestinyGaming.FDGCast"; Tasks: desktopicon

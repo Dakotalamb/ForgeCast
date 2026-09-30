@@ -43,3 +43,13 @@ Muted source timing: 30-second dock warning, 60-second Windows notification, opt
 Audio incidents, recoveries, pauses and fix requests/results are saved locally in bounded JSONL history and shown in Companion. Shared reports include counts with no audio source identities. If history saving fails, monitoring continues and Companion shows the storage error.
 
 Validation: 85 local Python tests pass, including mute thresholds, actual non-default track selection, quiet-scene behavior, telemetry loss, acknowledgement/snooze, source deletion, silence/meter distinctions, persistence/report privacy, safe toast XML encoding, API selection/authentication and preflight uncertainty. Python compilation and JavaScript syntax pass. Native compilation, Windows notifications, actual microphone/Focusrite tests and visual OBS validation await the deferred Windows build. Existing installed copies do not yet contain these source changes.
+
+## Pairing clarity and Companion startup checkpoint
+
+- Saved Hub pairing code remains in its masked local form with Show/Hide. A browser-authenticated, no-store endpoint restores it after app restarts; normal state, native IPC and reports exclude it.
+- Hub pairing status reports Connected only after an authenticated account-sync response; failed checks show attention and retry automatically.
+- OBS opens the installed Windows Companion once at plugin startup if its local service is absent. Installer records its executable path; no streaming outputs are started. Opening the app from Control also retries startup.
+- Windows desktop mutex prevents simultaneous app launches from rotating bridge credentials or spawning duplicate windows. Closing Companion does not cause an automatic restart loop.
+- 87 Python tests pass; Python compilation and JS syntax checks pass. Registry launch, single-instance behavior and UI rendering still require the deferred Windows/OBS build and live validation.
+
+Next: destination-specific Stream Doctor incidents and recovery history, followed by the combined session timeline and copyable diagnostic report.

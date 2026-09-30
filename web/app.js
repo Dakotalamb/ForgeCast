@@ -18,8 +18,10 @@ async function run(fn, target) { if(target) target.disabled=true; try { await fn
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
-function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
+function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
+let pairingLoaded=false;
+$('showPairCode').onclick=()=>{const input=$('hubForm').elements.token;input.type=input.type==='password'?'text':'password';$('showPairCode').textContent=input.type==='password'?'Show code':'Hide code';};
 $('send').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;run(async()=>{await action('chat_send',Object.fromEntries(new FormData(f)));f.elements.text.value='';},f.querySelector('button'));};
 document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>action('chat_disconnect',{platform:b.dataset.disconnect,forget:true}),b));
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
@@ -127,10 +129,12 @@ function render(s) {
  $('cpu').textContent=fresh&&stats.cpuUsage!==undefined?stats.cpuUsage.toFixed(1)+'%':'—';
  $('render').textContent=fresh&&stats.averageFrameRenderTime!==undefined?stats.averageFrameRenderTime.toFixed(1)+' ms':'—';
  $('outputCount').textContent=s.native_connected?s.outputs.filter(x=>x.active).length:'—';
- $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Tokens are never returned to this page.';
+ $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Platform tokens stay private. Your pairing code is available only in this local connection form.';
  $('health').replaceChildren(...(s.issues.length?s.issues.map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
  $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
  $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
+ const hubStatus=s.hub_connection==='connected'?'Connected':s.hub_connection==='attention'?'Connection needs attention':s.hub_paired?'Checking connection…':'Not paired';
+ $('hubPairStatus').textContent=hubStatus;$('hubPairStatus').className=s.hub_connection==='connected'?'ok':'muted';
  const hubUrl=$('hubForm').elements.url;
  if(document.activeElement!==hubUrl && hubUrl.value!==s.hub_url)hubUrl.value=s.hub_url;
  const serialized=JSON.stringify(s.messages);
@@ -160,6 +164,8 @@ function render(s) {
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
  $('hubEvents').replaceChildren(...s.hub_events.map(e=>{const d=el('article',undefined,'panel');d.append(el('h2',String(e.title||'Untitled')),el('p',String(e.starts_at||'')));return d;}));
 }
-async function refresh(){render(await api('/api/state'));}
+async function refresh(){render(await api('/api/state'));
+ if(!pairingLoaded){const saved=await api('/api/pairing');const input=$('hubForm').elements.token;if(!input.value&&document.activeElement!==input)input.value=saved.token;pairingLoaded=true;}
+}
 async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';error(e.message);}setTimeout(loop,1500);}
 if(key)loop();else error('Open the dashboard URL printed by Start-FDGCast. Its private session key is missing.');

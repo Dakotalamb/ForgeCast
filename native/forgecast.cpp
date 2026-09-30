@@ -24,6 +24,8 @@
 #include <QDialog>
 #include <QDialogButtonBox>
 #include <QFile>
+#include <QFileInfo>
+#include <QProcess>
 #include <QFormLayout>
 #include <QJsonArray>
 #include <QJsonDocument>
@@ -674,6 +676,28 @@ public:
 #endif
         connect(&timer, &QTimer::timeout, this, [this] { tick(); });
         timer.start(1000);
+        QTimer::singleShot(0, this, [this] { openCompanionIfNeeded(); });
+    }
+
+    void openCompanionIfNeeded()
+    {
+#ifdef _WIN32
+        // Probe first: opening OBS must not launch a duplicate Companion.
+        QNetworkRequest request(QUrl("http://127.0.0.1:17654/"));
+        request.setTransferTimeout(1500);
+        request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+        auto *reply = network.get(request);
+        connect(reply, &QNetworkReply::finished, this, [this, reply] {
+            if (reply->error() != QNetworkReply::NoError) {
+                QSettings install("HKEY_LOCAL_MACHINE\\Software\\Forged Destiny Gaming\\FDGCast", QSettings::NativeFormat);
+                const QString exe = install.value("CompanionPath").toString();
+                if (exe.isEmpty() || !QFileInfo::exists(exe) || !QProcess::startDetached(exe, QStringList{}))
+                    label->setText("FDGCast Companion could not start. Open it from the Start menu or repair the FDGCast installation.");
+                else label->setText("FDGCast Companion is starting…");
+            }
+            reply->deleteLater();
+        });
+#endif
     }
 
     void stopAll()
@@ -692,8 +716,10 @@ public:
 
     void sendAction(const QJsonObject &action)
     {
+        const bool requestFocus = action.value("action").toString() == "focus";
         QFile tokenFile(bridgePath);
         if (!tokenFile.open(QIODevice::ReadOnly)) {
+            if (requestFocus) { openCompanionIfNeeded(); return; }
             if (action.value("action") == "chat_send" && chatDock)
                 chatDock->sendResult(false, "Start the FDGCast app before sending chat.");
             if (multistreamDock) multistreamDock->message("Start the FDGCast companion first.");
@@ -717,7 +743,7 @@ public:
             if (audioAction && doctorDock) doctorDock->message(success ? "Audio Guard request accepted. Waiting for updated OBS readings." : error);
             if (multistreamDock) {
                 if (!success) {
-                    if (focusing) label->setText(error.isEmpty() ? "Open FDGCast from the Start menu." : error);
+                    if (focusing) { label->setText(error.isEmpty() ? "Opening FDGCast Companion…" : error); openCompanionIfNeeded(); }
                     else if (!sendingChat) multistreamDock->message(error.isEmpty() ? "Action failed. Check FDGCast connection." : error);
                 } else if (!focusing && !sendingChat) multistreamDock->message("Request accepted. Waiting for OBS output status.");
             }

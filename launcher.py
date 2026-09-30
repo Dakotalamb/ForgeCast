@@ -49,7 +49,35 @@ def apply_window_icon():
         time.sleep(0.25)
 
 
+def claim_desktop_instance():
+    if sys.platform != 'win32':
+        return True
+    kernel32 = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel32.CreateMutexW.argtypes = [ctypes.c_void_p, wintypes.BOOL, wintypes.LPCWSTR]
+    kernel32.CreateMutexW.restype = wintypes.HANDLE
+    global _desktop_mutex
+    _desktop_mutex = kernel32.CreateMutexW(None, False, 'Local\\FDGCastDesktop')
+    if not _desktop_mutex:
+        raise ctypes.WinError(ctypes.get_last_error())
+    if ctypes.get_last_error() != 183:  # ERROR_ALREADY_EXISTS
+        return True
+    kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel32.CloseHandle(_desktop_mutex)
+    user32 = ctypes.windll.user32
+    user32.FindWindowW.argtypes = [wintypes.LPCWSTR, wintypes.LPCWSTR]
+    user32.FindWindowW.restype = wintypes.HWND
+    user32.ShowWindow.argtypes = [wintypes.HWND, ctypes.c_int]
+    user32.SetForegroundWindow.argtypes = [wintypes.HWND]
+    hwnd = user32.FindWindowW(None, WINDOW_TITLE)
+    if hwnd:
+        user32.ShowWindow(hwnd, 9)
+        user32.SetForegroundWindow(hwnd)
+    return False
+
+
 def launch():
+    if not claim_desktop_instance():
+        return
     set_windows_identity()
     if '--headless' in sys.argv:
         sys.argv = [sys.argv[0], '--no-browser']

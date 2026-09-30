@@ -18,6 +18,31 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         await self.client.close()
         self.temp.cleanup()
 
+    async def test_pairing_code_retained_only_in_authenticated_form_endpoint(self):
+        self.state.vault.set('hub_token', 'SAVED-PAIR-CODE')
+        response = await self.client.get('/api/pairing', headers=self.headers)
+        self.assertEqual(response.status, 200)
+        self.assertEqual((await response.json())['token'], 'SAVED-PAIR-CODE')
+        self.assertEqual(response.headers['Cache-Control'], 'no-store')
+        response = await self.client.get('/api/state', headers=self.headers)
+        self.assertNotIn('SAVED-PAIR-CODE', await response.text())
+        response = await self.client.get('/api/report', headers=self.headers)
+        self.assertNotIn('SAVED-PAIR-CODE', await response.text())
+        response = await self.client.get('/api/pairing', headers={'Host':'127.0.0.1:17654'})
+        self.assertEqual(response.status, 401)
+        response = await self.client.get('/api/pairing', headers={**self.headers, 'Authorization':'Bearer '+self.state.native_key})
+        self.assertEqual(response.status, 401)
+
+    async def test_saved_pairing_does_not_falsely_claim_connected(self):
+        self.state.vault.set('hub_token', 'saved')
+        response = await self.client.get('/api/state', headers=self.headers)
+        data = await response.json()
+        self.assertTrue(data['hub_paired'])
+        self.assertNotEqual(data['hub_connection'], 'connected')
+        self.state.hub_connection = 'connected'
+        response = await self.client.get('/api/state', headers=self.headers)
+        self.assertEqual((await response.json())['hub_connection'], 'connected')
+
     async def test_state_auth(self):
         r=await self.client.get('/api/state',headers={'Host':'127.0.0.1:17654'})
         self.assertEqual(r.status,401)

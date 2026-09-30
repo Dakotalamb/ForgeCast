@@ -44,6 +44,7 @@ class State:
         self.stats = {}
         self.current_issues = []
         self.scene = 'OBS disconnected'
+        self.hub_connection = 'not_paired'
         self.session = self.obs = None
         self.hub_events = []
         self.kick_after = 0
@@ -136,6 +137,7 @@ class State:
                     messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
                     hub_events=self.hub_events,
                     secret_persistence='Windows DPAPI' if not self.vault.memory else 'Session memory only',
+                    hub_connection=self.hub_connection, hub_paired=bool(self.vault.get('hub_token')),
                     hub_url=self.config.get('hub_url', ''), obs_port=self.config.get('obs_port', 4455))
 
 
@@ -331,6 +333,13 @@ async def get_state(request):
     return web.json_response(request.app['state'].public())
 
 
+async def pairing(request):
+    # Only the authenticated local Companion page may retrieve its saved pairing code.
+    s = request.app['state']
+    return web.json_response({'token': s.vault.get('hub_token') or ''},
+                             headers={'Cache-Control': 'no-store'})
+
+
 async def action(request):
     s = request.app['state']
     data = await request.json()
@@ -456,7 +465,13 @@ async def action(request):
                 s.kick_verified = False
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
+            s.hub_connection = 'checking'
             s.save()
+            try:
+                await sync_hub_accounts(s)
+            except Exception:
+                s.hub_connection = 'attention'
+                raise
         elif op == 'hub_sync':
             url = s.config.get('hub_url')
             if not url or not s.vault.get('hub_token'):
@@ -652,6 +667,7 @@ async def sync_hub_accounts(s):
     async with s.hub_sync_lock:
         result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/connections',
                            headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
+        s.hub_connection = 'connected'
         for conn in result.get('connections', []):
             platform, token = conn.get('platform'), conn.get('access_token')
             if platform not in s.statuses or platform in s.paused_platforms: continue
@@ -755,6 +771,7 @@ async def poll_hub(s):
                 try:
                     async with s.lock: await sync_hub_accounts(s)
                 except Exception as exc:
+                    s.hub_connection = 'attention'
                     for platform in s.statuses:
                         if platform not in s.paused_platforms:
                             s.status(platform, str(exc) if isinstance(exc, ApiError) else 'Hub account sync failed; retrying automatically.')
@@ -868,6 +885,7 @@ def create_app(state):
     app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
     app.router.add_get('/api/state', get_state)
+    app.router.add_get('/api/pairing', pairing)
     app.router.add_post('/api/action', action)
     app.router.add_get('/api/report', report)
     app.router.add_post('/native/poll', native)
