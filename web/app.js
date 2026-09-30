@@ -23,7 +23,8 @@ bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind(
 $('send').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;run(async()=>{await action('chat_send',Object.fromEntries(new FormData(f)));f.elements.text.value='';},f.querySelector('button'));};
 document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>action('chat_disconnect',{platform:b.dataset.disconnect,forget:true}),b));
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
-$('stopAll').onclick=()=>{if(confirm('Stop all FDGCast secondary outputs? The main OBS stream stays running.'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
+$('startAll').onclick=()=>{if(confirm('Start your main OBS stream and every checked destination?'))run(()=>action('native_command',{command:'start_all',confirmed:true}),$('startAll'));};
+$('stopAll').onclick=()=>{if(confirm('Stop your main OBS stream and all FDGCast destinations?'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
 $('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
 $('report').onclick=()=>run(async()=>{const data=await api('/api/report');const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download='FDGCast-diagnostics.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);},$('report'));
 $('hubFetch').onclick=()=>run(()=>action('hub_fetch'),$('hubFetch'));
@@ -31,15 +32,45 @@ $('hubSync').onclick=()=>run(()=>action('hub_sync'),$('hubSync'));
 $('setupSync').onclick=()=>run(()=>action('hub_sync'),$('setupSync'));
 $('hubReport').onclick=()=>{if(confirm('Have you reviewed the downloaded report? Send diagnostic measurements and output names to your configured Hub?'))run(()=>action('hub_report',{confirmed:true}),$('hubReport'));};
 function issue(i) { const d=el('article',undefined,'issue');d.append(el('h3',i.title),el('small',i.confidence.toUpperCase()+' confidence · symptom classification'),el('p',i.evidence),el('p',i.suggestion));return d; }
+function platformIcon(platform) {
+ const image=el('img');image.className='platform-icon';image.alt=platform;image.title=platform;
+ if(['twitch','youtube','kick'].includes(platform))image.src='/icons/'+platform+'.svg';
+ return image;
+}
 function renderChat() {
  if(!state)return;
  const box=$('messages'), bottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
- const list=state.messages.filter(m=>($('platformFilter').value==='all'||m.platform===$('platformFilter').value)&&($('originFilter').value==='all'||m.origin_id===$('originFilter').value)&&(!$('activityOnly').checked||m.kind!=='chat'));
- box.replaceChildren(...list.map(m=>{const d=el('article',undefined,'message '+m.platform);const source=el('div',m.platform.toUpperCase()+' · '+m.origin+'’s chat','origin');if(m.shared)source.append(el('span','SHARED','tag'));d.append(source,el('time',new Date(m.time*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),el('strong',m.user),el('p',m.text));if(m.kind!=='chat')d.append(el('span',m.kind,'tag'));return d;}));
- if(!list.length)box.append(el('p','No messages match. Connect accounts or adjust filters.','empty'));
+ const list=state.messages.filter(m=>m.kind==='chat'&&($('platformFilter').value==='all'||m.platform===$('platformFilter').value)&&($('originFilter').value==='all'||m.origin_id===$('originFilter').value));
+ box.replaceChildren(...list.map(m=>{
+   const d=el('article',undefined,'message '+m.platform), identity=el('div',undefined,'chat-identity');
+   identity.append(platformIcon(m.platform));
+   if(m.is_creator&&/^\/media\/[a-f0-9]{64}$/.test(m.avatar||'')){const avatar=el('img');avatar.src=m.avatar;avatar.alt='';avatar.className='creator-avatar';identity.append(avatar);}
+   const name=el('strong',m.user,'username');name.title=m.user;
+   if(/^#[a-fA-F0-9]{6}$/.test(m.color||''))name.style.color=m.color;
+   identity.append(name);if(m.is_creator)identity.append(el('span','CREATOR','tag'));
+   const source=el('div',m.origin+'’s chat','origin');source.title=m.platform+' · '+m.origin+'’s chat';if(m.shared)source.append(el('span','SHARED','tag'));
+   const body=el('p');
+   for(const part of m.fragments||[{text:m.text}]){
+     if(/^\/media\/[a-f0-9]{64}$/.test(part.image||'')){
+       const image=el('img');image.src=part.image;image.alt=part.text;image.title=part.text;image.className='emote';
+       image.onerror=()=>image.replaceWith(document.createTextNode(part.text));body.append(image);
+     }else body.append(document.createTextNode(part.text));
+   }
+   d.append(el('time',new Date(m.time*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),identity,source,body);return d;
+ }));
+ if(!list.length)box.append(el('p','No chat messages yet. Check account connection status.','empty'));
  if(bottom)box.scrollTop=box.scrollHeight;
 }
-['platformFilter','originFilter','activityOnly'].forEach(id=>$(id).onchange=renderChat);
+['platformFilter','originFilter'].forEach(id=>$(id).onchange=renderChat);
+function outputStatus(s,d){
+ const current=s.outputs.find(x=>x.id===d.id), detail=current?.error||s.output_errors?.[d.id];
+ if(!s.native_connected)return {text:'OFFLINE · OBS module disconnected',level:'offline'};
+ if(detail)return {text:'ERROR',level:'error',detail};
+ if(current?.reconnecting)return {text:'RECONNECTING',level:'attention'};
+ if(current?.busy)return {text:'CONNECTING / STOPPING',level:'attention'};
+ if(current?.active)return {text:'LIVE',level:'healthy'};
+ return {text:'OFFLINE',level:'offline'};
+}
 let lastChat='', lastDest='';
 function render(s) {
  state=s;
@@ -59,8 +90,26 @@ function render(s) {
  if(document.activeElement!==hubUrl && hubUrl.value!==s.hub_url)hubUrl.value=s.hub_url;
  const serialized=JSON.stringify(s.messages);
  if(serialized!==lastChat){lastChat=serialized;const selected=$('originFilter').value;const channels=new Map(s.messages.map(m=>[m.origin_id,m.origin]));$('originFilter').replaceChildren(new Option('All origin channels','all'),...Array.from(channels,([id,name])=>new Option(name+'’s chat',id)));if(channels.has(selected))$('originFilter').value=selected;renderChat();}
- const destinations=JSON.stringify([s.destinations,s.outputs,s.native_connected]);
- if(destinations!==lastDest){lastDest=destinations;$('destinations').replaceChildren(...s.destinations.map(d=>{const card=el('article',undefined,'panel');const current=s.outputs.find(x=>x.id===d.id);card.append(el('h2',d.name),el('p',d.server,'muted'),el('p',!s.native_connected?'Native module offline — live state unknown':current?.active?(current.reconnecting?'Reconnecting':'Output active · verify on platform'):current?.busy?'Starting/stopping…':'Inactive'));const controls=el('div',undefined,'controls');for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start output':'Stop output',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));controls.append(button('Remove',async()=>{if(confirm('Remove destination '+d.name+' and its saved key?'))await action('delete_destination',{id:d.id});}));card.append(controls);return card;}));if(!s.destinations.length)$('destinations').append(el('p','No secondary destinations configured.','empty'));}
+ const destinations=JSON.stringify([s.destinations,s.outputs,s.native_connected,s.output_errors]);
+ if(destinations!==lastDest){lastDest=destinations;$('destinations').replaceChildren(...s.destinations.map(d=>{
+   const card=el('article',undefined,'panel destination-card'),status=outputStatus(s,d);
+   const enabled=el('label',undefined,'destination-choice'),check=el('input');check.type='checkbox';check.checked=d.enabled!==false;
+   check.setAttribute('aria-label','Include '+d.name+' in Start All');
+   check.onchange=()=>run(()=>action('destination_enabled',{id:d.id,enabled:check.checked}),check);
+   enabled.title='Choose destinations for the next Start All. Unchecking does not stop a live stream.';
+   enabled.append(check,el('strong',d.name));
+   const health=el('span','● '+status.text,'output-status '+status.level);health.title=status.detail||status.text;
+   card.append(enabled,health);if(status.detail)card.append(el('p',status.detail,'danger'));
+   const controls=el('div',undefined,'controls');
+   for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
+   controls.append(button('Remove',async()=>{if(confirm('Remove destination '+d.name+' and its saved key?'))await action('delete_destination',{id:d.id});}));
+   card.append(controls);return card;
+ }));if(!s.destinations.length)$('destinations').append(el('p','Add a destination, then use Start All.','empty'));}
+ $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
+ $('stopAll').disabled=s.demo||!s.native_connected;
+ $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
+   const item=el('p',undefined,'audience-event');item.append(el('small',e.source),el('br'),document.createTextNode(e.text));return item;
+ }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Subs, gifts, raids and supported audience activity appear here.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));

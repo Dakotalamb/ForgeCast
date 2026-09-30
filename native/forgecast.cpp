@@ -5,6 +5,18 @@
 #include <QApplication>
 #include <QByteArray>
 #include <QColor>
+#include <QBuffer>
+#include <QCursor>
+#include <QHash>
+#include <QImage>
+#include <QMovie>
+#include <QPainter>
+#include <QPolygon>
+#include <QRegularExpression>
+#include <QScrollBar>
+#include <QSet>
+#include <QTextDocument>
+#include <QToolTip>
 #include <QComboBox>
 #include <QDateTime>
 #include <QDockWidget>
@@ -54,6 +66,8 @@ struct Destination {
     bool starting = false;
     bool stopping = false;
     int startupTicks = 0;
+    bool wasLive = false;
+    QString error;
     ~Destination()
     {
         if (output) {
@@ -65,9 +79,95 @@ struct Destination {
     }
 };
 
+// Images are supplied by Companion's restricted public-image cache. No remote
+// URL or account credential is handed to the text widget.
+class ChatFeed : public QTextBrowser {
+    QNetworkAccessManager network;
+    QHash<QUrl, QImage> images;
+    QHash<QUrl, QMovie *> movies;
+    QSet<QUrl> loading;
+    QSet<QUrl> visibleImages;
+    void publish(const QUrl &url, const QImage &image)
+    {
+        if (image.isNull()) return;
+        if (images.size() >= 200 && !images.contains(url)) images.erase(images.begin());
+        images.insert(url, image);
+        document()->addResource(QTextDocument::ImageResource, url, image);
+        document()->markContentsDirty(0, document()->characterCount());
+        viewport()->update();
+    }
+    static QImage platformIcon(const QString &platform)
+    {
+        QImage image(32,32,QImage::Format_ARGB32_Premultiplied); image.fill(Qt::transparent);
+        QPainter painter(&image); painter.setRenderHint(QPainter::Antialiasing); painter.setPen(Qt::NoPen);
+        if (platform == "youtube") {
+            painter.setBrush(QColor("#ff0033")); painter.drawRoundedRect(QRectF(1,5,30,22),6,6);
+            painter.setBrush(Qt::white); painter.drawPolygon(QPolygon{{13,10},{13,22},{23,16}});
+        } else if (platform == "kick") {
+            painter.setBrush(QColor("#53fc18"));
+            painter.drawRect(3,3,7,26); painter.drawRect(10,12,7,8);
+            painter.drawRect(17,3,7,9); painter.drawRect(17,20,7,9);
+            painter.drawRect(24,3,5,5); painter.drawRect(24,24,5,5);
+        } else {
+            painter.setBrush(QColor("#9146ff")); painter.drawPolygon(QPolygon{{3,1},{31,1},{31,22},{22,31},{15,31},{15,26},{3,26}});
+            painter.setBrush(Qt::white); painter.drawPolygon(QPolygon{{7,4},{28,4},{28,19},{21,26},{15,26},{15,22},{7,22}});
+            painter.setBrush(QColor("#9146ff")); painter.drawRect(14,8,3,9); painter.drawRect(22,8,3,9);
+        }
+        return image;
+    }
+public:
+    explicit ChatFeed(QWidget *parent) : QTextBrowser(parent), network(this)
+    {
+        setOpenLinks(false); setOpenExternalLinks(false);
+        connect(this, &QTextBrowser::highlighted, this, [](const QUrl &url) {
+            if (url.scheme() == "identity") QToolTip::showText(QCursor::pos(), QUrl::fromPercentEncoding(url.path().toUtf8()));
+            else QToolTip::hideText();
+        });
+    }
+    void setVisibleImages(const QSet<QUrl> &urls)
+    {
+        visibleImages = urls;
+        for (auto it = movies.begin(); it != movies.end();) {
+            if (!urls.contains(it.key())) { it.value()->stop(); it.value()->deleteLater(); it = movies.erase(it); }
+            else ++it;
+        }
+    }
+    QVariant loadResource(int type, const QUrl &url) override
+    {
+        if (type != QTextDocument::ImageResource) return {};
+        if (url.scheme() == "platform") return platformIcon(url.path());
+        if (images.contains(url)) return images.value(url);
+        if (url.scheme() != "http" || url.host() != "127.0.0.1" || url.port() != 17654 ||
+            !QRegularExpression("^/media/[a-f0-9]{64}$").match(url.path()).hasMatch()) return {};
+        if (!loading.contains(url)) {
+            loading.insert(url);
+            QNetworkRequest request(url); request.setTransferTimeout(5000);
+            request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
+            auto *reply = network.get(request);
+            connect(reply, &QNetworkReply::finished, this, [this, reply, url] {
+                loading.remove(url);
+                const QByteArray bytes = reply->readAll();
+                if (reply->error() == QNetworkReply::NoError && bytes.size() <= 1048576) {
+                    publish(url, QImage::fromData(bytes));
+                    if (bytes.startsWith("GIF") && visibleImages.contains(url) && movies.size() < 40) {
+                        auto *movie = new QMovie(this);
+                        auto *buffer = new QBuffer(movie); buffer->setData(bytes); buffer->open(QIODevice::ReadOnly);
+                        movie->setDevice(buffer); movie->setScaledSize(QSize(28,28));
+                        movies.insert(url, movie);
+                        connect(movie, &QMovie::frameChanged, this, [this, movie, url](int) { publish(url, movie->currentImage()); });
+                        movie->start();
+                    }
+                }
+                reply->deleteLater();
+            });
+        }
+        return {};
+    }
+};
+
 class ChatDock : public QWidget {
     QLabel *connection;
-    QTextBrowser *feed;
+    ChatFeed *feed;
     QComboBox *sendTo;
     QLineEdit *compose;
     QPushButton *sendButton;
@@ -86,7 +186,7 @@ public:
         connection->setWordWrap(true);
         connection->setMinimumWidth(0);
         connection->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
-        feed = new QTextBrowser(this);
+        feed = new ChatFeed(this);
         feed->setOpenExternalLinks(false);
         feed->setMinimumWidth(0);
         layout->addWidget(connection);
@@ -150,21 +250,46 @@ public:
         const auto bytes = QJsonDocument(messages).toJson(QJsonDocument::Compact);
         if (bytes == lastMessages) return;
         lastMessages = bytes;
+        const bool atBottom = feed->verticalScrollBar()->maximum()-feed->verticalScrollBar()->value() < 60;
+        const int scroll = feed->verticalScrollBar()->value();
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
+        QSet<QUrl> visible;
         for (const auto &entry : messages) {
             const auto row = entry.toObject();
-            const auto platform = row.value("platform").toString().toUpper().toHtmlEscaped();
-            const auto origin = row.value("origin").toString().toHtmlEscaped();
-            const auto user = row.value("user").toString().toHtmlEscaped();
-            const auto message = row.value("text").toString().toHtmlEscaped();
-            const auto shared = row.value("shared").toBool() ? " · SHARED CHAT" : "";
-            html += "<p style='margin:0 0 12px'><b style='color:#ff7549'>" + platform +
-                    " · " + origin + "'s channel" + shared + "</b><br><b>" + user +
-                    ":</b> " + message + "</p>";
+            const QString platform = row.value("platform").toString();
+            const QString name = row.value("user").toString();
+            const QString shortName = name.size() > 22 ? name.left(21)+"…" : name;
+            QString color = row.value("color").toString("#d3baff");
+            if (!QRegularExpression("^#[a-fA-F0-9]{6}$").match(color).hasMatch()) color = "#d3baff";
+            QString avatar;
+            const auto avatarPath = row.value("avatar").toString();
+            if (row.value("is_creator").toBool() && avatarPath.startsWith("/media/")) {
+                const QUrl url("http://127.0.0.1:17654"+avatarPath); visible.insert(url);
+                avatar = "<img width='22' height='22' src='"+url.toString().toHtmlEscaped()+"'> ";
+            }
+            QString body;
+            for (const auto &fragment : row.value("fragments").toArray()) {
+                const auto part = fragment.toObject();
+                const auto path = part.value("image").toString();
+                if (path.startsWith("/media/")) {
+                    const QUrl url("http://127.0.0.1:17654"+path); visible.insert(url);
+                    body += "<img width='28' height='28' src='"+url.toString().toHtmlEscaped()+
+                            "' alt='"+part.value("text").toString().toHtmlEscaped()+"'>";
+                } else body += part.value("text").toString().toHtmlEscaped();
+            }
+            if (row.value("fragments").toArray().isEmpty()) body = row.value("text").toString().toHtmlEscaped();
+            body.replace("\n", "<br>");
+            const QString identity = QString::fromUtf8(QUrl::toPercentEncoding(name+" · "+platform+" · "+row.value("origin").toString()+"'s channel"));
+            html += "<p style='margin:0 0 12px'><img width='18' height='18' src='platform:"+platform.toHtmlEscaped()+"'> "+avatar+
+                    "<a href='identity:"+identity+"' style='text-decoration:none;color:"+color+"'><b>"+shortName.toHtmlEscaped()+"</b></a>"+
+                    (row.value("is_creator").toBool() ? " <small>CREATOR</small>" : "")+
+                    "<br><small style='color:#a8afb8'>"+row.value("origin").toString().toHtmlEscaped()+"'s channel"+
+                    (row.value("shared").toBool() ? " · SHARED" : "")+"</small><br>"+body+"</p>";
         }
         if (messages.isEmpty()) html += "<p>Messages will appear here when accounts are connected and live.</p>";
+        feed->setVisibleImages(visible);
         feed->setHtml(html + "</div>");
-        feed->moveCursor(QTextCursor::End);
+        feed->verticalScrollBar()->setValue(atBottom ? feed->verticalScrollBar()->maximum() : scroll);
     }
 };
 
@@ -263,11 +388,13 @@ public:
 
 class MultistreamDock : public QWidget {
     QLabel *status;
+    QLabel *actionStatus;
     QListWidget *list;
     QPushButton *startButton;
     QPushButton *stopButton;
     QPushButton *removeButton;
     QByteArray lastDestinations;
+    bool updating = false;
     std::function<void(const QJsonObject &)> send;
     QString selectedId() const
     {
@@ -297,6 +424,11 @@ public:
         layout->addWidget(heading);
         layout->addWidget(status);
         layout->addWidget(list);
+        actionStatus = new QLabel(this);
+        actionStatus->setWordWrap(true);
+        actionStatus->setMinimumWidth(0);
+        actionStatus->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
+        layout->addWidget(actionStatus);
         auto *add = new QPushButton("+ Add stream", this);
         removeButton = new QPushButton("Remove", this);
         removeButton->setObjectName("secondary");
@@ -313,7 +445,17 @@ public:
         controls->addWidget(startButton);
         controls->addWidget(stopButton);
         layout->addLayout(controls);
-        layout->addWidget(stopAll);
+        auto *startAll = new QPushButton("START ALL", this);
+        auto *bulk = new QHBoxLayout(); bulk->addWidget(startAll); bulk->addWidget(stopAll);
+        stopAll->setText("STOP ALL");
+        startAll->setToolTip("Starts the main OBS stream, then every checked destination.");
+        stopAll->setToolTip("Stops the main OBS stream and all secondary destinations.");
+        layout->insertLayout(2, bulk);
+        connect(startAll, &QPushButton::clicked, this, [this] { send(QJsonObject{{"action", "start_all"}}); });
+        connect(list, &QListWidget::itemChanged, this, [this](QListWidgetItem *item) {
+            if (!updating) send(QJsonObject{{"action", "destination_enabled"}, {"id", item->data(Qt::UserRole).toString()},
+                                         {"enabled", item->checkState() == Qt::Checked}});
+        });
         layout->addStretch();
         startButton->setEnabled(false);
         stopButton->setEnabled(false);
@@ -357,41 +499,52 @@ public:
         });
     }
 
-    void message(const QString &value) { status->setText(value); }
+    void message(const QString &value) { actionStatus->setText(value); }
 
     void update(const QJsonObject &payload)
     {
         const auto destinations = payload.value("destinations").toArray();
         const auto outputs = payload.value("outputs").toArray();
         QJsonArray snapshot = destinations;
+        snapshot.append(payload.value("output_errors"));
         for (const auto &output : outputs) snapshot.append(output);
         const auto bytes = QJsonDocument(snapshot).toJson(QJsonDocument::Compact);
         if (bytes != lastDestinations) {
             lastDestinations = bytes;
             const QString selected = selectedId();
+            updating = true;
             list->clear();
             for (const auto &entry : destinations) {
                 const auto dest = entry.toObject();
-                QString state = "ready";
+                QString state = "OFFLINE";
+                QString error = payload.value("output_errors").toObject().value(dest.value("id").toString()).toString();
                 for (const auto &output : outputs) {
                     const auto row = output.toObject();
                     if (row.value("id") == dest.value("id")) {
                         state = row.value("active").toBool() ? "LIVE" :
-                                row.value("busy").toBool() ? "connecting/stopping" : "stopped";
+                                row.value("busy").toBool() ? "CONNECTING / STOPPING" : "OFFLINE";
+                        if (!row.value("error").toString().isEmpty()) error = row.value("error").toString();
                         if (row.value("reconnecting").toBool()) state = "RECONNECTING";
                     }
                 }
-                auto *item = new QListWidgetItem(dest.value("name").toString() + "   " + state, list);
+                if (!error.isEmpty()) state = "ERROR";
+                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + "   " + state, list);
+                item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
+                item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
+                item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
                 item->setData(Qt::UserRole, dest.value("id").toString());
                 if (state == "LIVE") item->setForeground(QColor("#80d6a0"));
-                else if (state == "RECONNECTING") item->setForeground(QColor("#ff9576"));
+                else if (state == "ERROR") item->setForeground(QColor("#ff6b6b"));
+                else if (state != "OFFLINE") item->setForeground(QColor("#ffd166"));
+                else item->setForeground(QColor("#a8afb8"));
                 if (item->data(Qt::UserRole).toString() == selected) list->setCurrentItem(item);
             }
+            updating = false;
         }
         if (destinations.isEmpty())
             status->setText("No extra streams yet. Add a destination to get started.");
         else if (!payload.value("stream_active").toBool())
-            status->setText("Main stream offline · Start OBS streaming first (H.264/AAC).");
+            status->setText("Main stream offline · START ALL starts OBS and checked destinations (H.264/AAC).");
         else
             status->setText("Main stream live · Select a destination to control it.");
     }
@@ -410,6 +563,8 @@ class ForgeDock : public QWidget {
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
     QJsonArray results;
+    QJsonArray bulkStarts;
+    int bulkTicks = 0;
     bool pending = false;
     QString bridgePath;
 public:
@@ -450,11 +605,15 @@ public:
 
     void stopAll()
     {
+        bulkStarts = QJsonArray();
+        bulkTicks = 0;
         for (auto &entry : destinations) {
             auto &d = *entry.second;
             obs_output_stop(d.output);
             d.starting = false;
             d.stopping = true;
+            d.wasLive = false;
+            d.error.clear();
         }
     }
 
@@ -570,8 +729,16 @@ public:
         QString result = "unsupported_command";
         if (action == "start") {
             result = start(cmd.value("destination").toObject());
+        } else if (action == "start_all") {
+            if (!bulkStarts.isEmpty()) result = "already_active_or_busy";
+            else {
+                bulkStarts = cmd.value("destinations").toArray(); bulkTicks = 0;
+                if (!obs_frontend_streaming_active()) obs_frontend_streaming_start();
+                result = "start_all_requested";
+            }
         } else if (action == "stop_all") {
             stopAll();
+            obs_frontend_streaming_stop();
             result = "stop_all_requested";
         } else if (action == "stop") {
             auto it = destinations.find(cmd.value("destination").toObject().value("id").toString());
@@ -579,21 +746,35 @@ public:
                 obs_output_stop(it->second->output);
                 it->second->starting = false;
                 it->second->stopping = true;
+                it->second->wasLive = false;
+                it->second->error.clear();
                 result = "stop_requested";
             } else {
                 result = "output_not_created";
             }
         }
-        results.append(QJsonObject{{"id", cmd.value("id")}, {"status", result}});
+        results.append(QJsonObject{{"id", cmd.value("id")}, {"destination_id", cmd.value("destination").toObject().value("id")}, {"status", result}});
         while (results.size() > 30)
             results.removeAt(0);
     }
 
     void tick()
     {
-        // Main-stream stop always stops these shared-encoder outputs too.
-        if (!obs_frontend_streaming_active())
-            stopAll();
+        if (!bulkStarts.isEmpty()) {
+            if (obs_frontend_streaming_active()) {
+                const auto selected = bulkStarts; bulkStarts = QJsonArray(); bulkTicks = 0;
+                for (const auto &entry : selected) {
+                    const auto dest = entry.toObject();
+                    results.append(QJsonObject{{"destination_id", dest.value("id")}, {"status", start(dest)}});
+                }
+            } else if (++bulkTicks >= 60) {
+                for (const auto &entry : bulkStarts)
+                    results.append(QJsonObject{{"destination_id", entry.toObject().value("id")}, {"status", "main_start_timeout"}});
+                bulkStarts = QJsonArray(); bulkTicks = 0;
+            }
+        }
+        // A pending explicit Start All waits for OBS. Other inactive-main states stop secondary streams.
+        if (!obs_frontend_streaming_active() && bulkStarts.isEmpty()) stopAll();
         if (pending)
             return;
         QFile tokenFile(bridgePath);
@@ -613,17 +794,22 @@ public:
         for (auto &entry : destinations) {
             auto &d = *entry.second;
             bool active = obs_output_active(d.output);
-            if (active) d.starting = false;
+            if (active) { d.starting = false; d.wasLive = true; d.error.clear(); }
+            if (!active && d.wasLive && !d.stopping && !d.starting) {
+                d.error = "Destination disconnected and stopped. Check its settings and OBS log.";
+                d.wasLive = false;
+            }
             if (!active && d.stopping) d.stopping = false;
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
                 d.starting = false;
                 d.stopping = true;
-                results.append(QJsonObject{{"status", "start_timeout_stopped"}});
+                d.error = "Destination did not start within 30 seconds.";
+                results.append(QJsonObject{{"destination_id", entry.first}, {"status", "start_timeout_stopped"}});
             }
             outputs.append(QJsonObject{{"id", entry.first}, {"name", d.name}, {"active", active},
-                {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
+                {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
                 {"dropped", obs_output_get_frames_dropped(d.output)},
                 {"frames", obs_output_get_total_frames(d.output)},
                 {"bytes", static_cast<double>(obs_output_get_total_bytes(d.output))}});

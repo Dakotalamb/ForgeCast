@@ -14,7 +14,7 @@ import uuid
 import webbrowser
 from urllib.parse import urlparse
 from aiohttp import ClientSession, ClientTimeout, web
-from .core import ChatStore, Doctor, validate_destination, kick_message
+from .core import ChatStore, Doctor, validate_destination, kick_message, username_color
 from .storage import Vault, atomic_json, data_directory
 from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
@@ -39,6 +39,7 @@ class State:
         self.commands = deque(maxlen=30)
         self.native_seen = 0
         self.native_outputs = []
+        self.output_errors = {}
         self.stats = {}
         self.current_issues = []
         self.scene = 'OBS disconnected'
@@ -88,6 +89,7 @@ class State:
         rows = []
         for original in list(self.chat.messages)[-500:]:
             row = dict(original)
+            row.setdefault('color', username_color(row.get('platform', ''), str(row.get('user_id') or row.get('user', ''))))
             if row.get('avatar'): row['avatar'] = self.media_url(row['avatar'])
             row['fragments'] = [dict(text=f.get('text', ''), image=self.media_url(f['image']) if f.get('image') else '')
                                 for f in row.get('fragments', [{'text':row.get('text', '')}])]
@@ -121,6 +123,7 @@ class State:
         return dict(demo=self.demo, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
+                    output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
                     status_details=self.status_details, combined_events=combined_events(self),
@@ -142,6 +145,46 @@ def combined_events(s):
             for m in s.chat.messages if m.get('kind') in audience_kinds and not m.get('deleted')]
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
+
+
+OUTPUT_ERRORS = {
+    'start_main_obs_stream_first':'Start your main OBS stream first.',
+    'main_output_unavailable':'OBS main output is unavailable.',
+    'requires_main_h264_aac_disable_enhanced_broadcasting':'Use H.264 video and AAC audio on the main stream; disable Enhanced Broadcasting.',
+    'service_create_failed':'OBS could not create this destination service.',
+    'output_create_failed':'OBS could not create this stream output.',
+    'start_failed_check_obs':'This destination could not start. Check its server/key and OBS log.',
+    'start_timeout_stopped':'This destination did not start within 30 seconds and was stopped.',
+    'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
+    'invalid_destination':'This destination has invalid settings.',
+    'destination_limit':'The maximum number of destinations has been reached.',
+}
+
+
+def set_destination_enabled(s, data):
+    dest = next((d for d in s.config.get('destinations', []) if d['id'] == data.get('id')), None)
+    if not dest: raise ValueError('Destination not found.')
+    if not isinstance(data.get('enabled'), bool): raise ValueError('Enabled must be true or false.')
+    dest['enabled'] = data['enabled']
+    s.save()
+
+
+def queue_outputs(s, command, dest_id=None):
+    if time.time()-s.native_seen > 5: raise ValueError('OBS native module is disconnected.')
+    if command not in ('start', 'stop', 'start_all', 'stop_all'): raise ValueError('Unsupported native command.')
+    cmd = dict(id=uuid.uuid4().hex, action=command, created=time.time())
+    if command == 'start_all':
+        selected = [d for d in s.config.get('destinations', []) if d.get('enabled', True)]
+        if not selected: raise ValueError('Enable at least one destination before Start All.')
+        cmd['destinations'] = [dict(d, key=s.vault.get('stream:'+d['id'])) for d in selected]
+        if any(not d['key'] for d in cmd['destinations']): raise ValueError('A selected destination has no saved stream key.')
+    elif command in ('start', 'stop'):
+        dest = next((d for d in s.config.get('destinations', []) if d['id'] == dest_id), None)
+        if not dest: raise ValueError('Destination not found.')
+        cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
+    if len(s.commands) >= 30: raise ValueError('Command queue is full.')
+    s.commands.append(cmd)
+    s.event('Stream command queued: '+command+'. Waiting for OBS acknowledgement.')
 
 
 async def send_chat(s, platform, text):
@@ -203,6 +246,12 @@ async def page(request):
                                   '/favicon.png':'favicon.png'}[request.path]))
 
 
+async def platform_icon(request):
+    platform = request.match_info['platform']
+    if platform not in ('twitch', 'youtube', 'kick'): raise web.HTTPNotFound()
+    return web.FileResponse(WEB/'icons'/(platform+'.svg'))
+
+
 async def get_state(request):
     return web.json_response(request.app['state'].public())
 
@@ -254,6 +303,8 @@ async def action(request):
             if time.time()-s.native_seen < 5 and any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
             dest = validate_destination(data)
+            previous = next((d for d in s.config.get('destinations', []) if d['id'] == dest['id']), {})
+            dest['enabled'] = previous.get('enabled', True)
             key = data.get('key') or s.vault.get('stream:'+dest['id'])
             if not key or len(key) > 4096:
                 raise ValueError('A valid stream key is required.')
@@ -270,22 +321,10 @@ async def action(request):
             s.vault.delete('stream:'+data['id'])
             s.save()
         elif op == 'native_command':
-            if time.time()-s.native_seen > 5:
-                raise ValueError('Native FDGCast module is not connected. Build/install it first.')
-            if not data.get('confirmed'):
-                raise ValueError('Explicit confirmation required.')
-            if data.get('command') not in ('start', 'stop', 'stop_all'):
-                raise ValueError('Unsupported native command.')
-            cmd = dict(id=uuid.uuid4().hex, action=data['command'], created=time.time())
-            if data['command'] != 'stop_all':
-                dest = next((x for x in s.config.get('destinations', []) if x['id']==data.get('id')), None)
-                if not dest:
-                    raise ValueError('Unknown destination.')
-                cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
-            if len(s.commands) >= 30:
-                raise ValueError('Command queue is full.')
-            s.commands.append(cmd)
-            s.event('Secondary output command queued; wait for native acknowledgement.')
+            if not data.get('confirmed'): raise ValueError('Explicit confirmation required.')
+            queue_outputs(s, data.get('command'), data.get('id'))
+        elif op == 'destination_enabled':
+            set_destination_enabled(s, data)
         elif op == 'chat_connect':
             platform = data['platform']
             s.paused_platforms.discard(platform)
@@ -382,7 +421,13 @@ async def native(request):
     s.native_outputs = data.get('outputs', [])[:8]
     for result in data.get('results', [])[:30]:
         # Only codes are accepted; raw ingest error strings could reveal keys.
-        s.event('Native output: '+str(result.get('status', 'unknown'))[:80])
+        code = str(result.get('status', 'unknown'))[:80]
+        destination = result.get('destination_id')
+        if destination in {d['id'] for d in s.config.get('destinations', [])}:
+            if code in OUTPUT_ERRORS: s.output_errors[destination] = OUTPUT_ERRORS[code]
+            elif code in ('start_requested_not_yet_confirmed_live', 'already_active_or_busy', 'stop_requested'):
+                s.output_errors.pop(destination, None)
+        s.event('Stream output: '+OUTPUT_ERRORS.get(code, code.replace('_', ' ')))
     commands = []
     while s.commands:
         command = s.commands.popleft()
@@ -404,6 +449,7 @@ async def native(request):
         'status_details': s.status_details,
         'destinations': s.config.get('destinations', []),
         'outputs': s.native_outputs,
+        'output_errors': s.output_errors,
         'stream_active': bool(s.stats.get('stream_active')),
         'obs_connected': bool(s.obs and s.obs.connected),
         'scene': s.scene,
@@ -460,19 +506,10 @@ async def native_action(request):
             s.config['destinations'] = [d for d in items if d['id'] != dest_id]
             s.vault.delete('stream:'+dest_id)
             s.save()
-        elif op in ('start', 'stop', 'stop_all'):
-            if time.time()-s.native_seen > 5:
-                raise ValueError('OBS native module is disconnected.')
-            cmd = dict(id=uuid.uuid4().hex, action=op, created=time.time())
-            if op != 'stop_all':
-                dest = next((x for x in s.config.get('destinations', []) if x['id'] == data.get('id')), None)
-                if not dest:
-                    raise ValueError('Destination not found.')
-                cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
-            if len(s.commands) >= 30:
-                raise ValueError('Command queue is full.')
-            s.commands.append(cmd)
-            s.event('OBS dock requested secondary output '+op+'.')
+        elif op == 'destination_enabled':
+            set_destination_enabled(s, data)
+        elif op in ('start', 'stop', 'start_all', 'stop_all'):
+            queue_outputs(s, op, data.get('id'))
         else:
             raise ValueError('Unsupported OBS dock action.')
     return web.json_response({'ok':True})
@@ -735,6 +772,7 @@ def create_app(state):
     app.cleanup_ctx.append(lifecycle)
     for path in ('/', '/app.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
+    app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
     app.router.add_get('/api/state', get_state)
     app.router.add_post('/api/action', action)

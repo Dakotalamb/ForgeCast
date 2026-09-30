@@ -146,6 +146,43 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/native/poll',headers={**self.headers,'Authorization':'Bearer '+self.state.native_key},json={'outputs':[]})
         self.assertEqual([c['id'] for c in (await r.json())['commands']],['new'])
 
+    async def test_bulk_controls_and_checkbox_are_available_to_native_dock(self):
+        self.state.demo=False
+        self.state.native_seen=time.time()
+        self.state.config['destinations']=[{'id':'yt','name':'YouTube','server':'rtmps://example.com/live'}]
+        self.state.vault.set('stream:yt','SECRET-KEY')
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/action',headers=headers,json={'action':'start_all'})
+        self.assertEqual(r.status,200)
+        self.assertEqual(self.state.commands[-1]['action'],'start_all')
+        self.assertNotIn('SECRET-KEY',await r.text())
+        r=await self.client.post('/native/action',headers=headers,json={'action':'destination_enabled','id':'yt','enabled':False})
+        self.assertEqual(r.status,200)
+        self.assertFalse(self.state.config['destinations'][0]['enabled'])
+        r=await self.client.post('/native/action',headers=headers,json={'action':'start_all'})
+        self.assertEqual(r.status,400)
+        r=await self.client.post('/native/action',headers=headers,json={'action':'stop_all'})
+        self.assertEqual(r.status,200)
+
+    async def test_output_failure_has_readable_error_in_dock_payload(self):
+        self.state.config['destinations']=[{'id':'yt','name':'YouTube','server':'rtmps://example.com/live'}]
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/poll',headers=headers,json={'outputs':[],
+            'results':[{'destination_id':'yt','status':'requires_main_h264_aac_disable_enhanced_broadcasting'}]})
+        result=await r.json()
+        self.assertIn('H.264',result['output_errors']['yt'])
+        r=await self.client.post('/native/poll',headers=headers,json={'outputs':[],
+            'results':[{'destination_id':'yt','status':'start_requested_not_yet_confirmed_live'}]})
+        self.assertNotIn('yt',(await r.json())['output_errors'])
+
+    async def test_platform_icon_routes_are_local_and_allowlisted(self):
+        for name in ['twitch','youtube','kick']:
+            r=await self.client.get('/icons/'+name+'.svg',headers={'Host':'127.0.0.1:17654'})
+            self.assertEqual(r.status,200)
+            self.assertIn('<svg',await r.text())
+        r=await self.client.get('/icons/unknown.svg',headers={'Host':'127.0.0.1:17654'})
+        self.assertEqual(r.status,404)
+
     async def test_unknown_action(self):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'execute_shell'})
