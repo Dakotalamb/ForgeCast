@@ -18,9 +18,10 @@ async function run(fn, target) { if(target) target.disabled=true; try { await fn
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
-function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
+function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
-let pairingLoaded=false;
+let pairingLoaded=false,obsPasswordLoaded=false;
+$('showObsPassword').onclick=()=>{const input=$('obsForm').elements.password;input.type=input.type==='password'?'text':'password';$('showObsPassword').textContent=input.type==='password'?'Show password':'Hide password';};
 $('showPairCode').onclick=()=>{const input=$('hubForm').elements.token;input.type=input.type==='password'?'text':'password';$('showPairCode').textContent=input.type==='password'?'Show code':'Hide code';};
 $('send').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;run(async()=>{await action('chat_send',Object.fromEntries(new FormData(f)));f.elements.text.value='';},f.querySelector('button'));};
 document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>action('chat_disconnect',{platform:b.dataset.disconnect,forget:true}),b));
@@ -140,8 +141,11 @@ function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.1';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.2';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
+ $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
+ $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
+ $('obsConnectButton').textContent=s.obs_connected?'Reconnect OBS':'Connect OBS';
  $('scene').textContent=s.scene;
  const stats=s.stats, fresh=s.obs_connected||s.demo;
  $('fps').textContent=fresh&&stats.activeFps!==undefined?stats.activeFps.toFixed(1):'—';
@@ -184,6 +188,7 @@ function render(s) {
  $('hubEvents').replaceChildren(...s.hub_events.map(e=>{const d=el('article',undefined,'panel');d.append(el('h2',String(e.title||'Untitled')),el('p',String(e.starts_at||'')));return d;}));
 }
 async function refresh(){render(await api('/api/state'));
+ if(!obsPasswordLoaded){const saved=await api('/api/obs-connection');const form=$('obsForm');if(!form.elements.password.value&&document.activeElement!==form.elements.password)form.elements.password.value=saved.password;if(!form.contains(document.activeElement))form.elements.port.value=saved.port;obsPasswordLoaded=true;}
  if(!pairingLoaded){const saved=await api('/api/pairing');const input=$('hubForm').elements.token;if(!input.value&&document.activeElement!==input)input.value=saved.token;pairingLoaded=true;}
 }
 async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';error(e.message);}setTimeout(loop,1500);}

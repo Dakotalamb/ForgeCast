@@ -292,8 +292,11 @@ public:
     explicit ChatDock(std::function<void(const QJsonObject &)> submit) : QWidget(), send(std::move(submit))
     {
         setStyleSheet("QWidget { background: #151719; color: #f4f4f4; }"
-                      "QTextBrowser { background: #1d2022; border: 0; padding: 8px; }"
-                      "QLabel { color: #ff7549; padding: 8px; }");
+                      "QTextBrowser { background:#25303c; border:1px solid #556779; border-radius:4px; padding:6px; }"
+                      "QLabel { color:#ff7549; padding:3px; }"
+                      "QLineEdit { background:#090f17; color:#ffffff; border:1px solid #667b91; border-radius:4px; padding:5px; }"
+                      "QLineEdit:focus { border:2px solid #ff7549; }"
+                      "QComboBox { background:#1b2530; border:1px solid #556779; border-radius:4px; padding:4px; }");
         auto *layout = new QVBoxLayout(this);
         connection = new QLabel("Companion offline", this);
         connection->setWordWrap(false);
@@ -430,7 +433,7 @@ public:
     EventsDock() : QWidget()
     {
         setStyleSheet("QWidget { background:#151719;color:#f4f4f4; }"
-                      "QTextBrowser { background:#1d2022;border:0;padding:8px; }"
+                      "QTextBrowser { background:#25303c;border:1px solid #556779;border-radius:4px;padding:6px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
         feed = new QTextBrowser(this);feed->setOpenExternalLinks(false);

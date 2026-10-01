@@ -83,3 +83,10 @@ Scope stops at roadmap Phase 4. Vertical streaming and native overlays are defer
 - Scrollable content removes the old stacked-control and 95px-list height floor. Dock content can shrink to 100×60px with scrolling when necessary; OBS title bars and neighboring docks still affect the overall layout limit.
 - Fixed stale Events status after reconnect, and marks Multistream rows UNKNOWN while Companion is offline. Preferences persist independently of OBS's dock positions.
 - Python tests and JS checks retain coverage; Windows compilation/package tests validate the release. Live docking/resize acceptance still needs OBS.
+
+## 0.5.2 Preview: OBS connection clarity and chat contrast
+
+- OBS WebSocket password remains masked after connecting and is restored after app restart, with Show/Hide and an explicit green Connected indicator. Reconnect keeps a saved password when the field is blank. Neither the form nor its saved password is automatically cleared.
+- Password retrieval is confined to a browser-authenticated, no-store local setup endpoint; state, reports and native credentials do not expose it.
+- Chat/Events feed surfaces use a lighter blue-gray fill and visible border. Chat composer uses a darker fill, stronger border and orange focus outline. Companion feed/composer contrast is aligned with native docks.
+- 112 Python tests pass; Windows build includes browser Show/Hide/status checks. Live OBS appearance and reconnection remain acceptance checks.

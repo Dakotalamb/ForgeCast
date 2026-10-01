@@ -321,3 +321,27 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(asyncio.CancelledError): await poll(self.state)
         self.assertEqual(self.state.current_issues[0]['title'],'Telemetry unavailable')
         self.assertEqual(len(self.state.commands),0)
+
+    async def test_saved_obs_password_only_in_browser_setup_endpoint(self):
+        self.state.vault.set('obs_password','SAVED-OBS-SECRET')
+        self.state.config['obs_port']=4456
+        response=await self.client.get('/api/obs-connection',headers=self.headers)
+        self.assertEqual(response.status,200)
+        self.assertEqual(await response.json(),{'password':'SAVED-OBS-SECRET','port':4456})
+        self.assertEqual(response.headers['Cache-Control'],'no-store')
+        for path in ('/api/state','/api/report','/api/report-text'):
+            response=await self.client.get(path,headers=self.headers)
+            self.assertNotIn('SAVED-OBS-SECRET',await response.text())
+        for headers in ({'Host':'127.0.0.1:17654'},{**self.headers,'Authorization':'Bearer '+self.state.native_key}):
+            response=await self.client.get('/api/obs-connection',headers=headers)
+            self.assertEqual(response.status,401)
+
+    async def test_reconnect_reuses_saved_obs_password(self):
+        self.state.demo=False
+        self.state.vault.set('obs_password','KEEP-OBS-SECRET')
+        self.state.obs.connect=AsyncMock()
+        response=await self.client.post('/api/action',headers=self.headers,json={'op':'obs_connect','port':4455,'password':''})
+        self.assertEqual(response.status,200)
+        self.state.obs.connect.assert_awaited_once_with(4455,'KEEP-OBS-SECRET')
+        self.assertEqual(self.state.vault.get('obs_password'),'KEEP-OBS-SECRET')
+        self.state.demo=True

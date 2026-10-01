@@ -40,6 +40,11 @@ async function main(){
   await page.locator('#showPairCode').click();
   assert.equal(await page.locator('#hubForm input[name=token]').getAttribute('type'),'text');
   await page.locator('#showPairCode').click();
+  assert.match(await page.locator('#obsPairStatus').textContent(),/Disconnected/);
+  await page.locator('#showObsPassword').click();
+  assert.equal(await page.locator('#obsForm input[name=password]').getAttribute('type'),'text');
+  await page.locator('#showObsPassword').click();
+  assert.equal(await page.locator('#obsForm input[name=password]').getAttribute('type'),'password');
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
   await page.locator('[data-tab="live"]').click();
   page.on('dialog',dialog=>dialog.accept());

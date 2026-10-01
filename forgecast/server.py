@@ -123,7 +123,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='FDGCast', version='0.5.1-preview', demo=self.demo,
+        return dict(schema_version=1, app='FDGCast', version='0.5.2-preview', demo=self.demo,
                     generated_at=time.time(), stream_history=self.history.report(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -414,6 +414,13 @@ async def pairing(request):
     s = request.app['state']
     return web.json_response({'token': s.vault.get('hub_token') or ''},
                              headers={'Cache-Control': 'no-store'})
+
+
+async def obs_connection(request):
+    # Browser-authenticated local setup only; never included in state, IPC or reports.
+    s = request.app['state']
+    return web.json_response({'password':s.vault.get('obs_password') or '',
+                              'port':s.config.get('obs_port',4455)}, headers={'Cache-Control':'no-store'})
 
 
 async def action(request):
@@ -972,6 +979,7 @@ def create_app(state):
     app.router.add_get('/media/{key}', media)
     app.router.add_get('/api/state', get_state)
     app.router.add_get('/api/pairing', pairing)
+    app.router.add_get('/api/obs-connection', obs_connection)
     app.router.add_post('/api/action', action)
     app.router.add_get('/api/report', report)
     app.router.add_get('/api/report-text', report_text)

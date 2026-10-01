@@ -3,7 +3,7 @@
 [Setup]
 AppId={{C47C9B69-A4E0-4F8B-8D90-6D4CCF944210}
 AppName=FDGCast
-AppVersion=0.5.1 Preview
+AppVersion=0.5.2 Preview
 AppPublisher=Forged Destiny Gaming
 AppPublisherURL=https://forgeddestinygaming.com/
 SetupIconFile={#SourcePath}FDGCast.ico
@@ -11,7 +11,7 @@ UninstallDisplayIcon={app}\FDGCast.exe
 DefaultDirName={autopf}\Forged Destiny Gaming\FDGCast
 DefaultGroupName=FDGCast
 OutputDir={#SourcePath}..\release
-OutputBaseFilename=FDGCast-0.5.1-preview-win-x64-setup
+OutputBaseFilename=FDGCast-0.5.2-preview-win-x64-setup
 Compression=lzma2
 SolidCompression=yes
 PrivilegesRequired=admin
