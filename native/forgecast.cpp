@@ -19,6 +19,7 @@
 #include <QTextDocument>
 #include <QToolTip>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QDateTime>
 #include <QDockWidget>
 #include <QDialog>
