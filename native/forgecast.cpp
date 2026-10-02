@@ -448,7 +448,8 @@ public:
     {
         lastPayload=payload;
         const auto events = payload.value("events").toArray();
-        const auto bytes = QJsonDocument(events).toJson(QJsonDocument::Compact);
+        QJsonArray signature=events;signature.append(payload.value("statuses"));
+        const auto bytes = QJsonDocument(signature).toJson(QJsonDocument::Compact);
         if (bytes == lastEvents) return;
         lastEvents = bytes;
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
@@ -462,7 +463,7 @@ public:
                     "</b> · <span style='color:#a9adb0'>" + timestamp +
                     "</span><br>" + description + "</p>";
         }
-        if (events.isEmpty()) html += "<p style='color:#a8afb8'>No events yet.</p>";
+        if (events.isEmpty()) html += "<p style='color:#a8afb8'>"+payload.value("statuses").toObject().value("twitch_events").toString("No events yet. Check account connections.").toHtmlEscaped()+"</p>";
         feed->setHtml(html + "</div>");
     }
 };

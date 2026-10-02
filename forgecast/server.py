@@ -18,7 +18,7 @@ from .core import ChatStore, Doctor, validate_destination, kick_message, usernam
 from .storage import Vault, atomic_json, data_directory
 from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
-from .audio import AudioGuard, validate_settings, notify_windows
+from .audio import AudioGuard, validate_settings, notify_windows, play_warning_sound
 from .history import StreamHistory
 
 PORT = 17654
@@ -332,10 +332,12 @@ async def audio_notifications(s):
             or s.audio.is_quiet_scene(s.audio_snapshot.get('scene', '')) or time.time()-s.audio_seen>5):
             continue
         try:
-            if await notify_windows(notice):
-                s.audio.record('notification_submitted', code=notice['code'])
-            else:
-                s.audio.record('notification_unavailable', code=notice['code'])
+            if notice.get('sound'):
+                played = await play_warning_sound()
+                s.audio.record('sound_playback_requested' if played else 'sound_unavailable', code=notice['code'])
+            if notice.get('toast', True) and s.audio.settings['notifications']:
+                submitted = await notify_windows({**notice, 'sound':False})
+                s.audio.record('notification_submitted' if submitted else 'notification_unavailable', code=notice['code'])
         except Exception as exc:
             s.audio.record('notification_failed', error_type=type(exc).__name__)
 
@@ -430,7 +432,17 @@ async def action(request):
     if s.demo:
         raise ValueError('Demo mode never connects accounts or changes OBS. Restart without --demo.')
     async with s.lock:
-        if op == 'doctor_settings':
+        if op == 'audio_alert_test':
+            channel = data.get('channel')
+            if channel not in ('notification', 'sound'): raise ValueError('Choose notification or sound.')
+            try:
+                submitted = await play_warning_sound() if channel == 'sound' else await notify_windows({
+                    'title':'FDGCast Audio Guard test', 'body':'Test notification. Your stream and audio settings were not changed.', 'sound':False})
+            except Exception:
+                submitted = False
+            s.audio.record('test_'+channel+'_submitted' if submitted else 'test_'+channel+'_unavailable')
+            return web.json_response({'submitted':submitted, 'channel':channel})
+        elif op == 'doctor_settings':
             if not isinstance(data.get('notifications'), bool): raise ValueError('Notifications must be true or false.')
             s.config['doctor_notifications'] = data['notifications']; s.save()
         elif op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):

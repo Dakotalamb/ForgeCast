@@ -26,6 +26,18 @@ class AudioGuardTests(unittest.TestCase):
         for n in range(31,301):notices.extend(self.sample(n,muted=True))
         self.assertEqual(len(notices),2)
         self.assertFalse(any(n['sound'] for n in notices))
+    def test_optional_sound_does_not_depend_on_toast_setting(self):
+        self.guard.settings.update(sound=True,notifications=False)
+        notices=self.advance(121,muted=True)
+        self.assertEqual(len(notices),1)
+        self.assertTrue(notices[0]['sound'])
+        self.assertFalse(notices[0]['toast'])
+        self.assertEqual(self.sample(122,muted=True),[])
+
+    def test_sound_disabled_does_not_play_or_queue_when_notifications_off(self):
+        self.guard.settings.update(sound=False,notifications=False)
+        self.assertEqual(self.advance(301,muted=True),[])
+
     def test_exact_non_default_stream_track_mismatch_and_signal_evidence(self):
         notices=self.advance(10,mixers=1)
         issue=self.guard.current['issues'][0]

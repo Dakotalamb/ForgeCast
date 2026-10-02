@@ -325,6 +325,16 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(r.status,200,await r.text())
         self.assertEqual(self.state.vault.get('stream:yt'),'SECRET')
 
+    async def test_audio_alert_tests_work_offline_and_report_submission_only(self):
+        self.state.demo=False
+        with patch('forgecast.server.notify_windows',new=AsyncMock(return_value=True)), patch('forgecast.server.play_warning_sound',new=AsyncMock(return_value=False)):
+            r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_alert_test','channel':'notification'})
+            self.assertTrue((await r.json())['submitted'])
+            r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_alert_test','channel':'sound'})
+            self.assertFalse((await r.json())['submitted'])
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_alert_test','channel':'invalid'})
+        self.assertEqual(r.status,400)
+
     async def test_hub_requires_https(self):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'hub_save','url':'http://example.com','token':'fake'})

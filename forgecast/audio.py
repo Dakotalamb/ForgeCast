@@ -172,8 +172,8 @@ class AudioGuard:
             if due:
                 for _, stage, _ in due: condition['stages'].add(stage)
                 _, stage, sound = due[-1]
-                if self.settings['notifications']:
-                    notices.append(dict(title='FDGCast Audio Guard', body=issue['title'], sound=sound,
+                if self.settings['notifications'] or sound:
+                    notices.append(dict(title='FDGCast Audio Guard', body=issue['title'], sound=sound, toast=self.settings['notifications'],
                                         key=issue['key'], code=issue['code'], source_uuid=issue['source_uuid']))
                     self.record(stage+'_requested',issue)
         self.current = dict(state='warning' if visible else 'watching',
@@ -205,7 +205,9 @@ def toast_script(title, body, sound=False):
 $xml=New-Object Windows.Data.Xml.Dom.XmlDocument
 $xml.LoadXml([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String('{encoded}')))
 $toast=[Windows.UI.Notifications.ToastNotification]::new($xml)
-[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ForgedDestinyGaming.FDGCast').Show($toast)
+$notifier=[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier('ForgedDestinyGaming.FDGCast')
+if ($notifier.Setting.ToString() -ne 'Enabled') {{ throw 'Notifications disabled by Windows settings' }}
+$notifier.Show($toast)
 '''
 
 
@@ -220,3 +222,13 @@ async def notify_windows(notice):
         if isinstance(exc, asyncio.CancelledError): raise
         return False
     return process.returncode == 0
+
+
+async def play_warning_sound():
+    if os.name != 'nt': return False
+    import winsound
+    try:
+        await asyncio.to_thread(winsound.MessageBeep, winsound.MB_ICONEXCLAMATION)
+        return True
+    except RuntimeError:
+        return False

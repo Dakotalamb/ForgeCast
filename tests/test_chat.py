@@ -44,3 +44,32 @@ class ChatApiTests(unittest.IsolatedAsyncioTestCase):
         adapter=YouTube(session,{'live_chat_id':'configured-chat'},'TOKEN',ChatStore(),lambda *x:None)
         await adapter.send('hello')
         self.assertEqual(session.calls[0][1]['json']['snippet']['liveChatId'],'configured-chat')
+
+    async def test_redemptions_require_broadcaster_permission(self):
+        status=[]
+        session=Session(Response(data={}))
+        adapter=Twitch(session,{'client_id':'a','user_id':'u','channel_id':'u'},'TOKEN',ChatStore(),lambda *x:status.append(x))
+        await adapter.subscribe_redemptions('session')
+        self.assertEqual(session.calls,[])
+        self.assertIn('channel:read:redemptions',status[-1][1])
+        adapter.scopes={'channel:read:redemptions'}
+        await adapter.subscribe_redemptions('session')
+        body=session.calls[-1][1]['json']
+        self.assertEqual(body['condition'],{'broadcaster_user_id':'u'})
+        self.assertEqual(body['type'],'channel.channel_points_custom_reward_redemption.add')
+
+    async def test_redemption_denied_does_not_break_chat(self):
+        status=[]
+        adapter=Twitch(Session(Response(403,{})),{'client_id':'a','user_id':'u','channel_id':'u'},'TOKEN',ChatStore(),lambda *x:status.append(x))
+        adapter.scopes={'channel:read:redemptions'}
+        await adapter.subscribe_redemptions('session')
+        self.assertIn('denied',status[-1][1])
+
+    async def test_redemption_is_event_and_duplicates_merge(self):
+        store=ChatStore()
+        adapter=Twitch(None,{},'TOKEN',store,lambda *x:None)
+        event={'id':'redeem1','broadcaster_user_id':'u','broadcaster_user_name':'Deco','user_name':'Viewer','reward':{'title':'Hydrate'}}
+        for _ in range(2):adapter.handle('channel.channel_points_custom_reward_redemption.add',event)
+        self.assertEqual(len(store.messages),1)
+        self.assertEqual(store.messages[0]['kind'],'redeem')
+        self.assertEqual(store.messages[0]['text'],'Redeemed Hydrate')

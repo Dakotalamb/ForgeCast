@@ -51,6 +51,7 @@ class Twitch:
         self.session, self.config, self.token = session, config, token
         self.store, self.status = store, status
         self.task = None
+        self.scopes = set()
 
     @property
     def headers(self):
@@ -61,8 +62,22 @@ class Twitch:
                          headers={'Authorization':'OAuth '+self.token})
         if data.get('client_id') != self.config['client_id'] or data.get('user_id') != self.config['user_id']:
             raise ApiError('Twitch token does not match the configured client and user IDs.')
-        if 'user:read:chat' not in data.get('scopes', []):
+        self.scopes = set(data.get('scopes', []))
+        if 'user:read:chat' not in self.scopes:
             raise ApiError('Twitch token requires user:read:chat.')
+
+    async def subscribe_redemptions(self, session_id):
+        if self.config['user_id'] != self.config['channel_id'] or not self.scopes.intersection({'channel:read:redemptions','channel:manage:redemptions'}):
+            self.status('twitch_events', 'Chat activity available; redeems need channel:read:redemptions in Hub OAuth and a broadcaster reconnect.')
+            return
+        try:
+            await api(self.session, 'POST', 'https://api.twitch.tv/helix/eventsub/subscriptions',
+                      headers=self.headers, json=dict(type='channel.channel_points_custom_reward_redemption.add',version='1',
+                      condition=dict(broadcaster_user_id=self.config['channel_id']),
+                      transport=dict(method='websocket',session_id=session_id)))
+            self.status('twitch_events', 'Redemptions ready; waiting for an event.')
+        except ApiError:
+            self.status('twitch_events', 'Chat activity available; Twitch denied redemption subscription. Check Hub OAuth permission and reconnect.')
 
     async def run(self):
         delay = 2
@@ -100,6 +115,7 @@ class Twitch:
                                                   headers=self.headers, json=dict(type=topic, version='1',
                                                   condition=dict(broadcaster_user_id=self.config['channel_id'], user_id=self.config['user_id']),
                                                   transport=dict(method='websocket', session_id=session['id'])))
+                                    await self.subscribe_redemptions(session['id'])
                                 transferring = False
                                 delay = 2
                                 self.status('twitch', 'connected')
@@ -114,6 +130,7 @@ class Twitch:
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
+                self.status('twitch_events', 'Disconnected; waiting for Twitch reconnect.')
                 self.status('twitch', str(exc) if isinstance(exc, ApiError) else 'Disconnected; retrying. Check network and authorization.')
                 await asyncio.sleep(delay)
                 delay = min(delay*2, 60)
@@ -123,6 +140,13 @@ class Twitch:
             message = twitch_message(event)
             if message.get('is_creator'): message['avatar'] = self.config.get('avatar', '')
             self.store.add(message)
+        elif topic == 'channel.channel_points_custom_reward_redemption.add':
+            self.store.add(dict(id='twitch:redeem:'+event['id'], platform='twitch',
+                origin=event.get('broadcaster_user_name','Twitch'), origin_id=event['broadcaster_user_id'],
+                user=event.get('user_name','Viewer'), user_id=event.get('user_id',''),
+                text='Redeemed '+event.get('reward',{}).get('title','channel points reward'),
+                kind='redeem', shared=False, badges=[], time=time.time()))
+            self.status('twitch_events', 'Redemptions ready; event received.')
         elif topic == 'channel.chat.notification':
             # Notification IDs vary: retain events without pretending they are chat messages.
             origin = event.get('source_broadcaster_user_name') or event.get('broadcaster_user_name', 'Twitch')

@@ -93,3 +93,6 @@ Scope stops at roadmap Phase 4. Vertical streaming and native overlays are defer
 
 ## 0.5.3 destination setup
 Platform dropdown with Twitch/YouTube presets, connected-account Kick server discovery, and Other / Custom manual server entry. Optional name and generated destination IDs remove setup jargon. Advanced server override and editing preserve existing manual destinations and saved keys. Kick requires its account's server address when API permissions do not expose it.
+
+## 0.5.4 alert diagnostics and Twitch redemptions
+Separate Windows notification and local sound test buttons work without going live. Optional two-minute mute sound uses local Windows playback independently of toast permissions. Toast submission checks Windows notification settings; submission cannot prove banner display or audibility. Existing sound remains opt-in. Twitch redemption subscriptions require broadcaster-owned OAuth with channel:read:redemptions or channel:manage:redemptions. Missing permission and denied subscription appear in connection status and empty Events docks; chat continues. Hub must request that scope and users reconnect before redeems work.

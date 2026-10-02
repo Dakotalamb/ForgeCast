@@ -48,6 +48,12 @@ $('hubFetch').onclick=()=>run(()=>action('hub_fetch'),$('hubFetch'));
 $('hubSync').onclick=()=>run(()=>action('hub_sync'),$('hubSync'));
 $('setupSync').onclick=()=>run(()=>action('hub_sync'),$('setupSync'));
 $('hubReport').onclick=()=>{if(confirm('Have you reviewed the downloaded report? Send diagnostic measurements and output names to your configured Hub?'))run(()=>action('hub_report',{confirmed:true}),$('hubReport'));};
+for(const [id,channel] of [['testAudioNotification','notification'],['testAudioSound','sound']]){
+ $(id).onclick=()=>run(async()=>{
+  const r=await action('audio_alert_test',{channel});
+  $('audioTestResult').textContent=r.submitted?(channel==='sound'?'Sound playback requested. Check your output device and volume if you did not hear it.':'Notification submitted to Windows. If no banner appears, check Windows Notifications and Do Not Disturb.'):'Test unavailable. Check Audio Guard history and Windows notification settings.';
+ },$(id));
+}
 $('audioSnooze').onclick=()=>run(()=>action('audio_snooze'),$('audioSnooze'));
 $('audioAck').onclick=()=>run(()=>action('audio_ack'),$('audioAck'));
 $('audioForm').onsubmit=e=>{e.preventDefault();run(async()=>{
@@ -151,7 +157,7 @@ function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.3';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.4';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -197,7 +203,7 @@ function render(s) {
  $('stopAll').disabled=s.demo||!s.native_connected;
  $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
    const item=el('p',undefined,'audience-event');item.append(el('small',e.source),el('br'),document.createTextNode(e.text));return item;
- }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Subs, gifts, raids and supported audience activity appear here.','muted'));
+ }));if(!s.combined_events?.length)$('audienceEvents').append(el('p',s.statuses.twitch_events||'Subs, gifts, raids and supported audience activity appear here.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
