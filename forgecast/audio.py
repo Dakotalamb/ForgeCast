@@ -10,7 +10,7 @@ import re
 import time
 
 DEFAULTS = {'enabled':True, 'sources':[], 'quiet_scenes':['BRB','Starting Soon','Ending','Be Right Back','Intermission'],
-            'notifications':True, 'sound':False, 'silence_seconds':90, 'expected_track':1}
+            'notifications':True, 'sound':False, 'sound_volume':45, 'silence_seconds':90, 'expected_track':1}
 
 
 def validate_settings(data):
@@ -19,6 +19,10 @@ def validate_settings(data):
         if key in data:
             if not isinstance(data[key], bool): raise ValueError(key+' must be true or false.')
             result[key] = data[key]
+    volume = data.get('sound_volume',45)
+    if isinstance(volume,bool) or not isinstance(volume,(int,float)) or not 0 <= volume <= 100:
+        raise ValueError('Sound volume must be between 0 and 100.')
+    result['sound_volume'] = int(volume)
     result['expected_track'] = int(data.get('expected_track', 1))
     if not 1 <= result['expected_track'] <= 6: raise ValueError('Audio track must be 1–6.')
     result['silence_seconds'] = int(data.get('silence_seconds', 90))
@@ -224,11 +228,6 @@ async def notify_windows(notice):
     return process.returncode == 0
 
 
-async def play_warning_sound():
-    if os.name != 'nt': return False
-    import winsound
-    try:
-        await asyncio.to_thread(winsound.MessageBeep, winsound.MB_ICONEXCLAMATION)
-        return True
-    except RuntimeError:
-        return False
+async def play_warning_sound(custom_path=None, volume=45):
+    from .sound import play_sound
+    return await play_sound(custom_path or Path('__no_custom_sound__'), volume)

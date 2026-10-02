@@ -50,10 +50,18 @@ $('setupSync').onclick=()=>run(()=>action('hub_sync'),$('setupSync'));
 $('hubReport').onclick=()=>{if(confirm('Have you reviewed the downloaded report? Send diagnostic measurements and output names to your configured Hub?'))run(()=>action('hub_report',{confirmed:true}),$('hubReport'));};
 for(const [id,channel] of [['testAudioNotification','notification'],['testAudioSound','sound']]){
  $(id).onclick=()=>run(async()=>{
-  const r=await action('audio_alert_test',{channel});
+  const r=await action('audio_alert_test',{channel,volume:Number($('audioSoundVolume').value)});
   $('audioTestResult').textContent=r.submitted?(channel==='sound'?'Sound playback requested. Check your output device and volume if you did not hear it.':'Notification submitted to Windows. If no banner appears, check Windows Notifications and Do Not Disturb.'):'Test unavailable. Check Audio Guard history and Windows notification settings.';
  },$(id));
 }
+$('audioSoundVolume').oninput=()=>{$('audioSoundVolumeLabel').textContent=$('audioSoundVolume').value+'%';};
+$('audioDefaultSound').onclick=()=>run(()=>action('audio_sound_file'),$('audioDefaultSound'));
+$('audioCustomWav').onchange=()=>run(async()=>{
+ const file=$('audioCustomWav').files[0];if(!file)return;
+ if(file.size>2000000)throw Error('Choose a WAV under 2 MB.');
+ const wav=await new Promise((resolve,reject)=>{const reader=new FileReader();reader.onload=()=>resolve(reader.result.split(',')[1]);reader.onerror=()=>reject(Error('Could not read WAV.'));reader.readAsDataURL(file);});
+ await action('audio_sound_file',{wav});$('audioCustomWav').value='';
+},$('audioCustomWav'));
 $('audioSnooze').onclick=()=>run(()=>action('audio_snooze'),$('audioSnooze'));
 $('audioAck').onclick=()=>run(()=>action('audio_ack'),$('audioAck'));
 $('audioForm').onsubmit=e=>{e.preventDefault();run(async()=>{
@@ -62,10 +70,11 @@ $('audioForm').onsubmit=e=>{e.preventDefault();run(async()=>{
    const uuid=$(id).value;if(uuid){const name=$(id).selectedOptions[0].textContent;sources.push({uuid,name,role});}
  }
  await action('audio_settings',{settings:{sources,enabled:$('audioEnabled').checked,notifications:$('audioNotify').checked,
-   sound:$('audioSound').checked,quiet_scenes:$('audioQuiet').value.split('\n'),silence_seconds:Number($('audioSilence').value)}});
-},e.currentTarget.querySelector('button'));};
+   sound:$('audioSound').checked,sound_volume:Number($('audioSoundVolume').value),quiet_scenes:$('audioQuiet').value.split('\n'),silence_seconds:Number($('audioSilence').value)}});
+},e.currentTarget.querySelector('button[type=submit]'));};
 let audioSettingsShown='',audioOptionsShown='';
 function renderAudio(s){
+ $('audioSoundChoice').textContent=s.audio_sound_custom?'Custom WAV saved':'Default FDGCast chirp';
  const audio=s.audio_guard||{state:'unknown',title:'Audio telemetry unavailable.',issues:[],sources:[]};
  $('audioHome').textContent=audio.title;$('audioState').textContent=audio.state.toUpperCase();
  $('audioIssues').replaceChildren(...audio.issues.map(i=>{
@@ -90,7 +99,7 @@ function renderAudio(s){
  if(signature!==audioSettingsShown&&!$('audioForm').contains(document.activeElement)){
    audioSettingsShown=signature;
    $('audioEnabled').checked=settings.enabled!==false;$('audioNotify').checked=settings.notifications!==false;
-   $('audioSound').checked=!!settings.sound;$('audioSilence').value=settings.silence_seconds||90;
+   $('audioSound').checked=!!settings.sound;$('audioSoundVolume').value=settings.sound_volume??45;$('audioSoundVolumeLabel').textContent=$('audioSoundVolume').value+'%';$('audioSilence').value=settings.silence_seconds||90;
    $('audioQuiet').value=(settings.quiet_scenes||[]).join('\n');
    for(const [id,role] of [['audioMic','microphone'],['audioGame','game_audio']])$(id).value=(settings.sources||[]).find(r=>r.role===role)?.uuid||'';
  }
@@ -157,7 +166,7 @@ function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.4';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.5';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';

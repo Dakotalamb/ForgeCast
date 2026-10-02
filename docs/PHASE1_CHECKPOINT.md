@@ -96,3 +96,6 @@ Platform dropdown with Twitch/YouTube presets, connected-account Kick server dis
 
 ## 0.5.4 alert diagnostics and Twitch redemptions
 Separate Windows notification and local sound test buttons work without going live. Optional two-minute mute sound uses local Windows playback independently of toast permissions. Toast submission checks Windows notification settings; submission cannot prove banner display or audibility. Existing sound remains opt-in. Twitch redemption subscriptions require broadcaster-owned OAuth with channel:read:redemptions or channel:manage:redemptions. Missing permission and denied subscription appear in connection status and empty Events docks; chat continues. Hub must request that scope and users reconnect before redeems work.
+
+## 0.5.5 native destination presets and custom sound
+The OBS Add destination dialog now shares the Companion platform resolver: Twitch/YouTube automatic addresses, Kick account lookup with manual fallback, Other / Custom manual server. Audio Guard default is a 490 ms two-note synthesized chirp, scaled locally by a saved 0–100% volume. Custom WAVs are validated (PCM 8/16-bit, mono/stereo, 8–48 kHz, up to five seconds and 2 MB), copied to the local data folder, and can be reset to the default. Preview works with reminders disabled; automatic reminder stays opt-in. Memory WAV playback runs in a worker thread.

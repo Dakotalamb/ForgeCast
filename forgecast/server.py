@@ -1,4 +1,6 @@
 import argparse
+import base64
+import binascii
 import asyncio
 from collections import deque, OrderedDict
 import contextlib
@@ -20,6 +22,7 @@ from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
 from .audio import AudioGuard, validate_settings, notify_windows, play_warning_sound
 from .history import StreamHistory
+from .sound import read_pcm, MAX_BYTES
 
 PORT = 17654
 WEB = Path(__file__).resolve().parent.parent/'web'
@@ -58,6 +61,7 @@ class State:
         self.kick_verified = False
         self.kick_received = 0
         self.audio = AudioGuard(self.directory, self.config.get("audio_guard"), demo)
+        self.audio_sound_path = self.directory / "audio-warning.wav"
         self.audio_snapshot = None
         self.audio_seen = 0
         self.audio_notice_queue = asyncio.Queue(maxsize=20)
@@ -134,7 +138,7 @@ class State:
         return dict(demo=self.demo, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
-                    audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
+                    audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
                     stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True),
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
@@ -206,7 +210,7 @@ def queue_outputs(s, command, dest_id=None):
 async def audio_action(s, data):
     op = data.get('op') or data.get('action')
     if op == 'audio_settings':
-        settings = validate_settings(data.get('settings', {}))
+        settings = validate_settings({**s.audio.settings, **data.get('settings', {})})
         # UUIDs are stable OBS identities. Allow a saved missing source to remain selected
         # so Audio Guard can report it instead of silently dropping the expectation.
         known = {row['uuid'] for row in (s.audio_snapshot or {}).get('sources', [])}
@@ -333,7 +337,7 @@ async def audio_notifications(s):
             continue
         try:
             if notice.get('sound'):
-                played = await play_warning_sound()
+                played = await play_warning_sound(s.audio_sound_path, s.audio.settings['sound_volume'])
                 s.audio.record('sound_playback_requested' if played else 'sound_unavailable', code=notice['code'])
             if notice.get('toast', True) and s.audio.settings['notifications']:
                 submitted = await notify_windows({**notice, 'sound':False})
@@ -425,6 +429,31 @@ async def obs_connection(request):
                               'port':s.config.get('obs_port',4455)}, headers={'Cache-Control':'no-store'})
 
 
+async def resolve_destination(s, data):
+    platform = data.get('platform', 'custom')
+    if platform not in ('twitch', 'youtube', 'kick', 'custom'):
+        raise ValueError('Choose a supported platform or Other / Custom.')
+    server = str(data.get('server') or '').strip()
+    if not server and platform in ('twitch', 'youtube'):
+        server = {'twitch':'rtmp://live.twitch.tv/app',
+                  'youtube':'rtmps://a.rtmps.youtube.com:443/live2'}[platform]
+    if not server and platform == 'kick':
+        token = s.vault.get('kick_token')
+        if token:
+            try:
+                result = await api(s.session, 'GET', 'https://api.kick.com/public/v1/channels',
+                                   headers={'Authorization':'Bearer '+token})
+                server = str(result.get('data', [{}])[0].get('stream', {}).get('url') or '')
+            except (ApiError, IndexError, AttributeError, TypeError):
+                server = ''
+        if not server:
+            raise ValueError('Kick server unavailable. Enable the custom server option and paste the address from your Kick dashboard (Advanced settings in Companion).')
+    dest = validate_destination({**data, 'id':data.get('id') or uuid.uuid4().hex[:12],
+                                 'name':data.get('name') or {'twitch':'Twitch','youtube':'YouTube','kick':'Kick','custom':'Custom destination'}[platform],
+                                 'server':server})
+    return dest
+
+
 async def action(request):
     s = request.app['state']
     data = await request.json()
@@ -432,11 +461,28 @@ async def action(request):
     if s.demo:
         raise ValueError('Demo mode never connects accounts or changes OBS. Restart without --demo.')
     async with s.lock:
-        if op == 'audio_alert_test':
+        if op == 'audio_sound_file':
+            encoded = data.get('wav')
+            if encoded is None:
+                s.audio_sound_path.unlink(missing_ok=True)
+            else:
+                if not isinstance(encoded,str) or len(encoded) > (MAX_BYTES * 4 // 3 + 8):
+                    raise ValueError('Choose a WAV under 2 MB.')
+                try: wav = base64.b64decode(encoded,validate=True)
+                except (ValueError,binascii.Error) as exc: raise ValueError('Invalid WAV upload.') from exc
+                read_pcm(wav)
+                temporary = s.audio_sound_path.with_suffix('.tmp')
+                temporary.write_bytes(wav)
+                if os.name != 'nt': temporary.chmod(0o600)
+                temporary.replace(s.audio_sound_path)
+            return web.json_response({'ok':True, 'custom':s.audio_sound_path.exists()})
+        elif op == 'audio_alert_test':
             channel = data.get('channel')
             if channel not in ('notification', 'sound'): raise ValueError('Choose notification or sound.')
             try:
-                submitted = await play_warning_sound() if channel == 'sound' else await notify_windows({
+                volume = data.get('volume',s.audio.settings['sound_volume'])
+                if isinstance(volume,bool) or not isinstance(volume,(int,float)) or not 0 <= volume <= 100: raise ValueError('Sound volume must be between 0 and 100.')
+                submitted = await play_warning_sound(s.audio_sound_path, volume) if channel == 'sound' else await notify_windows({
                     'title':'FDGCast Audio Guard test', 'body':'Test notification. Your stream and audio settings were not changed.', 'sound':False})
             except Exception:
                 submitted = False
@@ -472,27 +518,7 @@ async def action(request):
         elif op == 'save_destination':
             if time.time()-s.native_seen < 5 and any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
-            platform = data.get('platform', 'custom')
-            if platform not in ('twitch', 'youtube', 'kick', 'custom'):
-                raise ValueError('Choose a supported platform or Other / Custom.')
-            server = str(data.get('server') or '').strip()
-            if not server and platform in ('twitch', 'youtube'):
-                server = {'twitch':'rtmp://live.twitch.tv/app',
-                          'youtube':'rtmps://a.rtmps.youtube.com:443/live2'}[platform]
-            if not server and platform == 'kick':
-                token = s.vault.get('kick_token')
-                if token:
-                    try:
-                        result = await api(s.session, 'GET', 'https://api.kick.com/public/v1/channels',
-                                           headers={'Authorization':'Bearer '+token})
-                        server = str(result.get('data', [{}])[0].get('stream', {}).get('url') or '')
-                    except (ApiError, IndexError, AttributeError, TypeError):
-                        server = ''
-                if not server:
-                    raise ValueError('Kick server unavailable. Paste the server address from your Kick dashboard under Advanced settings.')
-            dest = validate_destination({**data, 'id':data.get('id') or uuid.uuid4().hex[:12],
-                                         'name':data.get('name') or {'twitch':'Twitch','youtube':'YouTube','kick':'Kick','custom':'Custom destination'}[platform],
-                                         'server':server})
+            dest = await resolve_destination(s, data)
             previous = next((d for d in s.config.get('destinations', []) if d['id'] == dest['id']), {})
             dest['enabled'] = previous.get('enabled', True)
             key = data.get('key') or s.vault.get('stream:'+dest['id'])
@@ -703,7 +729,7 @@ async def native_action(request):
                 raise ValueError('A valid stream key is required.')
             if len(s.config.get('destinations', [])) >= 8:
                 raise ValueError('At most eight destinations are supported.')
-            dest = validate_destination({'id':uuid.uuid4().hex[:12], 'name':name, 'server':server})
+            dest = await resolve_destination(s, {**data, 'id':uuid.uuid4().hex[:12], 'name':name, 'server':server})
             s.vault.set('stream:'+dest['id'], key)
             s.config.setdefault('destinations', []).append(dest)
             s.save()
@@ -1002,7 +1028,7 @@ async def lifecycle(app):
 
 
 def create_app(state):
-    app = web.Application(middlewares=[secure], client_max_size=131072)
+    app = web.Application(middlewares=[secure], client_max_size=2_800_000)
     app['state'] = state
     app.cleanup_ctx.append(lifecycle)
     for path in ('/', '/app.js', '/style.css', '/favicon.png'):

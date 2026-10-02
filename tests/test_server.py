@@ -335,6 +335,30 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_alert_test','channel':'invalid'})
         self.assertEqual(r.status,400)
 
+    async def test_custom_sound_upload_is_validated_local_and_resettable(self):
+        import base64
+        from forgecast.sound import default_chirp
+        self.state.demo=False
+        wav=default_chirp()
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_sound_file','wav':base64.b64encode(wav).decode()})
+        self.assertEqual(r.status,200)
+        self.assertEqual(self.state.audio_sound_path.read_bytes(),wav)
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_sound_file','wav':'not valid'})
+        self.assertEqual(r.status,400)
+        self.assertEqual(self.state.audio_sound_path.read_bytes(),wav)
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'audio_sound_file'})
+        self.assertEqual(r.status,200)
+        self.assertFalse(self.state.audio_sound_path.exists())
+
+    async def test_native_platform_save_uses_same_presets(self):
+        self.state.demo=False
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        r=await self.client.post('/native/action',headers=headers,json={'action':'save','platform':'youtube','key':'KEY'})
+        self.assertEqual(r.status,200,await r.text())
+        self.assertEqual(self.state.config['destinations'][-1]['server'],'rtmps://a.rtmps.youtube.com:443/live2')
+        r=await self.client.post('/native/action',headers=headers,json={'action':'save','platform':'custom','key':'KEY','server':'rtmps://example.com/app','name':'Custom'})
+        self.assertEqual(r.status,200,await r.text())
+
     async def test_hub_requires_https(self):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'hub_save','url':'http://example.com','token':'fake'})

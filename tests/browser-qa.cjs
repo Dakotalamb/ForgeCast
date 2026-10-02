@@ -44,6 +44,8 @@ async function main(){
   assert.equal(await page.locator('#copyReport').isVisible(),true);
   assert.equal(await page.locator('#testAudioNotification').count(),1);
   assert.equal(await page.locator('#testAudioSound').count(),1);
+  assert.equal(await page.locator('#audioCustomWav').count(),1);
+  assert.equal(await page.locator('#audioSoundVolume').getAttribute('value'),'45');
   await page.screenshot({path:path.join(output,'doctor-demo.png'),fullPage:true});
   await page.locator('[data-tab="setup"]').click();
   assert.equal(await page.locator('#showPairCode').isVisible(),true);

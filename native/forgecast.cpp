@@ -661,17 +661,40 @@ public:
             dialog.setWindowTitle("Add FDGCast destination");
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
+            QComboBox platform(&dialog);
+            platform.addItem("Twitch", "twitch");platform.addItem("YouTube", "youtube");
+            platform.addItem("Kick", "kick");platform.addItem("Other / Custom", "custom");
+            QCheckBox advanced("Use a custom server address", &dialog);
+            QLabel help(&dialog);help.setWordWrap(true);
             key.setEchoMode(QLineEdit::Password);
-            server.setPlaceholderText("rtmps://example.com/live");
-            form.addRow("Name", &name);
-            form.addRow("RTMP(S) server", &server);
+            server.setPlaceholderText("Paste your platform's server address");
+            form.addRow("Platform", &platform);
             form.addRow("Stream key", &key);
+            form.addRow("Name (optional)", &name);
+            form.addRow(&advanced);
+            form.addRow("Server address", &server);
+            form.addRow(&help);
+            auto updatePlatform = [&] {
+                const QString selected=platform.currentData().toString();
+                const bool custom=selected=="custom";
+                server.setVisible(custom||advanced.isChecked());
+                form.labelForField(&server)->setVisible(custom||advanced.isChecked());
+                advanced.setVisible(!custom);
+                name.setPlaceholderText(platform.currentText());
+                help.setText(custom?"Paste the server address and key from your platform.":selected=="kick"?
+                    "Uses your connected Kick account. If unavailable, choose a custom server address from your Kick dashboard.":
+                    "The server is selected automatically. Just paste your stream key.");
+                dialog.adjustSize();
+            };
+            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
+            connect(&advanced, &QCheckBox::toggled, &dialog, [&](bool checked) { if(!checked)server.clear();updatePlatform(); });
+            updatePlatform();
             QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
             form.addRow(&buttons);
             connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
-                send(QJsonObject{{"action", "save"}, {"name", name.text()},
+                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
                                  {"server", server.text()}, {"key", key.text()}});
             key.clear();
         });
