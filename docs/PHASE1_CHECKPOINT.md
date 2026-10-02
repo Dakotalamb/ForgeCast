@@ -90,3 +90,6 @@ Scope stops at roadmap Phase 4. Vertical streaming and native overlays are defer
 - Password retrieval is confined to a browser-authenticated, no-store local setup endpoint; state, reports and native credentials do not expose it.
 - Chat/Events feed surfaces use a lighter blue-gray fill and visible border. Chat composer uses a darker fill, stronger border and orange focus outline. Companion feed/composer contrast is aligned with native docks.
 - 112 Python tests pass; Windows build includes browser Show/Hide/status checks. Live OBS appearance and reconnection remain acceptance checks.
+
+## 0.5.3 destination setup
+Platform dropdown with Twitch/YouTube presets, connected-account Kick server discovery, and Other / Custom manual server entry. Optional name and generated destination IDs remove setup jargon. Advanced server override and editing preserve existing manual destinations and saved keys. Kick requires its account's server address when API permissions do not expose it.

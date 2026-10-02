@@ -31,6 +31,14 @@ async function main(){
    await page.locator('[data-tab="'+tab+'"]').click();
    assert.equal(await page.locator('#'+tab).isVisible(),true);
   }
+  await page.locator('[data-tab="outputs"]').click();
+  assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+  await page.selectOption('#destinationPlatform','custom');
+  assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
+  assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
+  await page.selectOption('#destinationPlatform','youtube');
+  assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+  assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
   await page.locator('[data-tab="doctor"]').click();
   assert.equal(await page.locator('#streamTimeline').isVisible(),true);
   assert.equal(await page.locator('#copyReport').isVisible(),true);

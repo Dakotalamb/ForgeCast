@@ -293,6 +293,38 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn('FAKE-KEY',await r.text())
         self.assertNotIn('FAKE-KEY',self.state.config_path.read_text())
 
+    async def test_platform_presets_need_only_key(self):
+        self.state.demo=False
+        for platform, server in [('twitch','rtmp://live.twitch.tv/app'),('youtube','rtmps://a.rtmps.youtube.com:443/live2')]:
+            r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':platform,'key':'SECRET'})
+            self.assertEqual(r.status,200,await r.text())
+            d=self.state.config['destinations'][-1]
+            self.assertEqual(d['server'],server)
+            self.assertEqual(self.state.vault.get('stream:'+d['id']),'SECRET')
+
+    async def test_kick_auto_server_and_manual_fallback(self):
+        self.state.demo=False
+        self.state.vault.set('kick_token','TOKEN')
+        with patch('forgecast.server.api',new=AsyncMock(return_value={'data':[{'stream':{'url':'rtmps://example.com/app'}}]})):
+            r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'kick','key':'SECRET'})
+            self.assertEqual(r.status,200,await r.text())
+            self.assertEqual(self.state.config['destinations'][-1]['server'],'rtmps://example.com/app')
+        self.state.vault.delete('kick_token')
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'kick','key':'SECRET'})
+        self.assertEqual(r.status,400)
+        self.assertIn('Advanced settings',await r.text())
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'kick','server':'rtmps://example.com/app','key':'SECRET'})
+        self.assertEqual(r.status,200)
+
+    async def test_custom_still_requires_server_and_replacement_keeps_key(self):
+        self.state.demo=False
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'custom','key':'SECRET'})
+        self.assertEqual(r.status,400)
+        for key in ['SECRET','']:
+            r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'youtube','id':'yt','key':key})
+            self.assertEqual(r.status,200,await r.text())
+        self.assertEqual(self.state.vault.get('stream:yt'),'SECRET')
+
     async def test_hub_requires_https(self):
         self.state.demo=False
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'hub_save','url':'http://example.com','token':'fake'})

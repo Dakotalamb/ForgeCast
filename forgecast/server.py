@@ -460,7 +460,27 @@ async def action(request):
         elif op == 'save_destination':
             if time.time()-s.native_seen < 5 and any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
-            dest = validate_destination(data)
+            platform = data.get('platform', 'custom')
+            if platform not in ('twitch', 'youtube', 'kick', 'custom'):
+                raise ValueError('Choose a supported platform or Other / Custom.')
+            server = str(data.get('server') or '').strip()
+            if not server and platform in ('twitch', 'youtube'):
+                server = {'twitch':'rtmp://live.twitch.tv/app',
+                          'youtube':'rtmps://a.rtmps.youtube.com:443/live2'}[platform]
+            if not server and platform == 'kick':
+                token = s.vault.get('kick_token')
+                if token:
+                    try:
+                        result = await api(s.session, 'GET', 'https://api.kick.com/public/v1/channels',
+                                           headers={'Authorization':'Bearer '+token})
+                        server = str(result.get('data', [{}])[0].get('stream', {}).get('url') or '')
+                    except (ApiError, IndexError, AttributeError, TypeError):
+                        server = ''
+                if not server:
+                    raise ValueError('Kick server unavailable. Paste the server address from your Kick dashboard under Advanced settings.')
+            dest = validate_destination({**data, 'id':data.get('id') or uuid.uuid4().hex[:12],
+                                         'name':data.get('name') or {'twitch':'Twitch','youtube':'YouTube','kick':'Kick','custom':'Custom destination'}[platform],
+                                         'server':server})
             previous = next((d for d in s.config.get('destinations', []) if d['id'] == dest['id']), {})
             dest['enabled'] = previous.get('enabled', True)
             key = data.get('key') or s.vault.get('stream:'+dest['id'])

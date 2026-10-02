@@ -20,6 +20,16 @@ document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.datas
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
 function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
+function destinationPlatformChanged(){
+ const platform=$('destinationPlatform').value, custom=platform==='custom';
+ $('destinationAdvanced').open=custom;
+ $('destinationForm').elements.server.required=custom;
+ $('destinationForm').elements.server.value='';
+ $('destinationForm').elements.name.placeholder={twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
+ $('destinationHelp').textContent=custom?'Paste your server address and stream key.':platform==='kick'?'Uses your connected Kick account to find its server. If unavailable, paste the server address under Advanced settings.':'Server is selected automatically. Just paste your stream key.';
+}
+$('destinationPlatform').onchange=destinationPlatformChanged;
+destinationPlatformChanged();
 let pairingLoaded=false,obsPasswordLoaded=false;
 $('showObsPassword').onclick=()=>{const input=$('obsForm').elements.password;input.type=input.type==='password'?'text':'password';$('showObsPassword').textContent=input.type==='password'?'Show password':'Hide password';};
 $('showPairCode').onclick=()=>{const input=$('hubForm').elements.token;input.type=input.type==='password'?'text':'password';$('showPairCode').textContent=input.type==='password'?'Show code':'Hide code';};
@@ -141,7 +151,7 @@ function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.2';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.3';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -174,6 +184,12 @@ function render(s) {
    card.append(enabled,health);if(status.detail)card.append(el('p',status.detail,'danger'));
    const controls=el('div',undefined,'controls');
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
+   controls.append(button('Edit',()=>{
+     const f=$('destinationForm');
+     f.elements.platform.value='custom';destinationPlatformChanged();
+     f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';
+     f.scrollIntoView({behavior:'smooth'});
+   }));
    controls.append(button('Remove',async()=>{if(confirm('Remove destination '+d.name+' and its saved key?'))await action('delete_destination',{id:d.id});}));
    card.append(controls);return card;
  }));if(!s.destinations.length)$('destinations').append(el('p','Add a destination, then use Start All.','empty'));}
