@@ -111,3 +111,20 @@ class ChatApiTests(unittest.IsolatedAsyncioTestCase):
         adapter=YouTube(session,{'live_chat_id':''},'TOKEN',ChatStore(),lambda *x:None)
         with self.assertRaisesRegex(ApiError,'Start a YouTube broadcast'):await adapter.send('hello')
         self.assertEqual(session.calls,[])
+
+    async def test_event_retry_skips_already_subscribed_topics(self):
+        session=Session(Response(data={}))
+        adapter=Twitch(session,{'client_id':'a','user_id':'u','channel_id':'u'},'TOKEN',ChatStore(),lambda *x:None)
+        adapter.scopes={'moderator:read:followers','channel:read:redemptions'}
+        await adapter.subscribe_events('session')
+        await adapter.subscribe_events('session')
+        self.assertEqual(len(session.calls),3)
+
+    async def test_three_platform_messages_remain_in_combined_store(self):
+        from forgecast.core import twitch_message, kick_message
+        store=ChatStore()
+        store.add(twitch_message(dict(broadcaster_user_id='1',message_id='a',chatter_user_id='2',chatter_user_name='Twitch viewer',message={'text':'hello'})))
+        YouTube(None,{'channel_name':'YouTube channel'},'TOKEN',store,lambda *x:None).receive({'id':'a','snippet':{'liveChatId':'yt','type':'textMessageEvent','displayMessage':'hello'},'authorDetails':{'displayName':'YouTube viewer'}})
+        store.add(kick_message({'message_id':'a','broadcaster':{'user_id':3},'sender':{'user_id':4,'username':'Kick viewer'},'content':'hello'}))
+        self.assertEqual({m['platform'] for m in store.messages},{'twitch','youtube','kick'})
+        self.assertEqual(len(store.messages),3)

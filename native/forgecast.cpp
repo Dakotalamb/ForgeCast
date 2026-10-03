@@ -583,12 +583,12 @@ public:
         const bool unmute=audioIssue.value("action").toString() == "unmute";
         fixButton->setText(unmute ? "UNMUTE" : "FIX STREAM ROUTING");
         fixButton->setToolTip(audioIssue.value("source_name").toString()+" · "+audioIssue.value("evidence").toString());
-        const bool statsConnected = payload.value("obs_connected").toBool();
+        const bool statsConnected = payload.value("stats_connected").toBool();
         const auto stats = payload.value("stats").toObject();
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>"
                        ;
         if (!view->compact) html += "<p>Scene: <b>"+payload.value("scene").toString().toHtmlEscaped()+"</b></p>";
-        if (!statsConnected) html += "<p>Frame stats offline</p>";
+        if (!statsConnected) html += "<p>OBS readings unavailable · reconnecting</p>";
         for (const auto &entry : payload.value("destination_health").toArray()) {
             const auto health=entry.toObject();
             html += "<p><b>"+health.value("name").toString().toHtmlEscaped()+"</b> · "+health.value("state").toString().toHtmlEscaped()+"</p>";

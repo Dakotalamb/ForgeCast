@@ -18,7 +18,9 @@
 - Twitch Events now contains only follows, channel point redeems and incoming
   raids, using dedicated official EventSub subscriptions. Redelivery is deduplicated.
   Each optional subscription is independent; missing event permissions do not
-  stop chat. Unknown EventSub topics cannot clear unrelated chat messages.
+  stop chat. Failed optional subscriptions retry every five minutes without
+  duplicating subscriptions already established; manual account sync requests
+  an earlier retry. Unknown EventSub topics cannot clear unrelated chat messages.
 - MultiChat defaults to platform icon + viewer + message, with original channel
   in the hover tooltip. Appearance menu: text size, spacing, icon size, timestamps,
   name colors, optional creator avatars and optional original channel labels.

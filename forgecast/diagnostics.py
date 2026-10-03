@@ -7,5 +7,5 @@ PROFILES = {
 
 
 def policy(name):
-    if name not in PROFILES: raise ValueError('Choose Sensitive, Balanced or Relaxed.')
+    if not isinstance(name, str) or name not in PROFILES: raise ValueError('Choose Sensitive, Balanced or Relaxed.')
     return PROFILES[name]

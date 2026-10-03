@@ -8,7 +8,7 @@ function error(message) { $('error').textContent = message; $('error').hidden = 
 $('error').onclick = () => $('error').hidden = true;
 async function api(path, data) {
   const response = await fetch(path, {method:data?'POST':'GET', headers:{'Authorization':'Bearer '+key, 'Content-Type':'application/json'}, body:data?JSON.stringify(data):undefined});
-  if (!response.ok) { let message; try { message = (await response.json()).error; } catch {} throw Error(message || 'Local session expired. Reopen the URL printed by FDGCast.'); }
+  if (!response.ok) { let message; try { message = (await response.json()).error; } catch {} throw Error(message || 'Your local connection expired. Restart FDGCast Companion.'); }
   return response.json();
 }
 async function action(op, data={}) { return api('/api/action', {op,...data}); }
@@ -144,7 +144,7 @@ function render(s) {
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
  $('obsConnectButton').textContent=s.obs_connected?'Reconnect OBS':'Connect OBS';
  $('scene').textContent=s.scene;
- const stats=s.stats, fresh=s.obs_connected||s.demo;
+ const stats=s.stats, fresh=s.stats_connected??(s.obs_connected||s.demo);
  $('fps').textContent=fresh&&stats.activeFps!==undefined?stats.activeFps.toFixed(1):'—';
  $('cpu').textContent=fresh&&stats.cpuUsage!==undefined?stats.cpuUsage.toFixed(1)+'%':'—';
  $('render').textContent=fresh&&stats.averageFrameRenderTime!==undefined?stats.averageFrameRenderTime.toFixed(1)+' ms':'—';
@@ -196,6 +196,8 @@ function renderUpdates(u){
  $('updateStatus').textContent=u.status;
  $('updateNotes').textContent=u.latest?.notes||'No release notes available yet.';
  const download=$('updateDownload');
+ const secondary=$('updateDownloadSecondary');secondary.hidden=!u.available;
+ if(u.available)secondary.href=u.latest.download_url;else secondary.removeAttribute('href');
  if(u.available)download.href=u.latest.download_url;else download.removeAttribute('href');
 }
 $('updateCheck').onclick=()=>run(()=>action('update_check'),$('updateCheck'));

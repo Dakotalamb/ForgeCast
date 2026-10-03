@@ -411,7 +411,9 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.state.obs.connect=AsyncMock(side_effect=ConnectionError('offline'))
         with patch('forgecast.server.asyncio.sleep',AsyncMock(side_effect=asyncio.CancelledError)):
             with self.assertRaises(asyncio.CancelledError): await poll(self.state)
-        self.assertEqual(self.state.current_issues[0]['title'],'Telemetry unavailable')
+        self.assertEqual(self.state.current_issues,[])
+        self.assertEqual(self.state.stats_seen,0)
+        self.assertFalse(self.state.obs.connected)
         self.assertEqual(len(self.state.commands),0)
 
     async def test_saved_obs_password_only_in_browser_setup_endpoint(self):

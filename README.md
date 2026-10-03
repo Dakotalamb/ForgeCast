@@ -66,7 +66,7 @@ Run only one companion instance at a time. The fixed local port is 17654.
 1. Start OBS and enable Tools → WebSocket Server Settings → Enable WebSocket server.
    Keep authentication enabled; note the local port and password.
 2. Run `Start-FDGCast.cmd` (without `--demo`).
-3. Open Connections → OBS WebSocket and enter the port/password locally.
+3. Open Connections → Connect OBS and enter the port/password locally.
 4. Run Preflight and inspect Stream Doctor. Stream/record/replay actions require
    confirmation. Do not test with a public live stream until verified privately.
 5. Optional: add the URL printed in the console to OBS → Docks → Custom Browser
@@ -83,7 +83,7 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 | Shared chat provenance | Platform + original broadcaster + chatter; dedup by source message ID | Unit tested with fixtures |
 | Twitch adapter | EventSub messages/chat notifications/deletes/clears; send to configured receiving channel | Code implemented; live OAuth test needed |
 | YouTube adapter | API polling with server interval; chat/activity/deletion; send | Code implemented; live token/quota test needed |
-| Stream Doctor | Delta-based rendering/encoding/network classification; incident cooldown/history; JSON report | Unit tested; real OBS validation needed |
+| Stream Doctor | Delta-based rendering/encoding/network classification; sustained thresholds/history; JSON report | Unit tested; real OBS validation needed |
 | OBS controls | Authenticated v5 WebSocket, start/stop main stream/recording, replay | Mock-server integration tested |
 | Preflight | Mute flags, reported disk space, OBS CPU/memory | Code implemented; not an audio/capture quality test |
 | Multistream | Native OBS dock with destination setup, start/stop and status; shared H.264/AAC RTMP output engine, eight destinations, reconnect | Windows build passed; not live-tested inside OBS |
@@ -91,14 +91,19 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 | Credentials | Windows DPAPI storage; session-only storage on other OSes | Memory path tested; Windows DPAPI needs Windows test |
 | Kick chat | Verified webhook to Hub and five-second local relay | Source implemented; public HTTPS webhook/live test required |
 | OAuth login/refresh | Hub OAuth for three platforms and periodic access-token renewal | Source implemented; live test needed |
-| Vertical canvases / independent encoders / start-all | Not implemented | Roadmap |
+| Vertical canvases / independent encoders | Not implemented | Roadmap |
+| Start All / Stop All | Main stream and checked destinations | Build/fixture tested; live testing required |
+| Twitch Events | Follows, channel point redeems and incoming raids | Scopes/conditions and redelivery tested; live permissions required |
+| Updates | Startup/daily notices; changelog, manual download, Later | Needs public Hub release feed; see docs/UPDATES.md |
 | Automation / team controls / source profiling / remote access | Not implemented | Roadmap |
-| Emote images / avatar rendering / moderation actions / cross-channel replies | Not implemented | Roadmap |
+| Emote images / creator avatars | Bounded image cache; optional creator avatars | Fixtures/build verified |
+| Moderation actions / cross-channel replies | Not implemented | Roadmap |
 | Sponsor analytics / audience counts / Discord writes / automatic event preparation | Not implemented | Roadmap |
 
 ### The important shared-chat distinction
 
-An example row is `TWITCH · Box_Beard's chat → ViewerName → message`.
+By default each row shows a platform icon, ViewerName and message. Hover the icon
+to see Box_Beard's channel, or enable original channel labels in the dock menu.
 Twitch's `source_broadcaster_user_id`, `source_broadcaster_user_name` and
 `source_message_id` take precedence over receiving-channel fields. The receiving
 channel is retained separately. Missing source fields fall back to the receiving
@@ -128,12 +133,11 @@ broadcaster's OAuth access token and the active broadcast's `snippet.liveChatId`
 For sending, authorize an appropriate scope; the Hub requests `youtube`.
 This is an API chat ID, not the public
 video ID. The alpha uses `liveChatMessages.list`, respects `pollingIntervalMillis`,
-and can consume significant API quota. A production version should migrate to
-streamList, automate broadcast discovery, handle quota errors by type and refresh
-OAuth tokens securely. Your manually entered channel display name labels origin.
+and can consume significant API quota. Active broadcasts are discovered automatically on Hub account sync; typed quota
+errors back off without restarting OBS. A future version can migrate to streamList. Your manually entered channel display name labels origin.
 
-After restarting, click Sync Hub accounts again; for a new live YouTube broadcast,
-sync again to discover its current liveChatId. Manual chats must be reconnected.
+Saved Hub accounts sync automatically after restarting and every sixty seconds;
+new YouTube live chats are discovered when the old broadcast ends. Manual chats must be reconnected.
 For Kick, configure its developer app's public HTTPS webhook as
 `https://YOUR-HUB/api/forgecast/v1/webhooks/kick`, then reconnect Kick in Hub Settings
 to subscribe to `chat.message.sent`. Kick replies use the authorized user's
@@ -193,7 +197,8 @@ Do not sum platform viewers and call the result unique people.
   cross-site requests and DNS rebinding. Native bridge uses a different token.
 - Windows secrets are encrypted with current-user DPAPI under
   `%LOCALAPPDATA%\ForgeCast\secrets.dpapi.json`. The app never returns saved tokens
-  to the browser. Other operating systems use session-only secrets.
+  to normal chat/status payloads. Masked pairing/OBS setup endpoints are restricted
+  to the authenticated local Companion. Other operating systems use session-only secrets.
 - `%LOCALAPPDATA%\ForgeCast\config.json` contains nonsecret account metadata and
   ingest server URLs. Do not embed keys in server URL paths; use the key field.
 - The native bridge capability is a local file, `bridge-token`, readable by this

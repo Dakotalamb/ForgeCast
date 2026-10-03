@@ -48,6 +48,7 @@ class State:
         self.native_outputs = []
         self.output_errors = {}
         self.stats = {}
+        self.stats_seen = 0
         self.current_issues = []
         self.scene = 'OBS disconnected'
         self.hub_connection = 'not_paired'
@@ -138,7 +139,7 @@ class State:
                         'Output names are user-provided; review before sharing.'])
 
     def public(self):
-        return dict(demo=self.demo, updates=self.updates.public(), obs_connected=bool(self.obs and self.obs.connected),
+        return dict(demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
@@ -608,7 +609,7 @@ async def action(request):
             s.hub_connection = 'checking'
             s.save()
             try:
-                await sync_hub_accounts(s)
+                await sync_hub_accounts(s, retry_events=True)
             except Exception:
                 s.hub_connection = 'attention'
                 raise
@@ -618,7 +619,7 @@ async def action(request):
                 raise ValueError('Save your Hub URL and pairing token first.')
             s.paused_platforms.clear()
             s.config['paused_platforms'] = []
-            await sync_hub_accounts(s)
+            await sync_hub_accounts(s, retry_events=True)
             await fetch_hub_events(s)
             s.event('Hub accounts synced. Linked accounts refresh automatically.')
         elif op in ('hub_fetch', 'hub_report'):
@@ -698,6 +699,7 @@ async def native(request):
         'output_errors': s.output_errors,
         'stream_active': bool(s.stats.get('stream_active')),
         'obs_connected': bool(s.obs and s.obs.connected),
+        'stats_connected': s.demo or time.time()-s.stats_seen<8,
         'scene': s.scene,
     })
 
@@ -788,6 +790,7 @@ async def poll(s):
                     if s.main_output: outputs = [s.main_output]
                     outputs += s.native_outputs
                 s.stats = dict(stats, stream_active=stream['outputActive'], outputs=outputs)
+                s.stats_seen = time.time()
                 s.current_issues = [issue for issue in s.doctor.sample(s.stats) if issue['code'] in ('render','encode')]
                 for notice in s.history.frames(s.current_issues,stream['outputActive'],stabilized=True):
                     notice['created']=time.time()
@@ -800,8 +803,9 @@ async def poll(s):
                 s.doctor.reset()
         except Exception:
             s.history.frames_unavailable()
-            s.current_issues = [dict(title='Telemetry unavailable', evidence='OBS did not answer the latest stats request.',
-                                    confidence='high', suggestion='Reconnect OBS; old readings are not current.')]
+            s.stats_seen = 0
+            s.doctor.reset()
+            s.current_issues = []
         await asyncio.sleep(2)
 
 
@@ -828,7 +832,7 @@ async def ensure_kick_subscription(s, token, channel):
     s.status('kick', 'connected' if s.kick_received else 'Subscription ready; waiting for the first Hub webhook message.')
 
 
-async def sync_hub_accounts(s):
+async def sync_hub_accounts(s, retry_events=False):
     async with s.hub_sync_lock:
         result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/connections',
                            headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
@@ -864,6 +868,7 @@ async def sync_hub_accounts(s):
                     existing = s.adapters.get(platform)
                     if existing and existing.config.get('channel_id') == user and existing.config.get('client_id') == conn['client_id'] and existing.token == token and existing.task and not existing.task.done():
                         existing.token = token
+                        if retry_events: existing.events_retry_at = time.monotonic()
                         s.vault.set(platform+'_token', token)
                         continue
                     users = await api(s.session, 'GET', 'https://api.twitch.tv/helix/users',

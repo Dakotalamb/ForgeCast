@@ -154,7 +154,10 @@ class StreamHistory:
         if len(notices)>1 and len(bad)>1:
             notices=[dict(title='FDGCast Stream Doctor',body='Multiple destinations are struggling: '+', '.join(i['name'] for i in bad.values())+'. A shared connection or system issue is possible; the cause is not proven.',destination_ids=list(bad))]
         self.issues=[issue for issue in issues if issue['code'] == 'shared' and sum(c.get('notified', False) for c in self.conditions.values())>1 or self.conditions.get(issue.get('destination_id'), {}).get('notified')]
+        retained=[c['issue'] for uid,c in self.conditions.items() if uid not in bad and c.get('notified')]
+        self.issues.extend(retained)
         for row in self.health:
+            if any(i.get('destination_id') == row['id'] for i in retained): row['state'] = 'attention'
             if row['state'] == 'attention' and not self.conditions.get(row['id'], {}).get('notified'):
                 row['state'] = 'checking'
         self.previous={str(o['id']):dict(o,sample_at=now) for o in outputs}

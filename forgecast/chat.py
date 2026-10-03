@@ -52,6 +52,8 @@ class Twitch:
         self.store, self.status = store, status
         self.task = None
         self.scopes = set()
+        self.event_topics = set()
+        self.events_retry_at = float("inf")
 
     @property
     def headers(self):
@@ -88,15 +90,20 @@ class Twitch:
             ('Raids', 'channel.raid', '1', {'to_broadcaster_user_id':self.config['channel_id']}, None)]
         for label, topic, version, condition, scope in topics:
             permitted = not scope or scope in self.scopes or (label == 'Redeems' and 'channel:manage:redemptions' in self.scopes)
+            if topic in self.event_topics:
+                results.append(label+': ready')
+                continue
             if not own_channel or not permitted:
-                results.append(label+': reconnect Twitch in Hub settings'+(' after enabling '+scope if scope else ''))
+                results.append(label+': permission needed; reconnect Twitch in Hub settings')
                 continue
             try:
                 await api(self.session, 'POST', 'https://api.twitch.tv/helix/eventsub/subscriptions', headers=self.headers,
                     json=dict(type=topic, version=version, condition=condition, transport=dict(method='websocket',session_id=session_id)))
+                self.event_topics.add(topic)
                 results.append(label+': ready')
             except (ApiError, asyncio.TimeoutError, aiohttp.ClientError):
                 results.append(label+': unavailable; sync linked accounts to retry')
+        self.events_retry_at = time.monotonic()+300
         self.status('twitch_events', ' · '.join(results))
 
     async def run(self):
@@ -107,6 +114,7 @@ class Twitch:
                 validated_at = time.monotonic()
                 next_url = 'wss://eventsub.wss.twitch.tv/ws'
                 transferring = False
+                session_id = None
                 while next_url:
                     parsed = urlparse(next_url)
                     if parsed.scheme != 'wss' or parsed.hostname != 'eventsub.wss.twitch.tv':
@@ -122,12 +130,16 @@ class Twitch:
                             if time.monotonic() - validated_at >= 3600:
                                 await self.validate()
                                 validated_at = time.monotonic()
+                            if session_id and time.monotonic() >= self.events_retry_at:
+                                await self.subscribe_events(session_id)
                             kind = message.get('metadata', {}).get('message_type')
                             payload = message.get('payload', {})
                             if kind == 'session_welcome':
                                 session = payload['session']
+                                session_id = session['id']
                                 timeout = (session.get('keepalive_timeout_seconds') or 10) + 10
                                 if not transferring:
+                                    self.event_topics.clear()
                                     for topic in ['channel.chat.message', 'channel.chat.message_delete',
                                                   'channel.chat.clear', 'channel.chat.clear_user_messages',
                                                   'channel.chat.notification']:
