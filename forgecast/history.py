@@ -5,10 +5,13 @@ import os
 from pathlib import Path
 import time
 import uuid
+from .diagnostics import policy
 
 
 class StreamHistory:
-    def __init__(self, directory, demo=False):
+    def __init__(self, directory, demo=False, sensitivity="balanced"):
+        self.sensitivity = sensitivity
+        policy(sensitivity)
         self.path = Path(directory)/'stream-history.jsonl'
         self.demo = demo
         self.events = deque(maxlen=1500)
@@ -27,6 +30,8 @@ class StreamHistory:
         self.frame_conditions = {}
         self.previous = {}
         self.last_sample = None
+        self.lost_since = None
+        self.lost_notified = False
         self.intentional_stops = {}
         self.issues = []
         self.health = []
@@ -61,10 +66,16 @@ class StreamHistory:
         if live is None:
             if self.last_sample is not None:
                 self.record('telemetry_lost', title='OBS telemetry stopped. Stream health is unknown.')
-                if self.session: notices.append({'title':'FDGCast Stream Doctor','body':'OBS connection lost. Stream health is unknown.','telemetry_lost':True})
+                self.lost_since = now
+                self.lost_notified = False
+            if self.session and self.lost_since is not None and now-self.lost_since >= policy(self.sensitivity)['wait'] and not self.lost_notified:
+                notices.append({'title':'FDGCast Stream Doctor','body':'OBS connection lost. Stream health is unknown.','telemetry_lost':True})
+                self.lost_notified = True
             self.conditions.clear(); self.frame_conditions.clear(); self.previous.clear(); self.last_sample = None
             self.health = []; self.issues = []
             return notices
+        self.lost_since = None
+        self.lost_notified = False
         if self.last_sample is None and self.session:
             self.record('telemetry_restored', title='OBS telemetry is available again; monitoring resumed.')
         if self.last_sample is not None and now-self.last_sample > 5:
@@ -93,10 +104,12 @@ class StreamHistory:
             old = self.conditions.get(uid)
             if not failure and old and old['code'] in ('stopped','reconnecting','failed') and not out.get('active') and uid not in self.intentional_stops: failure='stopped'
             if uid in self.intentional_stops: failure=None; dropped=0
-            if failure or dropped:
+            frames = max(0, out.get('frames',0)-(before or {}).get('frames',0)) if before else 0
+            ratio = dropped/frames if frames else None
+            if failure or dropped >= 3 and (ratio is None or ratio >= policy(self.sensitivity)['ratio']):
                 code = failure or 'network_drops'
                 title = name+(' is reconnecting.' if code=='reconnecting' else ' stopped unexpectedly.' if code=='stopped' else ' failed to start.' if code=='failed' else ' is dropping network frames.')
-                bad[uid] = dict(code=code,title=title,name=name,destination_id=uid,
+                bad[uid] = dict(code=code,title=title,name=name,destination_id=uid, severity='critical' if code in ('failed','stopped') or ratio is not None and ratio>=0.05 else 'warning',
                     evidence=(str(dropped)+' network frames dropped in the latest sample.' if code=='network_drops' else 'OBS reports this output '+code+'.'),
                     suggestion='Check this destination and its route; OBS telemetry cannot prove the faulty network hop.',confidence='high')
             state = 'attention' if uid in bad else 'live' if out.get('active') else 'connecting' if out.get('busy') else 'offline'
@@ -112,28 +125,38 @@ class StreamHistory:
         for uid in list(self.conditions):
             if uid not in bad:
                 old = self.conditions.pop(uid)
+                if not old.get('notified'): continue
                 if uid in self.intentional_stops:
                     self.record('incident_closed', destination_id=uid,title=old['issue']['name']+' intentionally stopped; recovery not verified.')
                 elif uid not in {str(o['id']) for o in outputs}:
                     self.record('incident_closed', destination_id=uid,title=old['issue']['name']+' telemetry unavailable; recovery not verified.')
-                elif now-old.get('clear_since',now)<5:
+                elif now-old.get('clear_since',now)<policy(self.sensitivity)['clear']:
                     old.setdefault('clear_since',now); self.conditions[uid]=old
                 else:
                     elapsed = round(old.get('clear_since',now)-old['since'],1)
                     title=old['issue']['name']+' recovered after '+str(elapsed)+' seconds of observed disruption.'
-                    self.record('recovered',destination_id=uid,code=old['code'],title=title,duration=elapsed)
+                    if old.get('notified'): self.record('recovered',destination_id=uid,code=old['code'],title=title,duration=elapsed)
                     if old.get('notified'): notices.append(dict(title='FDGCast Stream Doctor',body=title,destination_id=uid,recovery=True))
         for uid, issue in bad.items():
             old=self.conditions.get(uid)
             if not old:
-                old={'since':now,'code':issue['code'],'issue':issue,'notified':False};self.conditions[uid]=old
-                self.record('incident',**issue)
+                old={'since':now,'code':issue['code'],'issue':issue,'notified':False, 'severity_since':now, 'observed_severity':issue['severity']};self.conditions[uid]=old
+
             old.pop('clear_since',None);old['issue']=issue
-            if now-old['since']>=3 and not old['notified']:
+            if old['observed_severity'] != issue['severity']:
+                old['severity_since'],old['observed_severity'] = now,issue['severity']
+            wait = 3 if issue['severity'] == 'critical' else policy(self.sensitivity)['wait']
+            if now-old['since'] >= wait and (issue['severity'] != 'critical' or now-old['severity_since'] >= 3) and (not old['notified'] or old.get('notified_severity') != 'critical' and issue['severity'] == 'critical'):
+                self.record('incident',**issue)
+                old['code'] = issue['code']
+                old['notified_severity']=issue['severity']
                 old['notified']=True;notices.append(dict(title='FDGCast Stream Doctor',body=issue['title']+' '+issue['evidence'],destination_id=uid))
         if len(notices)>1 and len(bad)>1:
             notices=[dict(title='FDGCast Stream Doctor',body='Multiple destinations are struggling: '+', '.join(i['name'] for i in bad.values())+'. A shared connection or system issue is possible; the cause is not proven.',destination_ids=list(bad))]
-        self.issues=issues
+        self.issues=[issue for issue in issues if issue['code'] == 'shared' and sum(c.get('notified', False) for c in self.conditions.values())>1 or self.conditions.get(issue.get('destination_id'), {}).get('notified')]
+        for row in self.health:
+            if row['state'] == 'attention' and not self.conditions.get(row['id'], {}).get('notified'):
+                row['state'] = 'checking'
         self.previous={str(o['id']):dict(o,sample_at=now) for o in outputs}
         return notices
 
@@ -142,7 +165,7 @@ class StreamHistory:
             self.record('frame_telemetry_lost',title='Frame statistics unavailable. Recovery cannot be verified.')
         self.frame_conditions.clear()
 
-    def frames(self, issues, live, now=None):
+    def frames(self, issues, live, now=None, stabilized=False):
         now=time.monotonic() if now is None else now
         if not live:
             self.frame_conditions.clear()
@@ -151,16 +174,19 @@ class StreamHistory:
         notices=[]
         for code, issue in current.items():
             if code not in self.frame_conditions:
-                self.frame_conditions[code]={'since':now,'title':issue['title']}
+                self.frame_conditions[code]={'since':now,'title':issue['title'], 'severity':issue.get('severity','warning')}
                 self.record('frame_incident',code=code,title=issue['title'],evidence=issue['evidence'])
                 notices.append(dict(title='FDGCast Stream Doctor',body=issue['title']+'. '+issue['evidence'],frame_code=code))
+            elif issue.get('severity') == 'critical' and self.frame_conditions[code].get('severity') != 'critical':
+                self.frame_conditions[code]['severity'] = 'critical'
+                notices.append(dict(title='FDGCast Stream Doctor', body='Critical: '+issue['title']+'. '+issue['evidence'], frame_code=code))
             self.frame_conditions[code].pop('clear_since',None)
         for code in list(self.frame_conditions):
             if code in current: continue
             condition=self.frame_conditions[code]
             condition.setdefault('clear_since',now)
-            if now-condition['clear_since']>=5:
-                self.record('frame_recovered',code=code,title=condition['title']+' stopped increasing for five seconds.',duration=round(condition['clear_since']-condition['since'],1))
+            if now-condition['clear_since'] >= (0 if stabilized else policy(self.sensitivity)['clear']):
+                self.record('frame_recovered',code=code,title=condition['title']+' cleared after stable frame measurements.',duration=round(condition['clear_since']-condition['since'],1))
                 self.frame_conditions.pop(code)
         return notices
 

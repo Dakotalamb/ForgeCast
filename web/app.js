@@ -33,13 +33,13 @@ destinationPlatformChanged();
 let pairingLoaded=false,obsPasswordLoaded=false;
 $('showObsPassword').onclick=()=>{const input=$('obsForm').elements.password;input.type=input.type==='password'?'text':'password';$('showObsPassword').textContent=input.type==='password'?'Show password':'Hide password';};
 $('showPairCode').onclick=()=>{const input=$('hubForm').elements.token;input.type=input.type==='password'?'text':'password';$('showPairCode').textContent=input.type==='password'?'Show code':'Hide code';};
-$('send').onsubmit=e=>{e.preventDefault();const f=e.currentTarget;run(async()=>{await action('chat_send',Object.fromEntries(new FormData(f)));f.elements.text.value='';},f.querySelector('button'));};
 document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>action('chat_disconnect',{platform:b.dataset.disconnect,forget:true}),b));
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
 $('startAll').onclick=()=>{if(confirm('Start your main OBS stream and every checked destination?'))run(()=>action('native_command',{command:'start_all',confirmed:true}),$('startAll'));};
 $('stopAll').onclick=()=>{if(confirm('Stop your main OBS stream and all FDGCast destinations?'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
 $('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));if(c.fix)d.append(button(c.fix==='unmute'?'Unmute':'Fix audio routing',()=>action('audio_fix',{source_uuid:c.source_uuid,fix:c.fix})));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
 $('goLiveAnyway').onclick=()=>{if(confirm('Start your main OBS stream and checked destinations despite the preflight warnings?'))run(()=>state.destinations.some(d=>d.enabled!==false)?action('native_command',{command:'start_all',confirmed:true}):action('obs_command',{command:'StartStream',confirmed:true}),$('goLiveAnyway'));};
+$('doctorSensitivity').onchange=()=>run(()=>action('doctor_settings',{sensitivity:$('doctorSensitivity').value}),$('doctorSensitivity'));
 $('doctorNotify').onchange=()=>run(()=>action('doctor_settings',{notifications:$('doctorNotify').checked}),$('doctorNotify'));
 $('copyReport').onclick=()=>run(async()=>{const r=await api('/api/report-text');try{await navigator.clipboard.writeText(r.text);$('copyReport').textContent='Copied';}catch{const box=$('reportCopyFallback');box.hidden=false;box.value=r.text;box.focus();box.select();}},$('copyReport'));
 $('historySession').onchange=()=>{if(state)renderHistory(state);};
@@ -108,36 +108,6 @@ function renderAudio(s){
  if(!s.audio_history?.length)$('audioHistory').append(el('p','No audio incidents recorded yet.','muted'));
 }
 function issue(i) { const d=el('article',undefined,'issue');d.append(el('h3',i.title),el('small',i.confidence.toUpperCase()+' confidence · symptom classification'),el('p',i.evidence),el('p',i.suggestion));return d; }
-function platformIcon(platform) {
- const image=el('img');image.className='platform-icon';image.alt=platform;image.title=platform;
- if(['twitch','youtube','kick'].includes(platform))image.src='/icons/'+platform+'.svg';
- return image;
-}
-function renderChat() {
- if(!state)return;
- const box=$('messages'), bottom=box.scrollHeight-box.scrollTop-box.clientHeight<60;
- const list=state.messages.filter(m=>m.kind==='chat'&&($('platformFilter').value==='all'||m.platform===$('platformFilter').value)&&($('originFilter').value==='all'||m.origin_id===$('originFilter').value));
- box.replaceChildren(...list.map(m=>{
-   const d=el('article',undefined,'message '+m.platform), identity=el('div',undefined,'chat-identity');
-   identity.append(platformIcon(m.platform));
-   if(m.is_creator&&/^\/media\/[a-f0-9]{64}$/.test(m.avatar||'')){const avatar=el('img');avatar.src=m.avatar;avatar.alt='';avatar.className='creator-avatar';identity.append(avatar);}
-   const name=el('strong',m.user,'username');name.title=m.user;
-   if(/^#[a-fA-F0-9]{6}$/.test(m.color||''))name.style.color=m.color;
-   identity.append(name);if(m.is_creator)identity.append(el('span','CREATOR','tag'));
-   const source=el('div',m.origin+'’s chat','origin');source.title=m.platform+' · '+m.origin+'’s chat';if(m.shared)source.append(el('span','SHARED','tag'));
-   const body=el('p');
-   for(const part of m.fragments||[{text:m.text}]){
-     if(/^\/media\/[a-f0-9]{64}$/.test(part.image||'')){
-       const image=el('img');image.src=part.image;image.alt=part.text;image.title=part.text;image.className='emote';
-       image.onerror=()=>image.replaceWith(document.createTextNode(part.text));body.append(image);
-     }else body.append(document.createTextNode(part.text));
-   }
-   d.append(el('time',new Date(m.time*1000).toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})),identity,source,body);return d;
- }));
- if(!list.length)box.append(el('p','No chat messages yet. Check account connection status.','empty'));
- if(bottom)box.scrollTop=box.scrollHeight;
-}
-['platformFilter','originFilter'].forEach(id=>$(id).onchange=renderChat);
 function outputStatus(s,d){
  const current=s.outputs.find(x=>x.id===d.id), detail=current?.error||s.output_errors?.[d.id];
  if(!s.native_connected)return {text:'OFFLINE · OBS module disconnected',level:'offline'};
@@ -147,7 +117,7 @@ function outputStatus(s,d){
  if(current?.active)return {text:'LIVE',level:'healthy'};
  return {text:'OFFLINE',level:'offline'};
 }
-let lastChat='', lastDest='';
+let lastDest='';
 function renderHistory(s){
  const history=s.stream_history||{}, rows=history.events||[], filter=$('historySession');
  const selected=filter.value;
@@ -161,13 +131,15 @@ function renderHistory(s){
  $('destinationHealth').replaceChildren(...(history.health||[]).map(r=>{const row=el('div',undefined,'row');row.append(el('strong',r.name),el('span',r.state.toUpperCase()+(r.bitrate_kbps!=null?' · '+r.bitrate_kbps+' kbps':'')));return row;}));
  if(!history.health?.length)$('destinationHealth').append(el('p','Go live to monitor destination health. Missing telemetry does not prove the stream stopped.','muted'));
  $('doctorNotify').checked=s.doctor_notifications!==false;
+ if(document.activeElement!==$('doctorSensitivity'))$('doctorSensitivity').value=s.doctor_sensitivity||'balanced';
 }
 function render(s) {
  state=s;
  renderAudio(s);
  renderHistory(s);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.5.5';
- $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Native connected':'Native offline');
+ renderUpdates(s.updates);
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.6.0';
+ $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
  $('obsConnectButton').textContent=s.obs_connected?'Reconnect OBS':'Connect OBS';
@@ -185,8 +157,6 @@ function render(s) {
  $('hubPairStatus').textContent=hubStatus;$('hubPairStatus').className=s.hub_connection==='connected'?'ok':'muted';
  const hubUrl=$('hubForm').elements.url;
  if(document.activeElement!==hubUrl && hubUrl.value!==s.hub_url)hubUrl.value=s.hub_url;
- const serialized=JSON.stringify(s.messages);
- if(serialized!==lastChat){lastChat=serialized;const selected=$('originFilter').value;const channels=new Map(s.messages.map(m=>[m.origin_id,m.origin]));$('originFilter').replaceChildren(new Option('All origin channels','all'),...Array.from(channels,([id,name])=>new Option(name+'’s chat',id)));if(channels.has(selected))$('originFilter').value=selected;renderChat();}
  const destinations=JSON.stringify([s.destinations,s.outputs,s.native_connected,s.output_errors]);
  if(destinations!==lastDest){lastDest=destinations;$('destinations').replaceChildren(...s.destinations.map(d=>{
    const card=el('article',undefined,'panel destination-card'),status=outputStatus(s,d);
@@ -211,13 +181,27 @@ function render(s) {
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
  $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
-   const item=el('p',undefined,'audience-event');item.append(el('small',e.source),el('br'),document.createTextNode(e.text));return item;
- }));if(!s.combined_events?.length)$('audienceEvents').append(el('p',s.statuses.twitch_events||'Subs, gifts, raids and supported audience activity appear here.','muted'));
+   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid'})[e.kind]||'Event'),el('br'),document.createTextNode(e.text));return item;
+ }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for Twitch follows, redeems and raids.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
  $('hubEvents').replaceChildren(...s.hub_events.map(e=>{const d=el('article',undefined,'panel');d.append(el('h2',String(e.title||'Untitled')),el('p',String(e.starts_at||'')));return d;}));
 }
+function renderUpdates(u){
+ if(!u)return;
+ $('updateBanner').hidden=!u.show_notice;
+ $('updateNotice').textContent='FDGCast '+(u.latest?.version||'')+' is available';
+ $('updateVersions').textContent='Installed: '+u.installed+(u.latest?' · Latest: '+u.latest.version:'');
+ $('updateStatus').textContent=u.status;
+ $('updateNotes').textContent=u.latest?.notes||'No release notes available yet.';
+ const download=$('updateDownload');
+ if(u.available)download.href=u.latest.download_url;else download.removeAttribute('href');
+}
+$('updateCheck').onclick=()=>run(()=>action('update_check'),$('updateCheck'));
+$('updateLater').onclick=()=>run(()=>action('update_later'),$('updateLater'));
+$('updateView').onclick=()=>{openTab('setup');$('updateChanges').open=true;$('updateChanges').scrollIntoView({behavior:'smooth'});};
+for(const [id,tip] of Object.entries({preflight:'Check audio and destination readiness before going live. This does not start a stream.',audioQuiet:'Exact scene names where silence or a muted microphone is expected. Alerts pause in these scenes.',audioSilence:'How long continuous silence must last before a warning appears. Silence does not prove a device is disconnected.',audioAck:'Silence alerts for the current audio problem until it clears. Monitoring continues.',audioSnooze:'Pause audio notifications for ten minutes while monitoring continues.',setupSync:'Reload your linked platform accounts and reconnect chats that need recovery.',doctorNotify:'Show a Windows notification once sustained stream trouble is detected. Monitoring continues when turned off.'}))$(id).title=tip;
 async function refresh(){render(await api('/api/state'));
  if(!obsPasswordLoaded){const saved=await api('/api/obs-connection');const form=$('obsForm');if(!form.elements.password.value&&document.activeElement!==form.elements.password)form.elements.password.value=saved.password;if(!form.contains(document.activeElement))form.elements.port.value=saved.port;obsPasswordLoaded=true;}
  if(!pairingLoaded){const saved=await api('/api/pairing');const input=$('hubForm').elements.token;if(!input.value&&document.activeElement!==input)input.value=saved.token;pairingLoaded=true;}

@@ -1,0 +1,7 @@
+{
+  "schema_version": 1,
+  "version": "0.6.0-preview",
+  "platform": "windows-x64",
+  "download_url": "/downloads/FDGCast-0.6.0-preview-win-x64-setup.exe",
+  "notes": "Quieter Stream Doctor presets; focused Twitch follows, redeems and incoming raids; simpler OBS MultiChat; chat reliability fixes; Companion recovery buttons; update notices and manual installer downloads."
+}

@@ -88,25 +88,46 @@ class DoctorTests(unittest.TestCase):
     def test_healthy(self):
         self.assertEqual(self.d.sample(self.sample,2), [])
 
+    def sustained(self):
+        result=[]
+        for index in range(1,7):
+            current=copy.deepcopy(self.sample)
+            current['renderTotalFrames']=100+(self.sample['renderTotalFrames']-100)*index
+            current['outputTotalFrames']=100+(self.sample['outputTotalFrames']-100)*index
+            current['renderSkippedFrames']=self.sample['renderSkippedFrames']*index
+            current['outputSkippedFrames']=self.sample['outputSkippedFrames']*index
+            for out in current['outputs']: out['dropped'] *= index
+            result=self.d.sample(current,index*2)
+        return result
+
     def test_render(self):
         self.sample.update(renderSkippedFrames=3,renderTotalFrames=220)
-        issue=self.d.sample(self.sample,2)[0]
+        issue=self.sustained()[0]
         self.assertEqual(issue['code'],'render')
         self.assertIn('3 of 120',issue['evidence'])
 
     def test_encoding(self):
         self.sample.update(outputSkippedFrames=6,outputTotalFrames=220)
-        self.assertEqual(self.d.sample(self.sample,2)[0]['code'],'encode')
+        self.assertEqual(self.sustained()[0]['code'],'encode')
 
     def test_single_route_not_definitive(self):
         self.sample['outputs'][0]['dropped']=10
-        issues=self.d.sample(self.sample,2)
+        issues=self.sustained()
         self.assertEqual(issues[-1]['title'],'Some outputs affected')
         self.assertEqual(issues[-1]['confidence'],'medium')
 
     def test_all_outputs(self):
         for out in self.sample['outputs']:out['dropped']=10
-        self.assertEqual(self.d.sample(self.sample,2)[-1]['title'],'All active outputs affected')
+        self.assertEqual(self.sustained()[-1]['title'],'All active outputs affected')
+
+    def test_transient_spike_is_ignored(self):
+        self.assertEqual(self.d.sample(dict(self.sample,renderSkippedFrames=40,renderTotalFrames=220),2),[])
+        self.assertEqual(self.d.sample(dict(self.sample,renderSkippedFrames=40,renderTotalFrames=340),4),[])
+        self.assertEqual(list(self.d.incidents),[])
+
+    def test_small_frame_fluctuation_is_ignored(self):
+        for n in range(1,40):
+            self.assertEqual(self.d.sample(dict(self.sample,renderSkippedFrames=n,renderTotalFrames=100+120*n),n*2),[])
 
     def test_counter_reset(self):
         self.sample.update(renderTotalFrames=1,renderSkippedFrames=0)
@@ -116,10 +137,19 @@ class DoctorTests(unittest.TestCase):
         self.sample['outputs'][0].update(active=False,dropped=9)
         self.assertEqual(self.d.sample(self.sample,2),[])
 
-    def test_cooldown(self):
-        for n in range(1,5):
-            self.d.sample(dict(self.sample,renderSkippedFrames=n,renderTotalFrames=100+120*n),n*2)
+    def test_continuing_issue_does_not_repeat(self):
+        for n in range(1,40):
+            self.d.sample(dict(self.sample,renderSkippedFrames=3*n,renderTotalFrames=100+120*n),n*2)
         self.assertEqual(len(self.d.incidents),1)
+
+    def test_severity_escalates_only_after_persistence(self):
+        for n in range(1,7):
+            self.d.sample(dict(self.sample,renderSkippedFrames=3*n,renderTotalFrames=100+120*n),n*2)
+        self.assertEqual(self.d.incidents[-1]['severity'],'warning')
+        for n in range(1,4):
+            result=self.d.sample(dict(self.sample,renderSkippedFrames=18+12*n,renderTotalFrames=820+120*n),12+n*2)
+        self.assertEqual(result[0]['severity'],'critical')
+        self.assertEqual(len(self.d.incidents),2)
 
     def test_reset_baseline(self):
         self.d.reset()

@@ -1,16 +1,11 @@
-# Next planned feature: update notifications
+# Current release: 0.6.0 Preview
 
-Saved October 1, 2026. Deferred at the user's request; do not implement until work resumes.
+Update notifications were moved into this release at the user's request on
+October 3, 2026. Companion checks public Hub release metadata and OBS Control
+shows the update notice. No automatic install or restart. See UPDATES.md for
+the website endpoint and download publishing contract.
 
-Add an update checker to the desktop Companion and a small update notice in the OBS Control dock.
-
-- Check on Companion startup and once daily against a small release manifest hosted on the FDG website.
-- Compare installed and latest versions; show both in Companion.
-- When a newer release exists, offer View changes, Download, and Later.
-- Show a small badge/notice in the OBS Control dock and a banner in Companion.
-- Persist Later so the same update does not repeatedly interrupt the user.
-- Download uses the approved installer link; installation remains a user action.
-- Never install or restart automatically, especially during a stream.
-- Installing over the current release preserves existing settings.
-
-Current shipped version: 0.5.5 Preview. The next version number is not yet assigned. Coordinate the website release manifest and public download links before shipping the checker.
+Remaining acceptance work: real platform chat/events, Windows notification/audio
+checks and actual OBS dock resize/drag behavior. See POLISH_0.6.0.md. Google
+verification and the Hub's public update feed/download must be completed outside
+this installer build. Later roadmap features remain deferred.

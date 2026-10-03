@@ -171,13 +171,13 @@ class AudioGuard:
             stages = [(issue['notify_after'],'notification',False)]
             if issue['code'] == 'muted':
                 if self.settings['sound']: stages.append((120,'sound',True))
-                stages.append((300,'reminder',False))
+
             due = [step for step in stages if elapsed >= step[0] and step[1] not in condition['stages']]
             if due:
                 for _, stage, _ in due: condition['stages'].add(stage)
                 _, stage, sound = due[-1]
                 if self.settings['notifications'] or sound:
-                    notices.append(dict(title='FDGCast Audio Guard', body=issue['title'], sound=sound, toast=self.settings['notifications'],
+                    notices.append(dict(title='FDGCast Audio Guard', body=issue['title'], sound=sound, toast=self.settings['notifications'] and stage != 'sound',
                                         key=issue['key'], code=issue['code'], source_uuid=issue['source_uuid']))
                     self.record(stage+'_requested',issue)
         self.current = dict(state='warning' if visible else 'watching',

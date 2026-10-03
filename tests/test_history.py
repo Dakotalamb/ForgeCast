@@ -5,15 +5,35 @@ from forgecast.server import State, preflight
 
 
 def output(uid='yt',active=True,reconnecting=False,dropped=0,**extras):
-    return dict(id=uid,name={'yt':'YouTube','kick':'Kick'}.get(uid,uid),active=active,reconnecting=reconnecting,dropped=dropped,bytes=10000,**extras)
+    return dict(dict(id=uid,name={'yt':'YouTube','kick':'Kick'}.get(uid,uid),active=active,reconnecting=reconnecting,dropped=dropped,bytes=10000),**extras)
 
 
 class HistoryTests(unittest.TestCase):
     def setUp(self):
         self.temp=tempfile.TemporaryDirectory()
-        self.history=StreamHistory(self.temp.name,demo=True)
+        self.history=StreamHistory(self.temp.name,demo=True,sensitivity="sensitive")
     def tearDown(self): self.temp.cleanup()
     def kinds(self):return [e['kind'] for e in self.history.events]
+    def test_balanced_ignores_short_reconnections_and_stable_bitrate_changes(self):
+        h=StreamHistory(self.temp.name,demo=True)
+        h.sample(True,[output()],now=0)
+        for now in range(1,31):
+            notices=h.sample(True,[output(reconnecting=now%6!=0,bytes=10000+now*1000)],now=now)
+            self.assertEqual(notices,[])
+            self.assertEqual(h.issues,[])
+        self.assertNotIn('incident',[e['kind'] for e in h.events])
+
+    def test_balanced_notifies_once_then_after_real_recovery(self):
+        h=StreamHistory(self.temp.name,demo=True)
+        h.sample(True,[output()],now=0)
+        notices=[]
+        for now in range(1,30): notices+=h.sample(True,[output(reconnecting=True)],now=now)
+        self.assertEqual(len(notices),1)
+        for now in range(30,41):h.sample(True,[output()],now=now)
+        notices=[]
+        for now in range(41,61): notices+=h.sample(True,[output(reconnecting=True)],now=now)
+        self.assertEqual(len(notices),1)
+
     def test_single_platform_problem_preserves_other_health(self):
         h=self.history;h.sample(True,[output(),output('kick')],now=0)
         self.assertEqual(h.sample(True,[output(reconnecting=True),output('kick')],now=1),[])
@@ -24,6 +44,9 @@ class HistoryTests(unittest.TestCase):
     def test_multi_output_problem_does_not_claim_root_cause(self):
         h=self.history;h.sample(True,[output(),output('kick')],now=0)
         h.sample(True,[output(dropped=4),output('kick',dropped=3)],now=1)
+        h.sample(True,[output(dropped=8),output('kick',dropped=6)],now=2)
+        h.sample(True,[output(dropped=12),output('kick',dropped=9)],now=3)
+        h.sample(True,[output(dropped=16),output('kick',dropped=12)],now=4)
         shared=next(i for i in h.issues if i['code']=='shared')
         self.assertEqual(shared['confidence'],'medium')
         self.assertIn('not proven',shared['suggestion'])
@@ -56,9 +79,10 @@ class HistoryTests(unittest.TestCase):
     def test_missing_telemetry_never_claims_recovery(self):
         h=self.history;h.sample(True,[output()],now=0)
         h.sample(True,[output(reconnecting=True)],now=1)
-        self.assertEqual(len(h.sample(None,[],now=2)),1)
+        self.assertEqual(h.sample(None,[],now=2),[])
         self.assertEqual(h.sample(None,[],now=3),[])
-        h.sample(True,[output()],now=4)
+        self.assertEqual(len(h.sample(None,[],now=5)),1)
+        h.sample(True,[output()],now=6)
         self.assertNotIn('recovered',self.kinds())
         self.assertIn('telemetry_restored',self.kinds())
     def test_sampling_gap_resets_disruption_timer(self):
@@ -88,6 +112,8 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(h.health[0]['bitrate_kbps'],0)
     def test_failed_start_recorded_without_raw_error(self):
         h=self.history;h.sample(True,[output(active=False,error='RAW-KEY')],now=0)
+        self.assertEqual(h.issues,[])
+        h.sample(True,[output(active=False,error='RAW-KEY')],now=3)
         self.assertEqual(h.issues[0]['code'],'failed')
         self.assertNotIn('RAW-KEY',str(h.events))
     def test_frame_incidents_and_verified_counter_recovery(self):

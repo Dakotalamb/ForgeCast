@@ -3,6 +3,8 @@ from collections import OrderedDict, deque
 import time
 import hashlib
 import re
+import copy
+from .diagnostics import policy
 
 
 def twitch_message(event):
@@ -108,30 +110,52 @@ class ChatStore:
 
 class Doctor:
     """Counter deltas, not lifetime percentages. No unsupported root-cause claims."""
-    def __init__(self):
+    def __init__(self, sensitivity="balanced"):
+        self.sensitivity = sensitivity
+        policy(sensitivity)
+        self.conditions = {}
         self.previous = None
         self.incidents = deque(maxlen=300)
         self.samples = deque(maxlen=120)
         self.last_notice = {}
 
+    def configure(self, sensitivity):
+        policy(sensitivity)
+        self.sensitivity = sensitivity
+        self.reset()
+
     def reset(self):
         self.previous = None
+        self.conditions.clear()
 
     def sample(self, current, now=None):
         now = time.time() if now is None else now
         self.samples.append(dict(time=now, **current))
-        prev, self.previous = self.previous, current
+        prev, self.previous = self.previous, copy.deepcopy(current)
         if not prev:
             return []
         result = []
+        settings = policy(self.sensitivity)
+        observed = set()
 
         def issue(code, title, evidence, suggestion, confidence='high'):
+            observed.add(code)
+            severity = 'critical' if confidence == 'critical' else 'warning'
             record = dict(time=now, code=code, title=title, evidence=evidence,
-                          suggestion=suggestion, confidence=confidence)
-            result.append(record)
-            if now - self.last_notice.get(code, -1e9) >= 30:
-                self.incidents.append(record)
-                self.last_notice[code] = now
+                          suggestion=suggestion, confidence='high' if confidence == 'critical' else confidence, severity=severity)
+            condition = self.conditions.setdefault(code, {'since':now, 'severity_since':now, 'observed_severity':severity, 'notice':None})
+            condition.pop('clear_since', None)
+            if condition['observed_severity'] != severity:
+                condition['severity_since'], condition['observed_severity'] = now, severity
+            wait = 3 if severity == 'critical' else settings['wait']
+            if now-condition['since'] >= wait and (severity != 'critical' or now-condition['severity_since'] >= 3):
+                previous_notice = condition['notice']
+                if previous_notice and previous_notice['severity'] == 'critical' and now-condition['severity_since'] < settings['clear']:
+                    record = dict(previous_notice, time=now)
+                condition['notice'] = record
+                result.append(record)
+                if not previous_notice or (previous_notice['severity'] != record['severity'] and record['severity'] == 'critical'):
+                    self.incidents.append(record)
 
         for missed, total, name, code, tip in [
             ('renderSkippedFrames', 'renderTotalFrames', 'Rendering lag', 'render',
@@ -139,8 +163,8 @@ class Doctor:
             ('outputSkippedFrames', 'outputTotalFrames', 'Encoding lag', 'encode',
              'Review encoder load, preset and resolution. Shared encoders can reduce duplicate work.')]:
             d, n = current.get(missed, 0)-prev.get(missed, 0), current.get(total, 0)-prev.get(total, 0)
-            if d > 0 and n > 0:
-                issue(code, name, f'{d} of {n} frames missed in the latest sample ({100*d/n:.1f}%).', tip)
+            if d >= 3 and n > 0 and d/n >= settings['ratio']:
+                issue(code, name, f'{d} of {n} frames missed in the latest sample ({100*d/n:.1f}%).', tip, 'critical' if d/n >= 0.05 else 'high')
         old = {o['id']: o for o in prev.get('outputs', [])}
         affected, active = [], []
         for out in current.get('outputs', []):
@@ -149,7 +173,7 @@ class Doctor:
             before = old.get(out['id'])
             if before and out.get('active') and before.get('active'):
                 drops = out.get('dropped', 0)-before.get('dropped', 0)
-                if drops > 0:
+                if drops >= 3:
                     affected.append(out['name'])
                     issue('network:'+out['id'], 'Network drops · '+out['name'],
                           f'{drops} frames dropped on this output in the latest sample.',
@@ -159,6 +183,14 @@ class Doctor:
             issue('pattern', pattern, ', '.join(affected),
                   'A common local bottleneck is possible.' if set(active) == set(affected)
                   else 'Investigate destination settings and route; a local bottleneck is still possible.', 'medium')
+        for code in list(self.conditions):
+            if code in observed: continue
+            condition = self.conditions[code]
+            condition.setdefault('clear_since', now)
+            if now-condition['clear_since'] >= settings['clear'] or not condition['notice']:
+                self.conditions.pop(code)
+            elif condition['notice']:
+                result.append(dict(condition['notice'], time=now))
         return result
 
 

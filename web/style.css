@@ -12,3 +12,5 @@ textarea{background:#0e141d;border:1px solid #354153;color:var(--ink);padding:10
 #send .compose input { background:#090f17; color:#fff; border:1px solid #667b91; }
 #send .compose input:focus { outline:2px solid #ff7549; outline-offset:1px; }
 .connection-connected { color:#94e6b0; font-weight:700; }
+
+.workspace{display:block}.workspace>aside{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,300px),1fr));gap:16px}#updateBanner{margin:12px 30px}#updateBanner .controls{margin:8px 0}#updateNotes{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit}.button{display:inline-block;border-radius:6px;padding:10px 14px;background:var(--orange);color:#151719;text-decoration:none;font-weight:600}

@@ -18,13 +18,10 @@ async function main(){
   browser=await chromium.launch({headless:true,args:['--no-sandbox']});
   const page=await browser.newPage({viewport:{width:1440,height:1080}});
   const errors=[];page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(url);await page.waitForSelector('.message');
+  await page.goto(url);await page.waitForFunction(()=>document.querySelector('#audioHome').textContent.includes('microphone')||document.querySelector('#mode').textContent.includes('DEMO'));
   assert.match(await page.locator('#mode').textContent(),/DEMO/);
-  assert.match(await page.locator('#messages').textContent(),/Box_Beard’s chat/);
-  await page.selectOption('#originFilter','Box_Beard');
-  assert.equal(await page.locator('.message').count(),1);
-  assert.match(await page.locator('.message').textContent(),/ViewerTwo/);
-  await page.selectOption('#originFilter','all');
+  assert.equal(await page.locator('#messages,#send,.panel.chat').count(),0,'Chat belongs in OBS');
+  assert.equal(await page.locator('#updateBanner').isVisible(),false);
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','live']){
@@ -58,6 +55,18 @@ async function main(){
   await page.locator('#showObsPassword').click();
   assert.equal(await page.locator('#obsForm input[name=password]').getAttribute('type'),'password');
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
+  await page.route('**/api/state',async route=>{
+    const response=await route.fetch(),data=await response.json();
+    data.updates={installed:'0.6.0-preview',latest:{version:'0.7.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
+    await route.fulfill({response,json:data});
+  });
+  await page.waitForSelector('#updateBanner:not([hidden])');
+  assert.match(await page.locator('#updateNotice').textContent(),/0.7.0-preview/);
+  await page.locator('#updateView').click();
+  assert.equal(await page.locator('#updateNotes').isVisible(),true);
+  assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.6.0-preview/);
+  assert.equal(await page.locator('#updateDownload').getAttribute('href'),'https://hub.example/downloads/setup.exe');
+  await page.screenshot({path:path.join(output,'updates-demo.png'),fullPage:true});
   await page.locator('[data-tab="live"]').click();
   page.on('dialog',dialog=>dialog.accept());
   await page.locator('[data-command="StartStream"]').click();
@@ -67,7 +76,7 @@ async function main(){
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
-  console.log('PASS: demo rendering, original-channel filter, all five tabs, blocked live action, mobile overflow, no JS errors.');
+  console.log('PASS: demo rendering, OBS-only chat, all five tabs, blocked live action, mobile overflow, no JS errors.');
  } finally {
   if(browser)await browser.close();
   server.kill('SIGINT');

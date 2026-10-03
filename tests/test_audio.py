@@ -17,14 +17,14 @@ class AudioGuardTests(unittest.TestCase):
         notices=[]
         for second in range(end+1):notices.extend(self.sample(second,**fields))
         return notices
-    def test_muted_warning_notification_and_five_minute_reminder(self):
+    def test_muted_warning_notifies_once_for_continuing_problem(self):
         self.advance(29,muted=True)
         self.assertEqual(self.guard.current['issues'],[])
         self.sample(30,muted=True)
         self.assertEqual(self.guard.current['issues'][0]['code'],'muted')
         notices=[]
         for n in range(31,301):notices.extend(self.sample(n,muted=True))
-        self.assertEqual(len(notices),2)
+        self.assertEqual(len(notices),1)
         self.assertFalse(any(n['sound'] for n in notices))
     def test_optional_sound_does_not_depend_on_toast_setting(self):
         self.guard.settings.update(sound=True,notifications=False)

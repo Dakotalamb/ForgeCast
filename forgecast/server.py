@@ -23,6 +23,8 @@ from .chat import Twitch, YouTube, ApiError, api
 from .audio import AudioGuard, validate_settings, notify_windows, play_warning_sound
 from .history import StreamHistory
 from .sound import read_pcm, MAX_BYTES
+from .updates import Updates
+from . import __version__
 
 PORT = 17654
 WEB = Path(__file__).resolve().parent.parent/'web'
@@ -37,7 +39,7 @@ class State:
         self.vault = Vault(self.directory, memory=demo)
         self.browser_key = secrets.token_urlsafe(32)
         self.native_key = secrets.token_urlsafe(32)
-        self.chat, self.doctor = ChatStore(), Doctor()
+        self.chat, self.doctor = ChatStore(), Doctor(self.config.get("doctor_sensitivity", "balanced"))
         self.statuses = {'twitch':'not connected', 'youtube':'not connected', 'kick':'not connected'}
         self.adapters = {}
         self.events = deque(maxlen=100)
@@ -65,10 +67,11 @@ class State:
         self.audio_snapshot = None
         self.audio_seen = 0
         self.audio_notice_queue = asyncio.Queue(maxsize=20)
-        self.history = StreamHistory(self.directory, demo)
+        self.history = StreamHistory(self.directory, demo, self.doctor.sensitivity)
         self.main_output = None
         self.doctor_notice_queue = asyncio.Queue(maxsize=20)
         self.audio_history_cursor = self.audio.history[-1] if self.audio.history else None
+        self.updates = Updates(self)
 
     def status(self, platform, message):
         if self.statuses.get(platform) != message:
@@ -127,7 +130,7 @@ class State:
 
     def report(self):
         # Deliberately excludes chats, stream URLs, credentials and source/window names.
-        return dict(schema_version=1, app='FDGCast', version='0.5.2-preview', demo=self.demo,
+        return dict(schema_version=1, app='FDGCast', version=__version__, demo=self.demo,
                     generated_at=time.time(), stream_history=self.history.report(), audio_guard=self.audio.summary(), incidents=list(self.doctor.incidents),
                     samples=list(self.doctor.samples), limitations=[
                         'Counter-based classification, not a proven root cause.',
@@ -135,11 +138,11 @@ class State:
                         'Output names are user-provided; review before sharing.'])
 
     def public(self):
-        return dict(demo=self.demo, obs_connected=bool(self.obs and self.obs.connected),
+        return dict(demo=self.demo, updates=self.updates.public(), obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
-                    stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True),
+                    stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sensitivity=self.doctor.sensitivity,
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
@@ -153,14 +156,10 @@ class State:
 
 def combined_events(s):
     """Bounded activity available from connected accounts and local OBS telemetry."""
-    audience_kinds = {'sub', 'resub', 'sub_gift', 'community_sub_gift', 'gift_paid_upgrade',
-        'prime_paid_upgrade', 'raid', 'unraid', 'pay_it_forward', 'announcement', 'bits_badge_tier',
-        'charity_donation', 'cheer', 'follow', 'redeem', 'superChatEvent', 'superStickerEvent',
-        'newSponsorEvent', 'memberMilestoneChatEvent', 'membershipGiftingEvent',
-        'giftMembershipReceivedEvent'}
+    audience_kinds = {'follow', 'redeem', 'raid'}
     rows = [dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
                  text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'), kind=m.get('kind'))
-            for m in s.chat.messages if m.get('kind') in audience_kinds and not m.get('deleted')]
+            for m in s.chat.messages if m.get('platform') == 'twitch' and m.get('kind') in audience_kinds and not m.get('deleted')]
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
 
@@ -460,6 +459,11 @@ async def action(request):
     op = data.get('op')
     if s.demo:
         raise ValueError('Demo mode never connects accounts or changes OBS. Restart without --demo.')
+    if op == 'update_check':
+        return web.json_response(await s.updates.check())
+    if op == 'update_later':
+        s.updates.later()
+        return web.json_response({'ok':True})
     async with s.lock:
         if op == 'audio_sound_file':
             encoded = data.get('wav')
@@ -489,8 +493,14 @@ async def action(request):
             s.audio.record('test_'+channel+'_submitted' if submitted else 'test_'+channel+'_unavailable')
             return web.json_response({'submitted':submitted, 'channel':channel})
         elif op == 'doctor_settings':
-            if not isinstance(data.get('notifications'), bool): raise ValueError('Notifications must be true or false.')
-            s.config['doctor_notifications'] = data['notifications']; s.save()
+            if 'notifications' in data:
+                if not isinstance(data['notifications'], bool): raise ValueError('Notifications must be true or false.')
+                s.config['doctor_notifications'] = data['notifications']
+            if 'sensitivity' in data:
+                s.doctor.configure(data['sensitivity'])
+                s.history.sensitivity = s.doctor.sensitivity
+                s.config['doctor_sensitivity'] = s.doctor.sensitivity
+            s.save()
         elif op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
             await audio_action(s, data)
         elif op == 'obs_connect':
@@ -670,6 +680,7 @@ async def native(request):
     # OBS owns the operator view. Send only bounded, non-credential telemetry to
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
+        'updates': s.updates.public(),
         'commands': commands,
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') == 'chat'][-80:],
         'events': combined_events(s),
@@ -697,6 +708,11 @@ async def native_action(request):
     op = data.get('action')
     if s.demo:
         raise ValueError('Live actions are disabled in demo mode.')
+    if op == 'update_check':
+        return web.json_response(await s.updates.check())
+    if op == 'update_later':
+        s.updates.later()
+        return web.json_response({'ok':True})
     if op == 'focus':
         if os.name != 'nt':
             raise ValueError('FDGCast desktop window is available in the Windows installer.')
@@ -772,8 +788,8 @@ async def poll(s):
                     if s.main_output: outputs = [s.main_output]
                     outputs += s.native_outputs
                 s.stats = dict(stats, stream_active=stream['outputActive'], outputs=outputs)
-                s.current_issues = s.doctor.sample(s.stats)
-                for notice in s.history.frames(s.current_issues,stream['outputActive']):
+                s.current_issues = [issue for issue in s.doctor.sample(s.stats) if issue['code'] in ('render','encode')]
+                for notice in s.history.frames(s.current_issues,stream['outputActive'],stabilized=True):
                     notice['created']=time.time()
                     if not s.doctor_notice_queue.full(): s.doctor_notice_queue.put_nowait(notice)
                 scene = await s.obs.request('GetCurrentProgramScene')
@@ -846,7 +862,7 @@ async def sync_hub_accounts(s):
                         raise ValueError('Twitch account identity is missing. Reconnect in Hub settings.')
                     config = {'client_id':conn['client_id'], 'user_id':user, 'channel_id':user}
                     existing = s.adapters.get(platform)
-                    if existing and existing.config.get('channel_id') == user and existing.config.get('client_id') == conn['client_id']:
+                    if existing and existing.config.get('channel_id') == user and existing.config.get('client_id') == conn['client_id'] and existing.token == token and existing.task and not existing.task.done():
                         existing.token = token
                         s.vault.set(platform+'_token', token)
                         continue
@@ -856,7 +872,7 @@ async def sync_hub_accounts(s):
                 else:
                     existing = s.adapters.get(platform)
                     user = str(conn.get('user_id') or conn.get('username') or 'YouTube')
-                    if existing and existing.config.get('account_id') == user:
+                    if existing and existing.config.get('account_id') == user and existing.task and not existing.task.done():
                         existing.token = token
                         config = existing.config
                     else:
@@ -896,9 +912,15 @@ async def sync_hub_accounts(s):
 
 def accept_kick_rows(s, result):
     for row in result.get('messages', []):
-        cursor = int(row['id'])
+        try:
+            cursor = int(row['id'])
+            if cursor < 0: raise ValueError('Invalid cursor')
+        except (KeyError, TypeError, ValueError):
+            s.status('kick', 'An invalid chat message was skipped; checking again automatically.')
+            continue
         try:
             payload = row['payload']
+            if not isinstance(payload, dict) or not isinstance(payload.get('broadcaster'), dict) or not isinstance(payload.get('sender'), dict): raise ValueError('Invalid message')
             if str(payload.get('broadcaster', {}).get('user_id')) != s.config.get('kick', {}).get('channel_id'):
                 continue
             s.chat.add(kick_message(payload))
@@ -921,9 +943,8 @@ async def poll_hub(s):
                     async with s.lock: await sync_hub_accounts(s)
                 except Exception as exc:
                     s.hub_connection = 'attention'
-                    for platform in s.statuses:
-                        if platform not in s.paused_platforms:
-                            s.status(platform, str(exc) if isinstance(exc, ApiError) else 'Hub account sync failed; retrying automatically.')
+                    message = 'Hub account sync failed; retrying automatically. Existing chats continue.'
+                    if not s.events or s.events[-1]['text'] != message: s.event(message)
                 next_accounts = now + 60
             if s.config.get('kick') and s.vault.get('kick_token') and 'kick' not in s.paused_platforms:
                 try:
@@ -985,7 +1006,7 @@ def seed_demo(s):
                   outputs=[dict(id='demo', name='DEMO Twitch', active=True, dropped=0)])
     s.doctor.sample(sample)
     s.stats = dict(sample, renderSkippedFrames=4, renderTotalFrames=220)
-    s.current_issues = s.doctor.sample(s.stats)
+    s.current_issues = [issue for issue in s.doctor.sample(s.stats) if issue['code'] in ('render','encode')]
     s.event('Demo data only. All live operations are disabled.')
 
 
@@ -1007,6 +1028,7 @@ async def lifecycle(app):
         notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
         history_task = asyncio.create_task(poll_history(s)) if not s.demo else None
         doctor_notify_task = asyncio.create_task(doctor_notifications(s)) if not s.demo else None
+        update_task = asyncio.create_task(s.updates.run()) if not s.demo else None
         yield
         for adapter in s.adapters.values():
             adapter.task.cancel()
@@ -1017,7 +1039,7 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
-        for background in (audio_task, notify_task, history_task, doctor_notify_task):
+        for background in (audio_task, notify_task, history_task, doctor_notify_task, update_task):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)

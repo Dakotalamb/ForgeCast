@@ -76,6 +76,32 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.state.config['doctor_notifications'])
         self.state.demo=True
 
+    async def test_doctor_sensitivity_is_saved_and_validated(self):
+        self.state.demo=False
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','sensitivity':'relaxed'})
+        self.assertEqual(r.status,200)
+        self.assertEqual(self.state.doctor.sensitivity,'relaxed')
+        self.assertEqual(self.state.history.sensitivity,'relaxed')
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','sensitivity':'extreme'})
+        self.assertEqual(r.status,400)
+
+    async def test_kick_invalid_cursor_and_payload_do_not_stop_following_messages(self):
+        from forgecast.server import accept_kick_rows
+        self.state.config['kick']={'channel_id':'123'}
+        good={'message_id':'good','broadcaster':{'user_id':123,'channel_slug':'deco'},'sender':{'user_id':456,'username':'Viewer'},'content':'Hello'}
+        accept_kick_rows(self.state,{'messages':[{'id':'bad','payload':{}},{'id':3,'payload':{'broadcaster':[]}},{'id':4,'payload':good}]})
+        self.assertEqual(self.state.kick_after,4)
+        self.assertEqual(self.state.chat.messages[-1]['platform'],'kick')
+        self.assertEqual(self.state.statuses['kick'],'connected')
+
+    async def test_events_include_only_twitch_follow_redeem_raid(self):
+        from forgecast.server import combined_events
+        self.state.chat.messages.clear()
+        for kind,platform in [('follow','twitch'),('redeem','twitch'),('raid','twitch'),('sub','twitch'),('raid','kick'),('superChatEvent','youtube')]:
+            self.state.chat.add(dict(id=kind+platform,platform=platform,kind=kind,time=20,origin='channel',user='Viewer',text='event'))
+        self.assertEqual({r['kind'] for r in combined_events(self.state)},{'follow','redeem','raid'})
+        self.assertEqual(len(combined_events(self.state)),3)
+
     async def test_state_auth(self):
         r=await self.client.get('/api/state',headers={'Host':'127.0.0.1:17654'})
         self.assertEqual(r.status,401)

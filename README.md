@@ -1,4 +1,8 @@
-# FDGCast 0.5.5 preview
+# FDGCast 0.6.0 preview
+
+Refinement release: quieter diagnostics, focused Twitch Events, simpler OBS chat,
+Companion recovery and update notices. See [refinement notes](docs/POLISH_0.6.0.md)
+and [website update feed setup](docs/UPDATES.md).
 
 OBS companion, Forge Creator Hub integration, and native multistream source for Forged Destiny Gaming.
 
@@ -18,7 +22,7 @@ diagnostics, and multistream controls are available in OBS. Test privately befor
 using it on a public stream. See
 `docs/NATIVE_BUILD.md` before distributing any binary.
 
-The first launch of 0.5.5 places Stream Doctor beside Sources, FDGCast Events
+The first launch of 0.6.0 places Stream Doctor beside Sources, FDGCast Events
 in the Event List area with Chat beside it, and Multistream beside Outputs. FDGCast Control shares the
 Multistream space as a tab. In OBS, use the Control dock's **Arrange FDGCast
 docks** button to restore that layout. To drag docks elsewhere, turn off

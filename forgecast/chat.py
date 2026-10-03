@@ -79,6 +79,26 @@ class Twitch:
         except ApiError:
             self.status('twitch_events', 'Chat activity available; Twitch denied redemption subscription. Check Hub OAuth permission and reconnect.')
 
+    async def subscribe_events(self, session_id):
+        results = []
+        own_channel = self.config['user_id'] == self.config['channel_id']
+        topics = [
+            ('Follows', 'channel.follow', '2', {'broadcaster_user_id':self.config['channel_id'], 'moderator_user_id':self.config['user_id']}, 'moderator:read:followers'),
+            ('Redeems', 'channel.channel_points_custom_reward_redemption.add', '1', {'broadcaster_user_id':self.config['channel_id']}, 'channel:read:redemptions'),
+            ('Raids', 'channel.raid', '1', {'to_broadcaster_user_id':self.config['channel_id']}, None)]
+        for label, topic, version, condition, scope in topics:
+            permitted = not scope or scope in self.scopes or (label == 'Redeems' and 'channel:manage:redemptions' in self.scopes)
+            if not own_channel or not permitted:
+                results.append(label+': reconnect Twitch in Hub settings'+(' after enabling '+scope if scope else ''))
+                continue
+            try:
+                await api(self.session, 'POST', 'https://api.twitch.tv/helix/eventsub/subscriptions', headers=self.headers,
+                    json=dict(type=topic, version=version, condition=condition, transport=dict(method='websocket',session_id=session_id)))
+                results.append(label+': ready')
+            except (ApiError, asyncio.TimeoutError, aiohttp.ClientError):
+                results.append(label+': unavailable; sync linked accounts to retry')
+        self.status('twitch_events', ' · '.join(results))
+
     async def run(self):
         delay = 2
         while True:
@@ -115,7 +135,7 @@ class Twitch:
                                                   headers=self.headers, json=dict(type=topic, version='1',
                                                   condition=dict(broadcaster_user_id=self.config['channel_id'], user_id=self.config['user_id']),
                                                   transport=dict(method='websocket', session_id=session['id'])))
-                                    await self.subscribe_redemptions(session['id'])
+                                    await self.subscribe_events(session['id'])
                                 transferring = False
                                 delay = 2
                                 self.status('twitch', 'connected')
@@ -126,7 +146,7 @@ class Twitch:
                             elif kind == 'revocation':
                                 raise ApiError('Twitch authorization revoked; reconnect your account.')
                             elif kind == 'notification':
-                                self.handle(payload['subscription']['type'], payload['event'])
+                                self.handle(payload['subscription']['type'], payload['event'], message.get('metadata', {}).get('message_id', ''))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -135,7 +155,7 @@ class Twitch:
                 await asyncio.sleep(delay)
                 delay = min(delay*2, 60)
 
-    def handle(self, topic, event):
+    def handle(self, topic, event, notification_id=''):
         if topic == 'channel.chat.message':
             message = twitch_message(event)
             if message.get('is_creator'): message['avatar'] = self.config.get('avatar', '')
@@ -146,7 +166,19 @@ class Twitch:
                 user=event.get('user_name','Viewer'), user_id=event.get('user_id',''),
                 text='Redeemed '+event.get('reward',{}).get('title','channel points reward'),
                 kind='redeem', shared=False, badges=[], time=time.time()))
-            self.status('twitch_events', 'Redemptions ready; event received.')
+
+        elif topic in ('channel.follow', 'channel.raid'):
+            follow = topic == 'channel.follow'
+            origin_id = event.get('broadcaster_user_id') if follow else event.get('to_broadcaster_user_id')
+            # Raid subscriptions are incoming only; EventSub message IDs deduplicate redelivery.
+            identity = notification_id or (event.get('user_id', '')+':'+event.get('followed_at', '') if follow else '')
+            if not origin_id or not identity: return
+            self.store.add(dict(id='twitch:'+('follow:' if follow else 'raid:')+identity, platform='twitch',
+                origin=event.get('broadcaster_user_name', 'Twitch') if follow else event.get('to_broadcaster_user_name', 'Twitch'),
+                origin_id=origin_id, user=event.get('user_name', 'Viewer') if follow else event.get('from_broadcaster_user_name', 'Creator'),
+                user_id=event.get('user_id', '') if follow else event.get('from_broadcaster_user_id', ''),
+                text='followed' if follow else 'raided with '+str(event.get('viewers', 0))+' viewers',
+                kind='follow' if follow else 'raid', shared=False, badges=[], time=time.time()))
         elif topic == 'channel.chat.notification':
             # Notification IDs vary: retain events without pretending they are chat messages.
             origin = event.get('source_broadcaster_user_name') or event.get('broadcaster_user_name', 'Twitch')
@@ -154,9 +186,9 @@ class Twitch:
                                 origin_id=event.get('source_broadcaster_user_id') or event['broadcaster_user_id'],
                                 received_in=event['broadcaster_user_id'], platform_message_id=event['message_id'],
                                 user=event.get('chatter_user_name') or 'Twitch', user_id=event.get('chatter_user_id', ''),
-                                text=event.get('system_message', ''), kind=event.get('notice_type', 'activity'),
+                                text=event.get('system_message', ''), kind='chat_activity',
                                 badges=[], shared=bool(event.get('source_broadcaster_user_id')), time=time.time()))
-        else:
+        elif topic in ('channel.chat.message_delete', 'channel.chat.clear', 'channel.chat.clear_user_messages'):
             self.store.delete('twitch', message_id=event.get('message_id'),
                               user_id=event.get('target_user_id'), channel=event.get('broadcaster_user_id'))
 
@@ -189,16 +221,15 @@ class YouTube:
                     params['pageToken'] = page
                 result = await api(self.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveChat/messages',
                                    headers={'Authorization':'Bearer '+self.token}, params=params)
+                invalid = False
                 for item in result.get('items', []):
-                    snip = item['snippet']
-                    if snip.get('type') == 'messageDeletedEvent':
-                        self.store.delete('youtube', message_id=snip['messageDeletedDetails']['deletedMessageId'])
-                    elif snip.get('type') == 'userBannedEvent':
-                        self.store.delete('youtube', user_id=snip['userBannedDetails']['bannedUserDetails']['channelId'])
-                    else:
-                        self.store.add(youtube_message(item, self.config['channel_name']))
+                    try:
+                        self.receive(item)
+                    except (KeyError, TypeError, ValueError):
+                        invalid = True
+                # Advance the cursor even if one malformed item was skipped.
                 page = result.get('nextPageToken')
-                self.status('youtube', 'connected')
+                self.status('youtube', 'An invalid message was skipped; chat continues.' if invalid else 'connected')
                 if result.get('offlineAt'):
                     self.config['live_chat_id'] = ''
                     page = None
@@ -220,7 +251,18 @@ class YouTube:
                 await asyncio.sleep(delay)
                 delay = min(delay*2, 120)
 
+    def receive(self, item):
+        snip = item['snippet']
+        if snip.get('type') == 'messageDeletedEvent':
+            self.store.delete('youtube', message_id=snip['messageDeletedDetails']['deletedMessageId'])
+        elif snip.get('type') == 'userBannedEvent':
+            self.store.delete('youtube', user_id=snip['userBannedDetails']['bannedUserDetails']['channelId'])
+        else:
+            self.store.add(youtube_message(item, self.config['channel_name']))
+
     async def send(self, text):
+        if not self.config.get('live_chat_id'):
+            raise ApiError('Start a YouTube broadcast with live chat before sending a message.')
         await api(self.session, 'POST', 'https://www.googleapis.com/youtube/v3/liveChat/messages',
                   headers={'Authorization':'Bearer '+self.token}, params={'part':'snippet'},
                   json={'snippet':{'liveChatId':self.config['live_chat_id'], 'type':'textMessageEvent',

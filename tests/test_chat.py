@@ -73,3 +73,41 @@ class ChatApiTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(store.messages),1)
         self.assertEqual(store.messages[0]['kind'],'redeem')
         self.assertEqual(store.messages[0]['text'],'Redeemed Hydrate')
+
+    async def test_follow_and_incoming_raid_subscriptions_are_independent(self):
+        session=Session(Response(data={}))
+        adapter=Twitch(session,{'client_id':'a','user_id':'u','channel_id':'u'},'TOKEN',ChatStore(),lambda *x:None)
+        adapter.scopes={'moderator:read:followers','channel:read:redemptions'}
+        await adapter.subscribe_events('session')
+        rows=[call[1]['json'] for call in session.calls]
+        self.assertEqual({r['type'] for r in rows},{'channel.follow','channel.raid','channel.channel_points_custom_reward_redemption.add'})
+        follow=next(r for r in rows if r['type']=='channel.follow')
+        self.assertEqual(follow['version'],'2')
+        self.assertEqual(follow['condition'],{'broadcaster_user_id':'u','moderator_user_id':'u'})
+        self.assertEqual(next(r for r in rows if r['type']=='channel.raid')['condition'],{'to_broadcaster_user_id':'u'})
+
+    async def test_missing_follow_permission_does_not_block_raids(self):
+        session=Session(Response(data={}))
+        adapter=Twitch(session,{'client_id':'a','user_id':'u','channel_id':'u'},'TOKEN',ChatStore(),lambda *x:None)
+        await adapter.subscribe_events('session')
+        self.assertEqual([call[1]['json']['type'] for call in session.calls],['channel.raid'])
+
+    async def test_follow_raid_redelivery_and_unknown_topics_do_not_delete_chat(self):
+        store=ChatStore()
+        store.add(dict(id='chat',platform='twitch',origin_id='u',received_in='u',platform_message_id='m',user_id='viewer',text='hello'))
+        adapter=Twitch(None,{},'TOKEN',store,lambda *x:None)
+        follow={'broadcaster_user_id':'u','user_id':'v','user_name':'Viewer','followed_at':'2026-10-03T12:00:00Z'}
+        raid={'to_broadcaster_user_id':'u','from_broadcaster_user_name':'Raider','viewers':25}
+        for _ in range(2):
+            adapter.handle('channel.follow',follow,'follow-event')
+            adapter.handle('channel.raid',raid,'raid-event')
+        adapter.handle('future.topic',{})
+        self.assertEqual(len(store.messages),3)
+        self.assertEqual(store.messages[0]['text'],'hello')
+        self.assertEqual(store.messages[-1]['text'],'raided with 25 viewers')
+
+    async def test_youtube_sending_waits_for_active_chat(self):
+        session=Session(Response(data={}))
+        adapter=YouTube(session,{'live_chat_id':''},'TOKEN',ChatStore(),lambda *x:None)
+        with self.assertRaisesRegex(ApiError,'Start a YouTube broadcast'):await adapter.send('hello')
+        self.assertEqual(session.calls,[])
