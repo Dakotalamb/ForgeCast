@@ -37,9 +37,10 @@ document.querySelectorAll('[data-disconnect]').forEach(b=>b.onclick=()=>run(()=>
 document.querySelectorAll('[data-command]').forEach(b=>b.onclick=()=>{if(confirm('Send '+b.dataset.command+' to OBS? This changes your real broadcast/recording.'))run(()=>action('obs_command',{command:b.dataset.command,confirmed:true}),b);});
 $('startAll').onclick=()=>{if(confirm('Start your main OBS stream and every checked destination?'))run(()=>action('native_command',{command:'start_all',confirmed:true}),$('startAll'));};
 $('stopAll').onclick=()=>{if(confirm('Stop your main OBS stream and all FDGCast destinations?'))run(()=>action('native_command',{command:'stop_all',confirmed:true}),$('stopAll'));};
-$('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));if(c.fix)d.append(button(c.fix==='unmute'?'Unmute':'Fix audio routing',()=>action('audio_fix',{source_uuid:c.source_uuid,fix:c.fix})));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
+$('preflight').onclick=()=>run(async()=>{const r=await action('preflight');$('preflightResults').replaceChildren(...r.checks.map(c=>{const d=el('div',undefined,'row');d.append(el('strong',c.label),el('span',c.result));if(c.help_tab)d.append(button('Open settings',()=>openTab(c.help_tab)));if(c.fix)d.append(button(c.fix==='unmute'?'Unmute':'Fix audio routing',()=>action('audio_fix',{source_uuid:c.source_uuid,fix:c.fix})));return d;}));$('preflightPanel').hidden=false;},$('preflight'));
 $('goLiveAnyway').onclick=()=>{if(confirm('Start your main OBS stream and checked destinations despite the preflight warnings?'))run(()=>state.destinations.some(d=>d.enabled!==false)?action('native_command',{command:'start_all',confirmed:true}):action('obs_command',{command:'StartStream',confirmed:true}),$('goLiveAnyway'));};
 $('doctorSensitivity').onchange=()=>run(()=>action('doctor_settings',{sensitivity:$('doctorSensitivity').value}),$('doctorSensitivity'));
+$('doctorSound').onchange=()=>run(()=>action('doctor_settings',{sound:$('doctorSound').checked}),$('doctorSound'));
 $('doctorNotify').onchange=()=>run(()=>action('doctor_settings',{notifications:$('doctorNotify').checked}),$('doctorNotify'));
 $('copyReport').onclick=()=>run(async()=>{const r=await api('/api/report-text');try{await navigator.clipboard.writeText(r.text);$('copyReport').textContent='Copied';}catch{const box=$('reportCopyFallback');box.hidden=false;box.value=r.text;box.focus();box.select();}},$('copyReport'));
 $('historySession').onchange=()=>{if(state)renderHistory(state);};
@@ -69,7 +70,7 @@ $('audioForm').onsubmit=e=>{e.preventDefault();run(async()=>{
  for(const [id,role] of [['audioMic','microphone'],['audioGame','game_audio']]){
    const uuid=$(id).value;if(uuid){const name=$(id).selectedOptions[0].textContent;sources.push({uuid,name,role});}
  }
- await action('audio_settings',{settings:{sources,enabled:$('audioEnabled').checked,notifications:$('audioNotify').checked,
+ await action('audio_settings',{settings:{sources,clipping:$('audioClipping').checked,vod_track:Number($('audioVodTrack').value),enabled:$('audioEnabled').checked,notifications:$('audioNotify').checked,
    sound:$('audioSound').checked,sound_volume:Number($('audioSoundVolume').value),quiet_scenes:$('audioQuiet').value.split('\n'),silence_seconds:Number($('audioSilence').value)}});
 },e.currentTarget.querySelector('button[type=submit]'));};
 let audioSettingsShown='',audioOptionsShown='';
@@ -98,6 +99,7 @@ function renderAudio(s){
  const signature=JSON.stringify(settings);
  if(signature!==audioSettingsShown&&!$('audioForm').contains(document.activeElement)){
    audioSettingsShown=signature;
+   $('audioClipping').checked=!!settings.clipping;$('audioVodTrack').value=settings.vod_track||0;
    $('audioEnabled').checked=settings.enabled!==false;$('audioNotify').checked=settings.notifications!==false;
    $('audioSound').checked=!!settings.sound;$('audioSoundVolume').value=settings.sound_volume??45;$('audioSoundVolumeLabel').textContent=$('audioSoundVolume').value+'%';$('audioSilence').value=settings.silence_seconds||90;
    $('audioQuiet').value=(settings.quiet_scenes||[]).join('\n');
@@ -130,7 +132,7 @@ function renderHistory(s){
  if(!rows.length)$('streamTimeline').append(el('p','Your stream incidents will appear here.','muted'));
  $('destinationHealth').replaceChildren(...(history.health||[]).map(r=>{const row=el('div',undefined,'row');row.append(el('strong',r.name),el('span',r.state.toUpperCase()+(r.bitrate_kbps!=null?' · '+r.bitrate_kbps+' kbps':'')));return row;}));
  if(!history.health?.length)$('destinationHealth').append(el('p','Go live to monitor destination health. Missing telemetry does not prove the stream stopped.','muted'));
- $('doctorNotify').checked=s.doctor_notifications!==false;
+ $('doctorNotify').checked=s.doctor_notifications!==false;$('doctorSound').checked=!!s.doctor_sound;
  if(document.activeElement!==$('doctorSensitivity'))$('doctorSensitivity').value=s.doctor_sensitivity||'balanced';
 }
 function render(s) {
@@ -138,7 +140,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.6.0';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.7.0';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -152,6 +154,7 @@ function render(s) {
  $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Platform tokens stay private. Your pairing code is available only in this local connection form.';
  $('health').replaceChildren(...((s.issues.length||s.stream_history?.issues?.length)?[...(s.stream_history?.issues||[]),...s.issues].map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
  $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
+ renderSuite(s);
  $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
  const hubStatus=s.hub_connection==='connected'?'Connected':s.hub_connection==='attention'?'Connection needs attention':s.hub_paired?'Checking connection…':'Not paired';
  $('hubPairStatus').textContent=hubStatus;$('hubPairStatus').className=s.hub_connection==='connected'?'ok':'muted';
@@ -181,12 +184,12 @@ function render(s) {
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
  $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
-   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid'})[e.kind]||'Event'),el('br'),document.createTextNode(e.text));return item;
+   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid'})[e.kind]||'Event'),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
  }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for Twitch follows, redeems and raids.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
- $('hubEvents').replaceChildren(...s.hub_events.map(e=>{const d=el('article',undefined,'panel');d.append(el('h2',String(e.title||'Untitled')),el('p',String(e.starts_at||'')));return d;}));
+ $('hubEvents').replaceChildren(...s.hub_events.map(e=>{const d=el('article',undefined,'panel');d.append(el('h2',e.title),el('p',e.starts_at_unix?new Date(e.starts_at_unix*1000).toLocaleString():'Time not reported'),el('p',e.game),el('p',e.instructions));if(e.participants?.length)d.append(el('small','Accepted RSVPs: '+e.participants.join(', ')+' · live status unverified'));if(e.url){const a=el('a','Open event in Hub');a.href=e.url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);}return d;}));
 }
 function renderUpdates(u){
  if(!u)return;
@@ -210,3 +213,44 @@ async function refresh(){render(await api('/api/state'));
 }
 async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';error(e.message);}setTimeout(loop,1500);}
 if(key)loop();else error('Open the dashboard URL printed by Start-FDGCast. Its private session key is missing.');
+
+
+// Connected suite screens; no duplicated Companion chat composer.
+const eventLabels={follow:'Follows',redeem:'Channel-point redeems',raid:'Incoming raids',subscription:'Subscriptions',gift:'Gifted subscriptions',bits:'Bits',membership:'YouTube memberships',superchat:'Super Chats',supersticker:'Super Stickers'};
+for(const [value,label] of Object.entries(eventLabels)){
+ const row=el('label'),input=el('input');input.type='checkbox';input.value=value;input.name='kind';row.append(input,document.createTextNode(' '+label));$('eventKinds').append(row);
+}
+$('eventSettings').onsubmit=e=>{e.preventDefault();run(()=>action('event_settings',{kinds:Array.from(document.querySelectorAll('#eventKinds input:checked'),x=>x.value),merge:$('mergeEvents').checked}),e.currentTarget.querySelector('button'));};
+$('eventTest').onclick=()=>run(()=>action('event_test',{kind:$('testEventKind').value}),$('eventTest'));
+$('youtubeRefresh').onclick=()=>run(()=>action('youtube_refresh'),$('youtubeRefresh'));
+$('youtubeBroadcast').onchange=()=>run(()=>action('youtube_select',{id:$('youtubeBroadcast').value}),$('youtubeBroadcast'));
+$('hubSelected').onchange=()=>run(()=>action('hub_select',{id:$('hubSelected').value}),$('hubSelected'));
+$('presetForm').onsubmit=e=>{e.preventDefault();run(()=>action('preset_save',{name:e.currentTarget.elements.name.value}),e.currentTarget.querySelector('button'));};
+$('presetApply').onclick=()=>run(()=>action('preset_apply',{name:$('outputPreset').value}),$('presetApply'));
+$('presetDelete').onclick=()=>run(()=>action('preset_delete',{name:$('outputPreset').value}),$('presetDelete'));
+$('previewReport').onclick=()=>run(async()=>{const report=await api('/api/report');$('reportPreview').textContent=JSON.stringify(report,null,2);$('reportPreview').hidden=false;},$('previewReport'));
+function downloadJson(data,name){const url=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));const a=el('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}
+$('exportSummary').onclick=()=>{if(state)downloadJson({version:state.version,limitations:['Local observations only; Companion outages are unobserved.','No unique audience estimate.'],sessions:state.summaries},'FDGCast-session-summaries.json');};
+$('overlayForm').onsubmit=e=>{e.preventDefault();run(()=>action('overlay_settings',{enabled:$('overlayEnabled').checked,mode:$('overlayMode').value,seconds:Number($('overlaySeconds').value)}),e.currentTarget.querySelector('button'));};
+$('showOverlayLink').onclick=()=>run(async()=>{$('overlayLink').value=(await api('/api/overlay-link')).url;$('overlayLink').hidden=false;$('overlayLink').select();},$('showOverlayLink'));
+$('rotateOverlay').onclick=()=>run(async()=>{await action('overlay_rotate');$('overlayLink').value='';$('overlayLink').hidden=true;},$('rotateOverlay'));
+function renderHelp(){if(!state)return;const query=$('helpSearch').value.trim().toLowerCase();$('helpArticles').replaceChildren(...state.help_articles.filter(a=>(a.title+' '+a.body).toLowerCase().includes(query)).map(a=>{const d=el('details',undefined,'panel advanced');d.append(el('summary',a.title),el('p',a.body));return d;}));if(!$('helpArticles').children.length)$('helpArticles').append(el('p','No matching article. Try chat, audio, frames or settings.'));}
+$('helpSearch').oninput=renderHelp;
+function budget(){const video=Number($('budgetVideo').value),audio=Number($('budgetAudio').value),outputs=Number($('budgetOutputs').value),upload=Number($('budgetUpload').value);if(![video,audio,outputs,upload].every(Number.isFinite)||video<100||audio<0||outputs<1||outputs>9){$('budgetResult').textContent='Enter valid bitrate and destination values.';return;}const payload=(video+audio)*outputs/1000,recommended=payload/0.7;$('budgetResult').textContent='About '+payload.toFixed(1)+' Mbps payload; budget roughly '+recommended.toFixed(1)+' Mbps upload including headroom.'+(upload>0?(upload>=recommended?' Your entered upload meets this estimate.':' Your entered upload is below this estimate; reduce bitrate or destinations and test.'):'');}
+for(const id of ['budgetVideo','budgetAudio','budgetOutputs','budgetUpload'])$(id).oninput=budget;budget();
+let suiteSignature='';
+function selectOptions(id,rows,selected,placeholder){const box=$(id);if(document.activeElement===box)return;const old=box.value;box.replaceChildren(new Option(placeholder,''),...rows.map(r=>new Option(r.title,r.id)));if(selected&&!rows.some(r=>r.id===selected))box.append(new Option('Selected broadcast is no longer active',selected));box.value=selected??old;}
+function renderSuite(s){
+ $('buildVersion').textContent='Companion version '+s.version;
+ $('hubScheduleStatus').textContent=s.coordination.status;
+ selectOptions('hubSelected',s.hub_events.map(e=>({id:e.id,title:e.title})),s.coordination.selected_id,'No event selected');
+ selectOptions('youtubeBroadcast',s.youtube_broadcasts,s.youtube_selected,'Automatic selection');
+ selectOptions('outputPreset',Object.keys(s.output_presets).map(name=>({id:name,title:name})),null,'Choose a preset');
+ $('sessionSummaries').replaceChildren(...s.summaries.map(r=>{const d=el('article',undefined,'issue');d.append(el('strong',r.started_at?new Date(r.started_at*1000).toLocaleString():'Session '+r.id.slice(0,8)),el('p',(r.interrupted?'Interrupted; final state unknown':r.ended?'Ended':'Observed live')+' · '+(r.duration_seconds??'Unknown')+' seconds'),el('p','Performance incidents: '+r.performance_incidents+' · output failures: '+r.output_failures+' · audio warnings: '+r.audio_warnings),el('small','Received chat: '+JSON.stringify(r.chat_messages)+' · events: '+JSON.stringify(r.audience_events)));return d;}));
+ if(!s.summaries.length)$('sessionSummaries').append(el('p','A summary appears after an OBS stream session is observed.','muted'));
+ if(!$('overlayForm').contains(document.activeElement)){$('overlayEnabled').checked=s.overlay_enabled;$('overlayMode').value=s.overlay_mode;$('overlaySeconds').value=s.overlay_seconds||30;}
+ if(!$('eventSettings').contains(document.activeElement)){for(const input of document.querySelectorAll('#eventKinds input'))input.checked=s.event_settings.includes(input.value);$('mergeEvents').checked=!!s.merge_events;}
+ const signature=JSON.stringify([s.connection_help,s.help_articles]);if(signature===suiteSignature)return;suiteSignature=signature;
+ $('connectionGuidance').replaceChildren(...Object.entries(s.connection_help).map(([platform,h])=>{const d=el('details',undefined,'advanced');d.append(el('summary',platform.replaceAll('_',' ')+' · '+h.title));const list=el('ol');for(const step of h.steps)list.append(el('li',step));d.append(list);if(h.settings_url){const a=el('a','Open Hub Settings');a.href=h.settings_url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);}return d;}));
+ renderHelp();$('helpLinks').replaceChildren(...s.help_links.map(l=>{const p=el('p'),a=el('a',l.title);a.href=l.url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);return p;}));
+}

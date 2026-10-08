@@ -24,6 +24,9 @@ from .audio import AudioGuard, validate_settings, notify_windows, play_warning_s
 from .history import StreamHistory
 from .sound import read_pcm, MAX_BYTES
 from .updates import Updates
+from .suite import EVENT_KINDS, DEFAULT_EVENTS, connection_help, normalize_events, session_summaries, audience_counts
+from .help import ARTICLES, LINKS
+from .operations import SUITE_ACTIONS, suite_action, chat_capabilities, refresh_origin_avatars, overlay_page, overlay_script, overlay_style, overlay_feed, overlay_link
 from . import __version__
 
 PORT = 17654
@@ -73,6 +76,52 @@ class State:
         self.doctor_notice_queue = asyncio.Queue(maxsize=20)
         self.audio_history_cursor = self.audio.history[-1] if self.audio.history else None
         self.updates = Updates(self)
+        self.youtube_broadcasts = []
+        self.hub_schedule_status = 'Not loaded'
+        self.origin_avatars = {}
+        self.overlay_key = self.vault.get('overlay_key') or secrets.token_urlsafe(32)
+        self.vault.set('overlay_key', self.overlay_key)
+        self.highlight_ids = deque(maxlen=20)
+        self.session_count_start = time.time()
+        self.last_count_save = 0
+        self.session_counts = {}
+        self.chat.on_add = self.count_message
+        self.event_ack = set()
+        self.audience_history = deque(maxlen=500)
+        self.audience_path = self.directory/'audience-events.json'
+        try:
+            history = json.loads(self.audience_path.read_text())
+            self.audience_history.extend(r for r in history if isinstance(r,dict) and r.get('kind') in EVENT_KINDS and r.get('id'))
+            self.event_ack = {r['id'] for r in self.audience_history if r.get('acknowledged')}
+        except (OSError,ValueError,TypeError): pass
+        self.checkpoint_path = self.directory/'chat-seen.json'
+        try:
+            saved = json.loads(self.checkpoint_path.read_text())
+            self.chat.persistent_seen = set(saved.get('hashes', [])[-10000:])
+            self.kick_after = int(saved.get('kick_after', 0))
+            self.checkpoint_channel = saved.get('kick_channel', '')
+        except (OSError, ValueError, TypeError): self.checkpoint_channel = ''
+
+    def count_message(self, row):
+        if row.get('kind') in EVENT_KINDS: self.audience_history.append(row)
+        if not self.history.session or row.get('simulated'): return
+        uid = self.history.session['id']
+        counts = self.session_counts.setdefault(uid, {'chat_messages':{}, 'audience_events':{}})
+        group = 'chat_messages' if row.get('kind', 'chat') == 'chat' else 'audience_events'
+        key = row['platform'] if group == 'chat_messages' else row.get('kind', 'event')
+        counts[group][key] = counts[group].get(key, 0)+1
+
+    def checkpoint(self):
+        if self.demo: return
+        hashes = list(self.chat.persistent_seen) + [hashlib.sha256(uid.encode()).hexdigest() for uid in self.chat.seen]
+        atomic_json(self.audience_path,[dict(r, acknowledged=r['id'] in self.event_ack) for r in self.audience_history if not r.get('simulated')])
+        atomic_json(self.checkpoint_path, {'hashes':list(dict.fromkeys(hashes))[-10000:], 'kick_after':self.kick_after,
+                    'kick_channel':self.config.get('kick', {}).get('channel_id', '')})
+
+    def coordination(self):
+        return {'events':normalize_events(self.hub_events, self.config.get('hub_url', '')),
+                'selected_id':self.config.get('selected_event_id', ''), 'status':self.hub_schedule_status}
+
 
     def status(self, platform, message):
         if self.statuses.get(platform) != message:
@@ -110,6 +159,7 @@ class State:
             row = dict(original)
             row.setdefault('color', username_color(row.get('platform', ''), str(row.get('user_id') or row.get('user', ''))))
             if row.get('avatar'): row['avatar'] = self.media_url(row['avatar'])
+            row['origin_avatar'] = self.media_url(self.origin_avatars.get(row['platform']+':'+str(row.get('origin_id', '')), ''))
             row['fragments'] = [dict(text=f.get('text', ''), image=self.media_url(f['image']) if f.get('image') else '')
                                 for f in row.get('fragments', [{'text':row.get('text', '')}])]
             detail = self.status_details.get(row.get('platform'))
@@ -143,13 +193,19 @@ class State:
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
-                    stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sensitivity=self.doctor.sensitivity,
+                    stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sound=self.config.get("doctor_sound",False), doctor_sensitivity=self.doctor.sensitivity,
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destinations=self.config.get('destinations', []), statuses=self.statuses,
                     status_details=self.status_details, combined_events=combined_events(self),
                     messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
-                    hub_events=self.hub_events,
+                    version=__version__, hub_events=self.coordination()['events'], coordination=self.coordination(),
+                    connection_help={k:connection_help(k,v,self.config.get('hub_url','')) for k,v in self.statuses.items()},
+                    youtube_broadcasts=self.youtube_broadcasts, youtube_selected=self.config.get('youtube_broadcast_id',''),
+                    event_settings=self.config.get('event_kinds', DEFAULT_EVENTS), output_presets=self.config.get('output_presets', {}),
+                    summaries=session_summaries(self), help_articles=[{'id':i,'title':title,'body':body} for i,title,body in ARTICLES],
+                    help_links=[{'title':title,'url':url} for title,url in LINKS], overlay_enabled=self.config.get('overlay_enabled',False),
+                    overlay_mode=self.config.get('overlay_mode','selected'), overlay_seconds=self.config.get('overlay_seconds',30), merge_events=self.config.get('merge_events',False),
                     secret_persistence='Windows DPAPI' if not self.vault.memory else 'Session memory only',
                     hub_connection=self.hub_connection, hub_paired=bool(self.vault.get('hub_token')),
                     hub_url=self.config.get('hub_url', ''), obs_port=self.config.get('obs_port', 4455))
@@ -157,10 +213,10 @@ class State:
 
 def combined_events(s):
     """Bounded activity available from connected accounts and local OBS telemetry."""
-    audience_kinds = {'follow', 'redeem', 'raid'}
+    audience_kinds = set(s.config.get('event_kinds', DEFAULT_EVENTS)) & EVENT_KINDS
     rows = [dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
-                 text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'), kind=m.get('kind'))
-            for m in s.chat.messages if m.get('platform') == 'twitch' and m.get('kind') in audience_kinds and not m.get('deleted')]
+                 text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'), kind=m.get('kind'), id=m['id'], simulated=bool(m.get('simulated')), acknowledged=m['id'] in s.event_ack)
+            for m in {r['id']:r for r in list(s.audience_history)+list(s.chat.messages)}.values() if (m.get('platform') == 'twitch' or (m.get('platform') == 'youtube' and m.get('kind') in {'membership','superchat','supersticker'})) and m.get('kind') in audience_kinds and not m.get('deleted')]
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
 
@@ -266,6 +322,12 @@ def preflight(s):
     if not s.config.get('destinations'): checks.append({'label':'Multistream destinations','result':'None saved — add destinations before Start All.'})
     checks.append({'label':'Encoder','result':'Active H.264/AAC encoder compatibility is checked when secondary outputs start; not verified offline.'})
     checks.append({'label':'Viewer picture / available upload','result':'Not measured. Check preview, platform dashboards and upload headroom.'})
+    checks.append({'label':'Companion', 'result':'Running locally; OBS docks '+('connected' if native_fresh else 'not connected'), 'help_tab':'setup'})
+    checks.append({'label':'Recording storage', 'result':str(round(s.stats['availableDiskSpace']/1024,1))+' GiB reported by OBS; check your recording path.' if isinstance(s.stats.get('availableDiskSpace'), (int,float)) else 'Not reported by OBS; check free space at the recording location.', 'help_tab':'help'})
+    selected = next((e for e in s.coordination()['events'] if e['id'] == s.config.get('selected_event_id')), None)
+    checks.append({'label':'Hub event', 'result':selected['title']+' · '+selected['starts_at'] if selected else 'No event selected. This is optional.', 'help_tab':'hub'})
+    for check in checks:
+        check.setdefault('help_tab', 'doctor' if check.get('source_uuid') else 'setup' if 'chat' in check['label'].lower() or 'OBS' in check['label'] else 'outputs')
     return checks
 
 
@@ -280,7 +342,15 @@ async def poll_history(s):
         fresh=time.time()-s.native_seen<5 and s.audio_snapshot is not None
         live=bool(s.audio_snapshot.get('stream_active')) if fresh else None
         outputs=([s.main_output] if s.main_output else [])+s.native_outputs if fresh else []
+        previous_session = s.history.session
         notices=s.history.sample(live,outputs)
+        count_session = s.history.session or previous_session
+        if count_session and (time.time()-s.last_count_save > 30 or (previous_session and not s.history.session)):
+            counts = s.session_counts.get(count_session['id'], {'chat_messages':{},'audience_events':{}})
+            s.history.record('audience_counts', session_id=count_session['id'], **counts,
+                audio_warnings=sum(1 for r in s.audio.history if r.get('time',0)>=count_session['started_at'] and r['kind']=='warning'))
+            s.last_count_save = time.time()
+            s.checkpoint()
         for notice in notices:
             notice['created']=time.time()
             if not s.doctor_notice_queue.full(): s.doctor_notice_queue.put_nowait(notice)
@@ -301,7 +371,7 @@ async def poll_history(s):
 async def doctor_notifications(s):
     while True:
         notice=await s.doctor_notice_queue.get()
-        if not s.config.get('doctor_notifications',True) or time.time()-notice['created']>15 or not s.history.session: continue
+        if (not s.config.get('doctor_notifications',True) and not s.config.get('doctor_sound',False)) or time.time()-notice['created']>15 or not s.history.session: continue
         if notice.get('telemetry_lost') and s.history.last_sample is not None: continue
         if notice.get('frame_code') and notice['frame_code'] not in s.history.frame_conditions: continue
         ids=notice.get('destination_ids') or ([notice['destination_id']] if notice.get('destination_id') else [])
@@ -309,7 +379,8 @@ async def doctor_notifications(s):
         if notice.get('recovery') and notice.get('destination_id') in s.history.conditions: continue
         # The notifier never sends stream keys, chat, source captures or raw API errors.
         try:
-            submitted=await notify_windows(notice)
+            if s.config.get('doctor_sound',False): await play_warning_sound(s.audio_sound_path,s.audio.settings['sound_volume'])
+            submitted=await notify_windows(notice) if s.config.get('doctor_notifications',True) else False
             s.history.record('notification_submitted' if submitted else 'notification_unavailable',title='Stream Doctor notification')
         except Exception as exc:
             s.history.record('notification_failed',title='Stream Doctor notification failed.',error_type=type(exc).__name__)
@@ -346,7 +417,7 @@ async def audio_notifications(s):
             s.audio.record('notification_failed', error_type=type(exc).__name__)
 
 
-async def send_chat(s, platform, text):
+async def send_chat(s, platform, text, reply_id=None):
     message = str(text).strip()
     if platform not in ('twitch', 'youtube', 'kick') or not message or len(message) > 200:
         raise ValueError('Choose a connected channel and enter 1–200 characters.')
@@ -362,10 +433,11 @@ async def send_chat(s, platform, text):
         if platform not in s.adapters:
             raise ValueError('Connect '+platform.title()+' in FDGCast first.')
         try:
-            await s.adapters[platform].send(message)
+            if reply_id and platform == 'twitch': await s.adapters[platform].send(message, reply_id=reply_id)
+            else: await s.adapters[platform].send(message)
         except ApiError as exc:
             if platform == 'youtube' and exc.reason == 'insufficientPermissions':
-                raise ValueError('YouTube declined this reply. The Hub connection needs a chat-writing scope; reconnect after Google approves it.') from exc
+                raise ValueError('YouTube declined this reply. The Hub connection needs a chat-writing scope; reconnect YouTube in Hub Settings with chat-writing permission.') from exc
             raise
     s.event('Message sent to '+platform.title()+'.')
 
@@ -466,6 +538,8 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op in SUITE_ACTIONS:
+            return web.json_response(await suite_action(s, op, data))
         if op == 'audio_sound_file':
             encoded = data.get('wav')
             if encoded is None:
@@ -494,6 +568,9 @@ async def action(request):
             s.audio.record('test_'+channel+'_submitted' if submitted else 'test_'+channel+'_unavailable')
             return web.json_response({'submitted':submitted, 'channel':channel})
         elif op == 'doctor_settings':
+            if 'sound' in data:
+                if not isinstance(data['sound'],bool):raise ValueError('Sound must be true or false.')
+                s.config['doctor_sound']=data['sound']
             if 'notifications' in data:
                 if not isinstance(data['notifications'], bool): raise ValueError('Notifications must be true or false.')
                 s.config['doctor_notifications'] = data['notifications']
@@ -592,7 +669,7 @@ async def action(request):
                 s.config.pop(platform, None)
                 s.save()
         elif op == 'chat_send':
-            await send_chat(s, data.get('platform'), data.get('text', ''))
+            await send_chat(s, data.get('platform'), data.get('text', ''), data.get('reply_id'))
         elif op == 'hub_save':
             url = str(data['url']).rstrip('/')
             parsed = urlparse(url)
@@ -682,8 +759,8 @@ async def native(request):
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
         'updates': s.updates.public(),
-        'commands': commands,
-        'messages': [m for m in s.chat_view() if m.get('kind', 'chat') == 'chat'][-80:],
+        'commands': commands, 'version':__version__, 'coordination':s.coordination(), 'output_presets':s.config.get('output_presets',{}), 'summaries':session_summaries(s), 'capabilities':chat_capabilities(s),
+        'messages': [m for m in s.chat_view() if m.get('kind', 'chat') in {'chat','superchat','supersticker','membership'} or (s.config.get('merge_events') and m.get('kind') in set(s.config.get('event_kinds', DEFAULT_EVENTS)))][-200:],
         'events': combined_events(s),
         'issues': (s.history.issues+s.current_issues)[:12],
         'destination_health': s.history.health,
@@ -733,10 +810,12 @@ async def native_action(request):
             user32.FlashWindow(hwnd, True)
         return web.json_response({'ok': True})
     async with s.lock:
+        if op in SUITE_ACTIONS:
+            return web.json_response(await suite_action(s, op, data))
         if op in ('audio_settings','audio_snooze','audio_ack','audio_fix'):
             await audio_action(s, data)
         elif op == 'chat_send':
-            await send_chat(s, data.get('platform'), data.get('text', ''))
+            await send_chat(s, data.get('platform'), data.get('text', ''), data.get('reply_id'))
         elif op == 'save':
             if any(o.get('active') or o.get('busy') for o in s.native_outputs):
                 raise ValueError('Stop secondary outputs before editing destinations.')
@@ -812,7 +891,10 @@ async def poll(s):
 async def fetch_hub_events(s):
     result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/events',
                        headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
-    s.hub_events = result.get('events', [])[:50]
+    new_events = result.get('events', [])[:50]
+    if s.hub_events and new_events != s.hub_events: s.event('Hub schedule changed. Review your selected event.')
+    s.hub_events = new_events
+    s.hub_schedule_status = 'Updated '+time.strftime('%H:%M')
 
 
 async def ensure_kick_subscription(s, token, channel):
@@ -855,19 +937,22 @@ async def sync_hub_accounts(s, retry_events=False):
                     if not channel.isdigit() or int(channel) <= 0:
                         raise ValueError('Kick channel ID is missing. Reconnect Kick in Hub settings.')
                     if s.config.get('kick', {}).get('channel_id') != channel:
-                        s.kick_after, s.kick_received = 0, 0
+                        if s.checkpoint_channel != channel: s.kick_after = 0
+                        s.kick_received = 0
+                    changed_token = s.vault.get('kick_token') != token
                     s.vault.set('kick_token', token)
                     s.config['kick'] = {'channel_id':channel, 'channel_name':conn.get('username') or 'Kick'}
-                    await ensure_kick_subscription(s, token, channel)
+                    if not s.kick_verified or changed_token or retry_events: await ensure_kick_subscription(s, token, channel)
                     continue
                 if platform == 'twitch':
                     user = str(conn.get('user_id') or '')
                     if not user or not conn.get('client_id'):
                         raise ValueError('Twitch account identity is missing. Reconnect in Hub settings.')
-                    config = {'client_id':conn['client_id'], 'user_id':user, 'channel_id':user}
+                    config = {'client_id':conn['client_id'], 'user_id':user, 'channel_id':user, 'event_kinds':s.config.get('event_kinds',DEFAULT_EVENTS)}
                     existing = s.adapters.get(platform)
                     if existing and existing.config.get('channel_id') == user and existing.config.get('client_id') == conn['client_id'] and existing.token == token and existing.task and not existing.task.done():
                         existing.token = token
+                        existing.config['event_kinds'] = s.config.get('event_kinds',DEFAULT_EVENTS)
                         if retry_events: existing.events_retry_at = time.monotonic()
                         s.vault.set(platform+'_token', token)
                         continue
@@ -882,12 +967,14 @@ async def sync_hub_accounts(s, retry_events=False):
                         config = existing.config
                     else:
                         config = {'live_chat_id':'', 'channel_name':conn.get('username') or 'YouTube', 'account_id':user}
-                    # Once a broadcast ends the adapter clears its ID and discovery resumes.
-                    if not config.get('live_chat_id'):
+                    # Manual refresh enumerates active broadcasts even while chat is connected.
+                    if retry_events or not config.get('live_chat_id'):
                         broadcasts = await api(s.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveBroadcasts',
                             headers={'Authorization':'Bearer '+token},
                             params={'part':'snippet,status', 'broadcastStatus':'active', 'broadcastType':'all', 'maxResults':50})
-                        active = next((b for b in broadcasts.get('items', []) if b.get('snippet', {}).get('liveChatId')), None)
+                        s.youtube_broadcasts = [dict(id=str(b.get('id','')), title=b.get('snippet',{}).get('title','Live broadcast'), live_chat_id=b['snippet']['liveChatId']) for b in broadcasts.get('items', []) if b.get('snippet',{}).get('liveChatId')]
+                        chosen = s.config.get('youtube_broadcast_id')
+                        active = next((b for b in broadcasts.get('items', []) if b.get('id') == chosen and b.get('snippet', {}).get('liveChatId')), None) if chosen else next((b for b in broadcasts.get('items', []) if b.get('snippet', {}).get('liveChatId')), None)
                         if active:
                             config['live_chat_id'] = active['snippet']['liveChatId']
                             s.status('youtube', 'connecting')
@@ -897,6 +984,7 @@ async def sync_hub_accounts(s, retry_events=False):
                         s.vault.set(platform+'_token', token)
                         s.config[platform] = dict(config)
                         continue
+                if config.get('avatar'): s.origin_avatars[platform+':'+str(config.get('channel_id',config.get('account_id','')))]=config['avatar']
                 old = s.adapters.pop(platform, None)
                 if old:
                     old.task.cancel()
@@ -946,6 +1034,7 @@ async def poll_hub(s):
             if now >= next_accounts:
                 try:
                     async with s.lock: await sync_hub_accounts(s)
+                    await refresh_origin_avatars(s)
                 except Exception as exc:
                     s.hub_connection = 'attention'
                     message = 'Hub account sync failed; retrying automatically. Existing chats continue.'
@@ -963,8 +1052,13 @@ async def poll_hub(s):
                 except Exception as exc:
                     s.status('kick', str(exc) if isinstance(exc, ApiError) else 'Hub chat relay failed; checking again soon.')
             if now >= next_events:
-                try: await fetch_hub_events(s)
-                except Exception as exc: s.event('Hub schedule unavailable ('+type(exc).__name__+'); chat continues independently.')
+                try:
+                    await fetch_hub_events(s)
+                    await refresh_origin_avatars(s)
+                    s.checkpoint()
+                except Exception as exc:
+                    s.hub_schedule_status = 'Schedule unavailable; displayed events may be outdated.'
+                    s.event('Hub schedule unavailable ('+type(exc).__name__+'); chat continues independently.')
                 next_events = now + 300
         await asyncio.sleep(5)
 
@@ -1035,6 +1129,7 @@ async def lifecycle(app):
         doctor_notify_task = asyncio.create_task(doctor_notifications(s)) if not s.demo else None
         update_task = asyncio.create_task(s.updates.run()) if not s.demo else None
         yield
+        s.checkpoint()
         for adapter in s.adapters.values():
             adapter.task.cancel()
         await asyncio.gather(*(x.task for x in s.adapters.values()), return_exceptions=True)
@@ -1057,11 +1152,17 @@ async def lifecycle(app):
 def create_app(state):
     app = web.Application(middlewares=[secure], client_max_size=2_800_000)
     app['state'] = state
+    app['web_path'] = WEB
     app.cleanup_ctx.append(lifecycle)
     for path in ('/', '/app.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
     app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
+    app.router.add_get('/overlay', overlay_page)
+    app.router.add_get('/overlay.js', overlay_script)
+    app.router.add_get('/overlay.css', overlay_style)
+    app.router.add_get('/overlay/feed', overlay_feed)
+    app.router.add_get('/api/overlay-link', overlay_link)
     app.router.add_get('/api/state', get_state)
     app.router.add_get('/api/pairing', pairing)
     app.router.add_get('/api/obs-connection', obs_connection)
@@ -1108,3 +1209,4 @@ def main(on_ready=None):
 
 if __name__ == '__main__':
     main()
+

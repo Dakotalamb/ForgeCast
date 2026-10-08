@@ -1,3 +1,7 @@
+# October 8 implementation checkpoint
+
+See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for delivered features and remaining work, and [HUB_HANDOFF_0.7.0.md](HUB_HANDOFF_0.7.0.md) for the website dependencies.
+
 # Production roadmap / remaining scope
 
 ## Gate 1: first usable private beta
@@ -39,3 +43,4 @@
 Keep local chat and basic diagnosis usable without Hub sign-in. Paid cloud features
 are a product decision, not implemented in this package. Do not promise free
 unlimited hosted relays or storage before measuring operating costs.
+

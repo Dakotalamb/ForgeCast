@@ -65,7 +65,7 @@ class ChatTests(unittest.TestCase):
     def test_youtube_normalization(self):
         m=youtube_message({'id':'a','snippet':{'liveChatId':'b','type':'superChatEvent','displayMessage':'Thank you!'},'authorDetails':{'displayName':'Bob','isChatSponsor':True}}, 'Deco YT')
         self.assertEqual(m['origin'], 'Deco YT')
-        self.assertEqual(m['kind'], 'superChatEvent')
+        self.assertEqual(m['kind'], 'superchat')
         self.assertIn('isChatSponsor', m['badges'])
 
     def test_kick_origin_and_dedup(self):
@@ -193,3 +193,4 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(auth_response('supersecretpassword','lM1GncleQOaCu9lT1yeUZhFYnqhsLLP1G5lAGo3ixaI=',
                                       '+IxH4CnCiqpX1rM9scsNynZzbOe4KhDeYcTNS3PDaeY='),
                          '1Ct943GAT+6YQUUX47Ia/ncufilbe6+oD6lY+5kaCu4=')
+

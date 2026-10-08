@@ -24,7 +24,7 @@ async function main(){
   assert.equal(await page.locator('#updateBanner').isVisible(),false);
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
-  for(const tab of ['outputs','doctor','hub','setup','live']){
+  for(const tab of ['outputs','doctor','hub','setup','help','live']){
    await page.locator('[data-tab="'+tab+'"]').click();
    assert.equal(await page.locator('#'+tab).isVisible(),true);
   }
@@ -57,14 +57,14 @@ async function main(){
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
   await page.route('**/api/state',async route=>{
     const response=await route.fetch(),data=await response.json();
-    data.updates={installed:'0.6.0-preview',latest:{version:'0.7.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
+    data.updates={installed:'0.7.0-preview',latest:{version:'0.8.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
     await route.fulfill({response,json:data});
   });
   await page.waitForSelector('#updateBanner:not([hidden])');
-  assert.match(await page.locator('#updateNotice').textContent(),/0.7.0-preview/);
+  assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
   await page.locator('#updateView').click();
   assert.equal(await page.locator('#updateNotes').isVisible(),true);
-  assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.6.0-preview/);
+  assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.7.0-preview/);
   assert.equal(await page.locator('#updateDownload').getAttribute('href'),'https://hub.example/downloads/setup.exe');
   await page.screenshot({path:path.join(output,'updates-demo.png'),fullPage:true});
   await page.locator('[data-tab="live"]').click();
@@ -76,10 +76,12 @@ async function main(){
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
-  console.log('PASS: demo rendering, OBS-only chat, all five tabs, blocked live action, mobile overflow, no JS errors.');
+  await page.locator('[data-tab="help"]').click();await page.locator('#helpSearch').fill('Kick');assert.ok(await page.locator('#helpArticles details').count()>0);await page.locator('#helpSearch').fill('no-matching-article-xyz');assert.match(await page.locator('#helpArticles').textContent(),/No matching article/);assert.equal(await page.locator('#overlayLink').isVisible(),false);
+  console.log('PASS: demo rendering, OBS-only chat, all six tabs, blocked live action, mobile overflow, no JS errors.');
  } finally {
   if(browser)await browser.close();
   server.kill('SIGINT');
  }
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
+

@@ -43,6 +43,7 @@ async def api(session, method, url, **kwargs):
             }.get(response.status, 'Platform request failed; check connection and try again.')
             raise ApiError(f'{message} (HTTP {response.status}' + (f'; {reason}' if reason else '') + ')',
                            response.status, reason)
+        if response.status == 204: return {}
         return await response.json()
 
 
@@ -88,6 +89,7 @@ class Twitch:
             ('Follows', 'channel.follow', '2', {'broadcaster_user_id':self.config['channel_id'], 'moderator_user_id':self.config['user_id']}, 'moderator:read:followers'),
             ('Redeems', 'channel.channel_points_custom_reward_redemption.add', '1', {'broadcaster_user_id':self.config['channel_id']}, 'channel:read:redemptions'),
             ('Raids', 'channel.raid', '1', {'to_broadcaster_user_id':self.config['channel_id']}, None)]
+        if 'bits' in self.config.get('event_kinds',[]): topics.append(('Bits','channel.cheer','1',{'broadcaster_user_id':self.config['channel_id']},'bits:read'))
         for label, topic, version, condition, scope in topics:
             permitted = not scope or scope in self.scopes or (label == 'Redeems' and 'channel:manage:redemptions' in self.scopes)
             if topic in self.event_topics:
@@ -191,6 +193,12 @@ class Twitch:
                 user_id=event.get('user_id', '') if follow else event.get('from_broadcaster_user_id', ''),
                 text='followed' if follow else 'raided with '+str(event.get('viewers', 0))+' viewers',
                 kind='follow' if follow else 'raid', shared=False, badges=[], time=time.time()))
+        elif topic == 'channel.cheer':
+            identity=notification_id
+            if not identity: return
+            self.store.add(dict(id='twitch:bits:'+identity,platform='twitch',origin_id=event['broadcaster_user_id'],
+                origin=event.get('broadcaster_user_name','Twitch'),user=event.get('user_name') or 'Anonymous',
+                user_id=event.get('user_id') or '',text=str(event.get('bits',0))+' Bits · '+event.get('message',''),kind='bits',time=time.time()))
         elif topic == 'channel.chat.notification':
             # Notification IDs vary: retain events without pretending they are chat messages.
             origin = event.get('source_broadcaster_user_name') or event.get('broadcaster_user_name', 'Twitch')
@@ -198,15 +206,17 @@ class Twitch:
                                 origin_id=event.get('source_broadcaster_user_id') or event['broadcaster_user_id'],
                                 received_in=event['broadcaster_user_id'], platform_message_id=event['message_id'],
                                 user=event.get('chatter_user_name') or 'Twitch', user_id=event.get('chatter_user_id', ''),
-                                text=event.get('system_message', ''), kind='chat_activity',
+                                text=event.get('system_message', ''), kind={'sub':'subscription','resub':'subscription','sub_gift':'gift','community_sub_gift':'gift','gift_paid_upgrade':'subscription','prime_paid_upgrade':'subscription'}.get(event.get('notice_type'),'chat_activity'),
                                 badges=[], shared=bool(event.get('source_broadcaster_user_id')), time=time.time()))
         elif topic in ('channel.chat.message_delete', 'channel.chat.clear', 'channel.chat.clear_user_messages'):
             self.store.delete('twitch', message_id=event.get('message_id'),
                               user_id=event.get('target_user_id'), channel=event.get('broadcaster_user_id'))
 
-    async def send(self, text):
+    async def send(self, text, reply_id=None):
+        body=dict(broadcaster_id=self.config['channel_id'], sender_id=self.config['user_id'], message=text)
+        if reply_id: body['reply_parent_message_id']=reply_id
         result = await api(self.session, 'POST', 'https://api.twitch.tv/helix/chat/messages', headers=self.headers,
-                           json=dict(broadcaster_id=self.config['channel_id'], sender_id=self.config['user_id'], message=text))
+                           json=body)
         if not result.get('data') or not result['data'][0].get('is_sent'):
             raise ApiError('Twitch did not deliver the message (possibly moderation).')
 
@@ -279,3 +289,4 @@ class YouTube:
                   headers={'Authorization':'Bearer '+self.token}, params={'part':'snippet'},
                   json={'snippet':{'liveChatId':self.config['live_chat_id'], 'type':'textMessageEvent',
                                    'textMessageDetails':{'messageText':text}}})
+

@@ -1,3 +1,8 @@
+# FDGCast 0.7.0 Preview
+
+New chat filters/actions, searchable Help, optional Hub dock, overlays and session summaries.
+See [release notes](docs/RELEASE_0.7.0.md), [roadmap coverage](docs/IMPLEMENTATION_STATUS.md) and [website handoff](docs/HUB_HANDOFF_0.7.0.md).
+
 # FDGCast 0.6.0 preview
 
 Refinement release: quieter diagnostics, focused Twitch Events, simpler OBS chat,
@@ -233,3 +238,4 @@ See `TEST_RESULTS.md` for the checks actually run in this environment.
 This is original source for this project, not a rebranded copy of Aitum. Before a
 public release, select a distribution license compatible with OBS and all linked
 dependencies, perform a security review and complete the live-platform test matrix.
+

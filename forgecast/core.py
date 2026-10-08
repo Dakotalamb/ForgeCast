@@ -18,6 +18,8 @@ def twitch_message(event):
                 text=event['message']['text'], badges=event.get('source_badges') or event.get('badges', []),
                 shared=bool(event.get('source_broadcaster_user_id')),
                 is_creator=event['chatter_user_id'] == origin,
+                reply_to=event.get('reply',{}).get('parent_user_name','') if event.get('reply') else '',
+                highlighted=event.get('message_type')=='channel_points_highlighted',
                 fragments=twitch_fragments(event['message']),
                 color=username_color('twitch', event['chatter_user_id']),
                 kind='chat', time=time.time())
@@ -34,7 +36,7 @@ def youtube_message(item, channel):
                 color=username_color('youtube', author.get('channelId') or author.get('displayName', '')),
                 fragments=[{'text':snip.get('displayMessage', '')}],
                 badges=[x for x in ['isChatOwner', 'isChatModerator', 'isChatSponsor'] if author.get(x)],
-                shared=False, kind='chat' if snip.get('type') == 'textMessageEvent' else snip.get('type', 'event'),
+                shared=False, kind={'textMessageEvent':'chat','superChatEvent':'superchat','superStickerEvent':'supersticker','newSponsorEvent':'membership','membershipGiftingEvent':'gift','giftMembershipReceivedEvent':'membership'}.get(snip.get('type'), snip.get('type','event')),
                 time=time.time())
 
 
@@ -84,14 +86,17 @@ class ChatStore:
     def __init__(self, limit=500):
         self.messages = deque(maxlen=limit)
         self.seen = OrderedDict()
+        self.persistent_seen = set()
+        self.on_add = None
 
     def add(self, message):
-        if message['id'] in self.seen:
+        if message['id'] in self.seen or hashlib.sha256(message['id'].encode()).hexdigest() in self.persistent_seen:
             return False
         self.seen[message['id']] = True
         if len(self.seen) > 10000:
             self.seen.popitem(last=False)
         self.messages.append(message)
+        if self.on_add: self.on_add(message)
         return True
 
     def delete(self, platform, message_id=None, user_id=None, channel=None):
@@ -207,3 +212,4 @@ def validate_destination(data):
     if not data.get('name', '').strip() or len(data['name']) > 80:
         raise ValueError('Enter a destination name (maximum 80 characters).')
     return {k: data[k] for k in ('id', 'name', 'server')}
+

@@ -39,7 +39,7 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
             with self.assertRaises(ValueError):release_link(url,'https://hub.example')
         self.assertEqual(release_link('/downloads/setup.exe','https://hub.example'),'https://hub.example/downloads/setup.exe')
     async def test_check_is_public_and_dismissal_survives_restart(self):
-        self.s.session=Session(b'{"schema_version":1,"version":"0.7.0-preview","platform":"windows-x64","notes":"New release","download_url":"/downloads/setup.exe"}')
+        self.s.session=Session(b'{"schema_version":1,"version":"0.8.0-preview","platform":"windows-x64","notes":"New release","download_url":"/downloads/setup.exe"}')
         self.s.vault.set('hub_token','PRIVATE')
         result=await self.s.updates.check()
         self.assertTrue(result['show_notice'])
@@ -48,7 +48,7 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
         self.s.updates.later()
         self.assertFalse(self.s.updates.public()['show_notice'])
         restored=State(self.temp.name,demo=True)
-        self.assertEqual(restored.config['update_later_version'],'0.7.0-preview')
+        self.assertEqual(restored.config['update_later_version'],'0.8.0-preview')
     async def test_malformed_and_oversized_feed_is_nonfatal(self):
         for body in [b'not json',b'{}',b'x'*65537]:
             self.s.session=Session(body)
@@ -56,7 +56,8 @@ class UpdateTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse(result['available'])
             self.assertIn('unavailable',result['status'])
     async def test_switching_hub_hides_old_release(self):
-        self.s.session=Session(b'{"schema_version":1,"version":"0.7.0-preview","platform":"windows-x64","download_url":"/downloads/setup.exe"}')
+        self.s.session=Session(b'{"schema_version":1,"version":"0.8.0-preview","platform":"windows-x64","download_url":"/downloads/setup.exe"}')
         await self.s.updates.check()
         self.s.config['hub_url']='https://different.example'
         self.assertFalse(self.s.updates.public()['available'])
+

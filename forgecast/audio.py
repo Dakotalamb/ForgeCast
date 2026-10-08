@@ -10,12 +10,12 @@ import re
 import time
 
 DEFAULTS = {'enabled':True, 'sources':[], 'quiet_scenes':['BRB','Starting Soon','Ending','Be Right Back','Intermission'],
-            'notifications':True, 'sound':False, 'sound_volume':45, 'silence_seconds':90, 'expected_track':1}
+            'notifications':True, 'sound':False, 'sound_volume':45, 'silence_seconds':90, 'expected_track':1, 'clipping':False, 'vod_track':0}
 
 
 def validate_settings(data):
     result = dict(DEFAULTS)
-    for key in ('enabled','notifications','sound'):
+    for key in ('enabled','notifications','sound','clipping'):
         if key in data:
             if not isinstance(data[key], bool): raise ValueError(key+' must be true or false.')
             result[key] = data[key]
@@ -23,6 +23,8 @@ def validate_settings(data):
     if isinstance(volume,bool) or not isinstance(volume,(int,float)) or not 0 <= volume <= 100:
         raise ValueError('Sound volume must be between 0 and 100.')
     result['sound_volume'] = int(volume)
+    result['vod_track'] = int(data.get('vod_track', 0))
+    if not 0 <= result['vod_track'] <= 6: raise ValueError('Optional VOD track must be 0–6.')
     result['expected_track'] = int(data.get('expected_track', 1))
     if not 1 <= result['expected_track'] <= 6: raise ValueError('Audio track must be 1–6.')
     result['silence_seconds'] = int(data.get('silence_seconds', 90))
@@ -120,6 +122,10 @@ class AudioGuard:
                 signal = row.get('signal_age') is not None and row['signal_age'] <= 5
                 title = label+' is working, but is excluded from your stream track.' if signal else label+' is excluded from your stream track.'
                 problem('wrong_track',title,f'Not enabled on stream Track {track}. Other audio tracks are unchanged by the fix.', 'route')
+            if self.settings['vod_track'] and not (int(row.get('mixers',0)) & (1 << (self.settings['vod_track']-1))):
+                problem('vod_routing',label+' is excluded from your selected VOD track.', 'Not enabled on your chosen Track '+str(self.settings['vod_track'])+'. This does not verify the platform’s VOD encoder setting; check OBS Advanced Output.',delay=15,notify_after=30)
+            if self.settings['clipping'] and row.get('hot_duration',0) >= 3 and row.get('meter_age') is not None and row['meter_age']<=5:
+                problem('near_clipping',label+' input level is staying near clipping.', 'OBS input peaks have stayed within 1 dB of full scale. Lower device gain and listen to a recording; final distortion is not measured.',delay=5,notify_after=15)
             if row.get('volume',1) <= 0:
                 problem('zero_volume',label+' volume is zero.', 'OBS source volume is set to zero. Raise it in the Audio Mixer.')
             if row.get('meter_age') is None or row['meter_age'] > 5:
@@ -231,3 +237,4 @@ async def notify_windows(notice):
 async def play_warning_sound(custom_path=None, volume=45):
     from .sound import play_sound
     return await play_sound(custom_path or Path('__no_custom_sound__'), volume)
+
