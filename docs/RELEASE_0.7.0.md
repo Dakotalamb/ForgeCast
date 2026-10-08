@@ -54,8 +54,21 @@ is distinct from real-account delivery and testing docks in a running OBS UI.
 ## Validation
 
 166 Python tests passed locally after the final local checkpoint/overlay queue fixes.
-Windows native compilation, expanded Chromium UI checks, desktop app/installer
-smoke checks and installer hashes must be recorded after CI completes.
+Windows build run [37712506897](https://github.com/Dakotalamb/ForgeCast/actions/runs/37712506897)
+passed native compilation, 166 Python tests, Chromium checks across all six tabs
+and the overlay, packaged desktop launch/icon/single-instance checks, service
+smoke checks, installer creation and installation-path/hash checks.
+
+Installer: `FDGCast-0.7.0-preview-win-x64-setup.exe`, 13,262,639 bytes.
+SHA-256: `57f1662d6663b2b67db31678dd762a893ff719e8b7f2573452fe6cc4d4f51405`.
+Built source: `670ded5694ffcad6e89d912feccab2e9b9e5249e`.
+
+The recovered Hub 2.13.3 source was separately patched: Twitch event/moderation
+scopes, refresh rotation/concurrency and error classification, explicit Kick
+broadcaster subscriptions with per-event validation, private receipt diagnostics,
+and compatible event identities/accepted participants. Its syntax checks and all
+13 Node test programs passed locally. Its ZIP includes this installer and the
+matching release feed. These are prepared changes, not an already deployed Hub.
 
 ## Required live verification
 
@@ -65,11 +78,14 @@ smoke checks and installer hashes must be recorded after CI completes.
 - OBS right-click actions, dock resizing/arrangement, pause/reconnect, custom WAV,
   near-clipping duration, selected VOD routing and independent output failures.
 - Overlay Browser Source during real moderation and Companion interruption.
-- Hub event field shape against the deployed website contract.
+- Deploy the patched Hub, then verify event identities and accepted participants
+  from the deployed website. The old API lacked the id used by this dock.
 
 ## Outside this repository
 
-Hub/Discord/Twitch extension updates require their latest source. Cloud restream,
+The latest available Hub source ZIP was recovered and its FDGCast integration
+updated separately. Existing Discord/Twitch extension behavior was preserved;
+no new external service or extension review is implied. Cloud restream,
 paid billing, a public hosted chat page, sponsor analytics, independent encoders,
 vertical canvases, delegated collaborator chat, platform title/category mutation,
 dedicated Stream Deck/Streamer.bot plugins and hardware-derived auto settings

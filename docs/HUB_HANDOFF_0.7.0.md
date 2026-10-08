@@ -1,10 +1,57 @@
-# Website handoff for FDGCast 0.7.0 Preview
+# Hub integration delivered with FDGCast 0.7.0 Preview
 
-FDGCast is the desktop/OBS repository. Do not claim these backend changes were
-made here. Apply to the current deployed Hub source and test real accounts.
-Historical `/api/forgecast/v1/...` route names stay unchanged for compatibility.
+The latest available website source, Hub 2.13.3 mobile-navigation ZIP, was
+recovered and patched separately from this repository. Deploy that edited ZIP;
+these changes are not live simply because the desktop installer was built.
+Historical `/api/forgecast/v1/...` names remain compatible.
 
-## Fix the failures seen in Connections
+## Implemented in the website ZIP
+
+- Twitch OAuth now requests the scopes used by follows, redeems, optional Bits,
+  deletion, bans and timeouts, preserving chat read/write. Existing users must
+  reconnect Twitch once to grant them. Channel eligibility/roles still apply.
+- Google and other provider refreshes retain a refresh token when omitted by a
+  response and persist rotated tokens. Concurrent refreshes in one server process
+  share a request and reread the persisted account. This is not a distributed
+  lock across independently running Hub processes.
+- Refresh failures distinguish invalid/revoked grants, app configuration,
+  account-admin policy and temporary outages. A still-valid access token can
+  survive temporary refresh failure. Logs contain only platform/reason labels,
+  not upstream bodies, chat, client secrets or tokens. An actually expired or
+  revoked grant still needs creator reconnection. Google Testing mode can expire
+  YouTube refresh grants after seven days; code cannot override that policy.
+- OAuth callbacks reject a missing access token, failed profile lookup or missing
+  channel identity before saving a misleading connection.
+- Kick uses an explicit broadcaster ID, reuses the correct existing webhook
+  subscription and validates each subscription result instead of treating HTTP
+  200 alone as success. Signature/raw-body/timestamp verification remains intact.
+- Private `/api/forgecast/v1/kick/diagnostics` returns subscription time, receipt
+  time and retained count for the paired creator, without message contents.
+  Hub Settings shows the last received chat time or no receipt in its retained
+  window. Subscription readiness remains separate from message delivery.
+- Events return stable IDs, statuses, timezone-aware dates, instructions and
+  accepted participant names. The earlier slug-only response left the new dock
+  empty. Only the creator's owned/going/accepted events are returned; pending
+  invitations are excluded.
+- FDGCast page and changelog now describe 0.7.0 accurately. Installer and matching
+  same-host update manifests are bundled, with 0.6.0 retained for rollback.
+
+## Deployment and live check
+
+Deploy the complete edited Hub source, including `public/downloads/` and
+`releases/`. Keep the existing platform secrets, encryption key, database and
+BASE_URL unchanged. The normal server startup migration remains in use; this
+patch does not need an additional migration. See the ZIP's
+`docs/FDGCAST_0.7.0_INTEGRATION.md` for exact steps and remaining limitations.
+
+Confirm the public installer download and `/fdgcast/releases/latest.json` return
+200 without sign-in. Close OBS and Companion before installing. Reconnect Twitch,
+reconnect YouTube if it has an expired grant, then Sync linked accounts. Send a
+fresh Kick message and compare the Hub receipt with the OBS chat dock. Select an
+upcoming Hub event and verify its title, time and accepted people in the optional
+Today’s Events dock.
+
+## Reference: platform requirements and live troubleshooting
 
 1. YouTube: Connections must refresh expired access tokens server-side before
    returning them. Persist the refresh token encrypted. If a refresh response
