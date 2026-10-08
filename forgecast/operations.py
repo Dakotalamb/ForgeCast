@@ -6,7 +6,7 @@ from aiohttp import web
 from .chat import api, ApiError
 from .suite import EVENT_KINDS, DEFAULT_EVENTS
 
-SUITE_ACTIONS = {'preflight','event_settings','event_test','event_ack','hub_select','youtube_select','youtube_refresh',
+SUITE_ACTIONS = {'preflight_settings','preflight','event_settings','event_test','event_ack','hub_select','youtube_select','youtube_refresh',
                  'hub_events_refresh','preset_save','preset_apply','preset_delete','chat_moderate','chat_send_many','highlight','overlay_settings','overlay_rotate'}
 
 
@@ -63,7 +63,10 @@ async def moderate(s, data):
 
 async def suite_action(s, op, data):
     from .server import preflight, sync_hub_accounts, send_chat
-    if op == 'preflight': return {'checks':preflight(s),'blocks_streaming':False}
+    if op == 'preflight_settings':
+        if not isinstance(data.get('recording_expected'),bool): raise ValueError('Recording expectation must be true or false.')
+        s.config['recording_expected']=data['recording_expected']
+    elif op == 'preflight': return {'checks':preflight(s),'blocks_streaming':False}
     elif op == 'chat_moderate': await moderate(s,data)
     elif op == 'chat_send_many':
         platforms = data.get('platforms')
@@ -126,13 +129,21 @@ async def suite_action(s, op, data):
         s.config['output_presets']=presets
     elif op == 'highlight':
         row=find_message(s,data.get('id'))
-        if row['id'] not in s.highlight_ids: s.highlight_ids.append(row['id'])
-        s.highlight_started=time.time()
+        if not s.config.get('overlay_enabled') or s.config.get('overlay_mode','selected')!='selected': raise ValueError('Enable Selected messages overlay in Companion Help first.')
+        if data.get('immediate') is True:
+            s.highlight_current=row['id'];s.highlight_started=time.time()
+        elif row['id'] != getattr(s,'highlight_current',None) and row['id'] not in s.highlight_ids:
+            if len(s.highlight_ids)>=20:raise ValueError('Highlight queue is full. Wait for displayed messages to finish.')
+            s.highlight_ids.append(row['id'])
     elif op == 'overlay_settings':
         if not isinstance(data.get('enabled'),bool) or data.get('mode') not in ('all','selected'): raise ValueError('Choose an overlay mode and enable or disable it.')
         seconds=data.get('seconds',30)
         if isinstance(seconds,bool) or not isinstance(seconds,int) or not 5<=seconds<=120: raise ValueError('Overlay duration must be 5–120 seconds.')
+        theme=data.get('theme','dark');font=data.get('font',22);spacing=data.get('spacing','comfortable')
+        if theme not in ('dark','minimal') or font not in (18,22,28) or spacing not in ('compact','comfortable'): raise ValueError('Choose supported overlay appearance options.')
+        s.config.update(overlay_theme=theme,overlay_font=font,overlay_spacing=spacing)
         s.config['overlay_enabled']=data['enabled'];s.config['overlay_mode']=data['mode']
+        if not data['enabled']:s.highlight_ids.clear();s.highlight_current=None
         s.config['overlay_seconds']=seconds
     elif op == 'overlay_rotate':
         s.overlay_key=secrets.token_urlsafe(32);s.vault.set('overlay_key',s.overlay_key)
@@ -166,9 +177,15 @@ async def overlay_feed(request):
     rows=[]
     if s.config.get('overlay_enabled'):
         if s.config.get('overlay_mode','selected') == 'selected':
-            ids=list(s.highlight_ids)
-            if time.time()-getattr(s,'highlight_started',0) < s.config.get('overlay_seconds',30):
-                rows=[r for r in s.chat_view() if r['id'] in ids and not r.get('deleted')][-1:]
+            available={r['id']:r for r in s.chat_view() if not r.get('deleted')}
+            current=getattr(s,'highlight_current',None)
+            if current not in available or time.time()-getattr(s,'highlight_started',0)>=s.config.get('overlay_seconds',30):
+                s.highlight_current=None
+                while s.highlight_ids:
+                    candidate=s.highlight_ids.popleft()
+                    if candidate in available:
+                        s.highlight_current=candidate;s.highlight_started=time.time();break
+            if getattr(s,'highlight_current',None) in available: rows=[available[s.highlight_current]]
         else:
             rows=[r for r in s.chat_view() if r.get('kind','chat') in {'chat','superchat','supersticker'} and not r.get('deleted') and time.time()-r['time']<s.config.get('overlay_seconds',30)][-8:]
-    return web.json_response({'messages':[{k:r.get(k) for k in ('id','platform','origin','user','text','fragments','color')} for r in rows]})
+    return web.json_response({'appearance':{'theme':s.config.get('overlay_theme','dark'),'font':s.config.get('overlay_font',22),'spacing':s.config.get('overlay_spacing','comfortable')},'messages':[{k:r.get(k) for k in ('id','platform','origin','user','text','fragments','color')} for r in rows]})

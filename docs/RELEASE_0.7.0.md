@@ -35,15 +35,15 @@ is distinct from real-account delivery and testing docks in a running OBS UI.
   accepted participants from the Hub. Hidden on its first introduction; enable
   through OBS Docks. RSVPs never imply live status or start outputs.
 - Preflight in OBS Control, plus Companion fixes/navigation, selected event and
-  recording-space information reported by OBS. Missing telemetry stays unknown.
+  optional recording expectation and fresh recording-space information reported by OBS. Missing telemetry stays unknown.
 - Searchable Help with first-stream walkthrough, troubleshooting, official OBS
   resources, upload-budget calculator, compatibility and update recovery guidance.
 - Stream Doctor optional chirp/custom WAV, independent of Windows notifications.
   Audio Guard optional sustained input near-clipping warning and routing checks
   against a creator-selected VOD track. No claim of viewer playback or automatic
   detection of the platform’s VOD encoder settings.
-- Optional transparent chat overlay: selected latest highlight or recent combined
-  public chat. Separate revocable read-only link; disabled by default. Deleted
+- Optional transparent chat overlay: immediate or queued highlights, or recent combined
+  public chat. Basic themes, font/spacing controls and separate revocable read-only link; disabled by default. Deleted
   messages are excluded. No account tokens or OBS controls in its feed.
 - Session summaries/export: locally observed duration, destinations, performance
   failures, audio warnings and received per-platform message/event counts.
@@ -53,7 +53,7 @@ is distinct from real-account delivery and testing docks in a running OBS UI.
 
 ## Validation
 
-162 Python tests passed locally at the initial implementation checkpoint.
+166 Python tests passed locally after the final local checkpoint/overlay queue fixes.
 Windows native compilation, expanded Chromium UI checks, desktop app/installer
 smoke checks and installer hashes must be recorded after CI completes.
 

@@ -1,1 +1,2 @@
 html,body{margin:0;background:transparent;font:20px system-ui;color:white}#messages{padding:12px}.message{background:rgba(14,19,26,.88);border-left:4px solid #ff5a1f;border-radius:6px;padding:10px 14px;margin:8px 0;overflow-wrap:anywhere}.message img{height:28px;vertical-align:middle}.origin{font-size:13px;color:#d2d9e2}.user{font-weight:bold}p{margin:4px 0}
+.font-18{font-size:18px}.font-22{font-size:22px}.font-28{font-size:28px}.minimal .message{background:transparent;border:0;text-shadow:0 2px 3px black}.compact .message{padding:5px 8px;margin:4px 0}

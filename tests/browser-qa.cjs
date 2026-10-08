@@ -77,6 +77,13 @@ async function main(){
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
   await page.locator('[data-tab="help"]').click();await page.locator('#helpSearch').fill('Kick');assert.ok(await page.locator('#helpArticles details').count()>0);await page.locator('#helpSearch').fill('no-matching-article-xyz');assert.match(await page.locator('#helpArticles').textContent(),/No matching article/);assert.equal(await page.locator('#overlayLink').isVisible(),false);
+  await page.locator('#helpSearch').fill('');await page.screenshot({path:path.join(output,'help-demo.png'),fullPage:true});
+  const overlay=await browser.newPage({viewport:{width:600,height:400}});let overlayVisible=true;
+  overlay.on('pageerror',e=>errors.push(e.message));
+  await overlay.route('**/overlay/feed',route=>route.fulfill({json:{appearance:{theme:'dark',font:22,spacing:'compact'},messages:overlayVisible?[{id:'test',platform:'twitch',origin:'Creator',user:'Viewer',text:'<script>test</script>',fragments:[{text:'<script>test</script>'}],color:'#ffd28d'}]:[]}}));
+  await overlay.goto(url.split('/#')[0]+'/overlay#READ-ONLY-DEMO');await overlay.waitForSelector('.message');
+  assert.match(await overlay.locator('.message').textContent(),/<script>test<\/script>/);assert.equal(await overlay.locator('#messages script').count(),0);
+  await overlay.screenshot({path:path.join(output,'overlay-demo.png')});overlayVisible=false;await overlay.waitForFunction(()=>document.querySelectorAll('.message').length===0);await overlay.close();assert.deepEqual(errors,[]);
   console.log('PASS: demo rendering, OBS-only chat, all six tabs, blocked live action, mobile overflow, no JS errors.');
  } finally {
   if(browser)await browser.close();

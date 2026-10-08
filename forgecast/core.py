@@ -88,6 +88,7 @@ class ChatStore:
         self.seen = OrderedDict()
         self.persistent_seen = set()
         self.on_add = None
+        self.event_messages = ()
 
     def add(self, message):
         if message['id'] in self.seen or hashlib.sha256(message['id'].encode()).hexdigest() in self.persistent_seen:
@@ -100,7 +101,7 @@ class ChatStore:
         return True
 
     def delete(self, platform, message_id=None, user_id=None, channel=None):
-        for m in self.messages:
+        for m in list(self.messages)+list(self.event_messages):
             if m['platform'] != platform:
                 continue
             if channel and channel not in (m['origin_id'], m['received_in']):

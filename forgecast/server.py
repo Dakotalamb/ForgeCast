@@ -88,6 +88,8 @@ class State:
         self.chat.on_add = self.count_message
         self.event_ack = set()
         self.audience_history = deque(maxlen=500)
+        self.chat.event_messages=self.audience_history
+        self.observed_destinations=()
         self.audience_path = self.directory/'audience-events.json'
         try:
             history = json.loads(self.audience_path.read_text())
@@ -114,9 +116,13 @@ class State:
     def checkpoint(self):
         if self.demo: return
         hashes = list(self.chat.persistent_seen) + [hashlib.sha256(uid.encode()).hexdigest() for uid in self.chat.seen]
-        atomic_json(self.audience_path,[dict(r, acknowledged=r['id'] in self.event_ack) for r in self.audience_history if not r.get('simulated')])
-        atomic_json(self.checkpoint_path, {'hashes':list(dict.fromkeys(hashes))[-10000:], 'kick_after':self.kick_after,
-                    'kick_channel':self.config.get('kick', {}).get('channel_id', '')})
+        try:
+            atomic_json(self.audience_path,[dict(r, acknowledged=r['id'] in self.event_ack) for r in self.audience_history if not r.get('simulated')])
+            atomic_json(self.checkpoint_path, {'hashes':list(dict.fromkeys(hashes))[-10000:], 'kick_after':self.kick_after,
+                        'kick_channel':self.config.get('kick', {}).get('channel_id', '')})
+        except OSError:
+            if not self.events or self.events[-1]['text']!='Local chat checkpoints could not be saved; monitoring continues.':
+                self.event('Local chat checkpoints could not be saved; monitoring continues.')
 
     def coordination(self):
         return {'events':normalize_events(self.hub_events, self.config.get('hub_url', '')),
@@ -202,10 +208,10 @@ class State:
                     version=__version__, hub_events=self.coordination()['events'], coordination=self.coordination(),
                     connection_help={k:connection_help(k,v,self.config.get('hub_url','')) for k,v in self.statuses.items()},
                     youtube_broadcasts=self.youtube_broadcasts, youtube_selected=self.config.get('youtube_broadcast_id',''),
-                    event_settings=self.config.get('event_kinds', DEFAULT_EVENTS), output_presets=self.config.get('output_presets', {}),
+                    recording_expected=self.config.get('recording_expected',False), event_settings=self.config.get('event_kinds', DEFAULT_EVENTS), output_presets=self.config.get('output_presets', {}),
                     summaries=session_summaries(self), help_articles=[{'id':i,'title':title,'body':body} for i,title,body in ARTICLES],
                     help_links=[{'title':title,'url':url} for title,url in LINKS], overlay_enabled=self.config.get('overlay_enabled',False),
-                    overlay_mode=self.config.get('overlay_mode','selected'), overlay_seconds=self.config.get('overlay_seconds',30), merge_events=self.config.get('merge_events',False),
+                    overlay_mode=self.config.get('overlay_mode','selected'), overlay_theme=self.config.get('overlay_theme','dark'), overlay_font=self.config.get('overlay_font',22), overlay_spacing=self.config.get('overlay_spacing','comfortable'), overlay_seconds=self.config.get('overlay_seconds',30), merge_events=self.config.get('merge_events',False),
                     secret_persistence='Windows DPAPI' if not self.vault.memory else 'Session memory only',
                     hub_connection=self.hub_connection, hub_paired=bool(self.vault.get('hub_token')),
                     hub_url=self.config.get('hub_url', ''), obs_port=self.config.get('obs_port', 4455))
@@ -323,7 +329,8 @@ def preflight(s):
     checks.append({'label':'Encoder','result':'Active H.264/AAC encoder compatibility is checked when secondary outputs start; not verified offline.'})
     checks.append({'label':'Viewer picture / available upload','result':'Not measured. Check preview, platform dashboards and upload headroom.'})
     checks.append({'label':'Companion', 'result':'Running locally; OBS docks '+('connected' if native_fresh else 'not connected'), 'help_tab':'setup'})
-    checks.append({'label':'Recording storage', 'result':str(round(s.stats['availableDiskSpace']/1024,1))+' GiB reported by OBS; check your recording path.' if isinstance(s.stats.get('availableDiskSpace'), (int,float)) else 'Not reported by OBS; check free space at the recording location.', 'help_tab':'help'})
+    checks.append({'label':'Recording', 'result':('Recording active.' if s.audio_snapshot.get('recording_active') else 'Recording expected but not active — start recording in OBS.') if s.config.get('recording_expected') and native_fresh and s.audio_snapshot and 'recording_active' in s.audio_snapshot else 'Recording expectation enabled; status unavailable.' if s.config.get('recording_expected') else 'Recording is optional; expectation is off.', 'help_tab':'live'})
+    checks.append({'label':'Recording storage', 'result':str(round(s.stats['availableDiskSpace']))+' MB reported by OBS; check your recording path.' if (s.demo or time.time()-s.stats_seen<8) and isinstance(s.stats.get('availableDiskSpace'), (int,float)) else 'Not reported by OBS; check free space at the recording location.', 'help_tab':'help'})
     selected = next((e for e in s.coordination()['events'] if e['id'] == s.config.get('selected_event_id')), None)
     checks.append({'label':'Hub event', 'result':selected['title']+' · '+selected['starts_at'] if selected else 'No event selected. This is optional.', 'help_tab':'hub'})
     for check in checks:
@@ -344,6 +351,9 @@ async def poll_history(s):
         outputs=([s.main_output] if s.main_output else [])+s.native_outputs if fresh else []
         previous_session = s.history.session
         notices=s.history.sample(live,outputs)
+        observed=tuple(sorted(str(o['id']) for o in outputs if o.get('active'))) if live else ()
+        if s.history.session and (not previous_session or observed != s.observed_destinations): s.history.record('destination_observed',destinations=list(observed))
+        s.observed_destinations=observed
         count_session = s.history.session or previous_session
         if count_session and (time.time()-s.last_count_save > 30 or (previous_session and not s.history.session)):
             counts = s.session_counts.get(count_session['id'], {'chat_messages':{},'audience_events':{}})
@@ -1129,6 +1139,9 @@ async def lifecycle(app):
         doctor_notify_task = asyncio.create_task(doctor_notifications(s)) if not s.demo else None
         update_task = asyncio.create_task(s.updates.run()) if not s.demo else None
         yield
+        if s.history.session:
+            counts=s.session_counts.get(s.history.session['id'], {'chat_messages':{},'audience_events':{}})
+            s.history.record('audience_counts',**counts,audio_warnings=sum(1 for r in s.audio.history if r.get('time',0)>=s.history.session['started_at'] and r['kind']=='warning'))
         s.checkpoint()
         for adapter in s.adapters.values():
             adapter.task.cancel()

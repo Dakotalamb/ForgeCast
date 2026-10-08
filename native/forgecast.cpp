@@ -233,7 +233,7 @@ class DockView : public QObject {
         connect(action,&QAction::triggered,owner,[this,key](bool value) { save(key,value); });
     }
 public:
-    bool compact=true, showStatus=true, showControls=true, showOrigins=false, showTimes=false, userColors=true, showAvatars=true, showFilters=true, alternate=false, showBadges=true;
+    bool compact=true, showStatus=true, showControls=true, showOrigins=false, showTimes=false, userColors=true, showAvatars=true, showFilters=true, alternate=false, showBadges=false;
     int iconPixels=18;
     int pixels=13;
     QMenu *menu;
@@ -309,7 +309,7 @@ public:
         showAvatars=settings.value(prefix+"avatars",true).toBool();
         showFilters=settings.value(prefix+"filters",true).toBool();
         alternate=settings.value(prefix+"alternate",false).toBool();
-        showBadges=settings.value(prefix+"badges",true).toBool();
+        showBadges=settings.value(prefix+"badges",false).toBool();
         iconPixels=qBound(16,settings.value(prefix+"icon",18).toInt(),26);
         pixels=qBound(11,settings.value(prefix+"font",13).toInt(),17);
         QFont font=owner->font();font.setPixelSize(pixels);owner->setFont(font);
@@ -454,7 +454,8 @@ public:
         auto *copy=menu.addAction("Copy message");connect(copy,&QAction::triggered,this,[row]{QApplication::clipboard()->setText(row.value("text").toString());});
         auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && r.value("user_id")==row.value("user_id"))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
         auto *reply=menu.addAction("Reply in my "+platform+" channel");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
-        auto *highlight=menu.addAction("Show on selected-message overlay");connect(highlight,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id}});});
+        auto *highlight=menu.addAction("Show on selected-message overlay");connect(highlight,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id},{"immediate",true}});});
+        auto *queue=menu.addAction("Queue for selected-message overlay");connect(queue,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id}});});
         QString profile;
         if(platform=="youtube" && QRegularExpression("^[A-Za-z0-9_-]{1,100}$").match(row.value("user_id").toString()).hasMatch())profile="https://www.youtube.com/channel/"+row.value("user_id").toString();
         else if(QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
@@ -511,7 +512,7 @@ public:
             if (!QRegularExpression("^#[a-fA-F0-9]{6}$").match(color).hasMatch()) color = "#d3baff";
             if (!view->userColors) color="#f4f4f4";
             QString avatar;
-            const auto avatarPath = row.value("origin_avatar").toString(row.value("avatar").toString());
+            QString avatarPath = row.value("origin_avatar").toString();if(avatarPath.isEmpty() && row.value("is_creator").toBool())avatarPath=row.value("avatar").toString();
             if (view->showAvatars && avatarPath.startsWith("/media/")) {
                 const QUrl url("http://127.0.0.1:17654"+avatarPath); visible.insert(url);
                 avatar = "<img width='22' height='22' src='"+url.toString().toHtmlEscaped()+"'> ";
@@ -1116,7 +1117,7 @@ public:
                 QStringList lines;for(const auto &entry:body.value("checks").toArray()){auto r=entry.toObject();lines.append(r.value("label").toString()+": "+r.value("result").toString());}
                 QMessageBox box(this);box.setWindowTitle("FDGCast pre-stream checks");box.setTextFormat(Qt::PlainText);box.setText(lines.join("\n\n"));box.exec();
             }
-            if(!success && (action.value("action").toString()=="chat_moderate" || action.value("action").toString()=="hub_select")){QMessageBox box(this);box.setWindowTitle("FDGCast action needs attention");box.setTextFormat(Qt::PlainText);box.setText(error);box.exec();}
+            if(!success && (action.value("action").toString()=="chat_moderate" || action.value("action").toString()=="hub_select" || action.value("action").toString()=="highlight")){QMessageBox box(this);box.setWindowTitle("FDGCast action needs attention");box.setTextFormat(Qt::PlainText);box.setText(error);box.exec();}
             if (sendingChat && chatDock)
                 chatDock->sendResult(success, error);
             if (audioAction && doctorDock) doctorDock->message(success ? "Audio Guard request accepted. Waiting for updated OBS readings." : error);
@@ -1184,7 +1185,7 @@ public:
         const QString sceneName = scene ? QString::fromUtf8(obs_source_get_name(scene)) : QString();
         if (scene) obs_source_release(scene);
         return QJsonObject{{"sources",rows},{"stream_track",track},{"track_verified",obs_frontend_streaming_active() && track>=1 && track<=6},
-            {"stream_active",obs_frontend_streaming_active()},{"scene",sceneName}};
+            {"stream_active",obs_frontend_streaming_active()},{"recording_active",obs_frontend_recording_active()},{"scene",sceneName}};
     }
 
     QString fixAudio(const QJsonObject &cmd)

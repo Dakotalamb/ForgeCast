@@ -1,10 +1,13 @@
 'use strict';
 const overlayKey=location.hash.slice(1);history.replaceState(null,'','/overlay');
+let previous='';
 async function refresh(){
  try{
   const response=await fetch('/overlay/feed',{headers:{Authorization:'Bearer '+overlayKey}});
   if(!response.ok)throw Error('Unavailable');
   const data=await response.json(),root=document.getElementById('messages');
+  const signature=JSON.stringify(data);if(signature===previous){setTimeout(refresh,1000);return;}previous=signature;
+  const a=data.appearance||{};document.body.className=['font-'+([18,22,28].includes(a.font)?a.font:22),a.theme==='minimal'?'minimal':'dark',a.spacing==='compact'?'compact':'comfortable'].join(' ');
   root.replaceChildren(...data.messages.map(m=>{
    const box=document.createElement('article');box.className='message';
    const origin=document.createElement('div');origin.className='origin';origin.textContent=m.platform.toUpperCase()+' · '+m.origin;
@@ -17,7 +20,7 @@ async function refresh(){
    }
    box.append(origin,body);return box;
   }));
- }catch{document.getElementById('messages').replaceChildren();}
+ }catch{previous='';document.getElementById('messages').replaceChildren();}
  setTimeout(refresh,1000);
 }
 if(overlayKey)refresh();

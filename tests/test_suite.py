@@ -106,10 +106,28 @@ class SuiteTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('Collab',next(c['result'] for c in preflight(self.state) if c['label']=='Hub event'))
         self.assertFalse(self.state.commands)
 
+    async def test_recording_preflight_uses_fresh_native_status(self):
+        await suite_action(self.state,'preflight_settings',{'recording_expected':True})
+        self.state.native_seen=time.time();self.state.audio_snapshot={'recording_active':False}
+        self.assertIn('not active',next(r['result'] for r in preflight(self.state) if r['label']=='Recording'))
+        self.state.native_seen=0
+        self.assertIn('unavailable',next(r['result'] for r in preflight(self.state) if r['label']=='Recording'))
+
+    async def test_event_history_moderation_after_chat_eviction(self):
+        event=message(uid='paid');event['kind']='superchat';self.state.chat.add(event)
+        for n in range(500):self.state.chat.add(message(uid=str(n)))
+        self.state.chat.delete('twitch',message_id='platform-paid')
+        self.assertTrue(self.state.audience_history[0]['deleted'])
+
     async def test_dedup_survives_restart_without_storing_chat(self):
         self.state.demo=False;self.state.chat.add(message());self.state.checkpoint()
         saved=json.loads(self.state.checkpoint_path.read_text());self.assertNotIn('Hello',str(saved));self.assertNotIn('Viewer',str(saved))
         restored=State(self.temp.name,demo=True);self.assertFalse(restored.chat.add(message()));self.assertTrue(restored.chat.add(message(uid='new')))
+
+    async def test_checkpoint_failure_keeps_monitoring_available(self):
+        self.state.demo=False
+        with patch('forgecast.server.atomic_json',side_effect=OSError('disk full')): self.state.checkpoint()
+        self.assertIn('monitoring continues',self.state.events[-1]['text'])
 
     async def test_session_counts_survive_feed_eviction_and_dedup(self):
         self.state.history.session={'id':'session','started_at':time.time()-30}
@@ -132,6 +150,20 @@ class OverlayTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual((await self.client.get(path,headers=headers)).status,401)
         self.assertEqual((await self.client.post('/native/action',headers=headers,json={'action':'start_all'})).status,401)
         self.assertNotIn(self.state.overlay_key,str(self.state.public()));self.assertNotIn(self.state.overlay_key,str(self.state.report()))
+    async def test_selected_overlay_queue_advances_and_skips_deleted_messages(self):
+        self.state.chat.add(message(uid='one'));self.state.chat.add(message(uid='two'));self.state.chat.add(message(uid='three'))
+        await suite_action(self.state,'overlay_settings',{'enabled':True,'mode':'selected','seconds':10})
+        for uid in ('one','two','three'):await suite_action(self.state,'highlight',{'id':uid})
+        headers={**self.headers,'Authorization':'Bearer '+self.state.overlay_key}
+        result=await self.client.get('/overlay/feed',headers=headers)
+        self.assertEqual((await result.json())['messages'][0]['id'],'one')
+        self.state.chat.delete('twitch',message_id='platform-two')
+        self.state.highlight_started=time.time()-11
+        result=await self.client.get('/overlay/feed',headers=headers)
+        self.assertEqual((await result.json())['messages'][0]['id'],'three')
+        await suite_action(self.state,'overlay_settings',{'enabled':False,'mode':'selected','seconds':10})
+        self.assertFalse(self.state.highlight_ids);self.assertIsNone(self.state.highlight_current)
+
     async def test_overlay_disabled_rotation_and_moderation(self):
         headers={**self.headers,'Authorization':'Bearer '+self.state.overlay_key}
         self.state.chat.add(message());self.state.vault.set('hub_token','SECRET-PAIR')
