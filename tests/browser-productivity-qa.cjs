@@ -17,17 +17,19 @@ const {chromium}=require(require.resolve('playwright',{paths:[process.env.CODEX_
    else {return route.continue();}
    await route.fulfill({json:result});
   });
-  await page.goto(url);await page.locator('[data-tab="help"]').click();await page.waitForFunction(()=>!document.querySelector('#audioTestStart').disabled);
+  await page.goto(url);await page.locator('[data-tab="tools"]').click();await page.waitForFunction(()=>!document.querySelector('#audioTestStart').disabled);
   await page.locator('#audioTestStart').click();await page.waitForFunction(()=>document.querySelector('#audioTestStatus').textContent.includes('Recording test'));assert.match(await page.locator('#audioTestStatus').textContent(),/Recording test/);
   await page.locator('#audioTestStop').click();await page.waitForFunction(()=>document.querySelector('#audioTestStatus').textContent.includes('sample.mkv'));assert.equal(await page.locator('#audioTestStop').isDisabled(),true);
+  await page.locator('[data-tab="help"]').click();assert.equal(await page.locator('#audioTestStart').isVisible(),false);
   await page.locator('#feedbackForm input[name=title]').fill('Example problem');await page.locator('#feedbackForm textarea').fill('<script>test</script>');await page.locator('#feedbackForm button').click();await page.waitForSelector('#feedbackPreview:not([hidden])');
   assert.match(await page.locator('#feedbackPreview').textContent(),/<script>test<\/script>/);assert.equal(await page.locator('#feedbackPreview script').count(),0);assert.equal(sent,0);
   await page.locator('#feedbackSend').click();await page.waitForFunction(()=>document.querySelector('#feedbackStatus').textContent.includes('sent'));assert.equal(sent,1);assert.equal(await page.locator('#feedbackSend').isDisabled(),true);
   await page.locator('#feedbackForm textarea').fill('Edited');assert.equal(await page.locator('#feedbackDownload').isDisabled(),true);
+  await page.locator('[data-tab="tools"]').click();
   await page.locator('#backupFile').setInputFiles({name:'preferences.json',mimeType:'application/json',buffer:Buffer.from(JSON.stringify({schema_version:1,app:'FDGCast preferences',preferences:{doctor_sound:true},destinations:[{name:'YouTube'}]}))});await page.waitForFunction(()=>!document.querySelector('#backupRestore').disabled);assert.match(await page.locator('#backupPreview').textContent(),/YouTube/);
   await page.locator('#backupRestore').click();await page.waitForFunction(()=>document.querySelector('#backupStatus').textContent.includes('Restored'));assert.equal(await page.locator('#backupRestore').isDisabled(),true);
   await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));assert.deepEqual(errors,[]);
-  const qa=path.resolve(__dirname,'../qa-next');fs.mkdirSync(qa,{recursive:true});await page.screenshot({path:path.join(qa,'help-productivity-mobile.png'),fullPage:true});
+  const qa=path.resolve(__dirname,'../qa-next');fs.mkdirSync(qa,{recursive:true});await page.screenshot({path:path.join(qa,'tools-preferences-mobile.png'),fullPage:true});
   console.log('PASS: simulated recording controls, feedback preview/XSS/confirmation/edit reset, backup preview/restore and mobile overflow; no JS errors.');
  }finally{if(browser)await browser.close();server.kill('SIGINT');}
 })().catch(e=>{console.error(e);process.exitCode=1;});

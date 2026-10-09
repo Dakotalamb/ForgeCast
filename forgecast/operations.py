@@ -129,7 +129,7 @@ async def suite_action(s, op, data):
         s.config['output_presets']=presets
     elif op == 'highlight':
         row=find_message(s,data.get('id'))
-        if not s.config.get('overlay_enabled') or s.config.get('overlay_mode','selected')!='selected': raise ValueError('Enable Selected messages overlay in Companion Help first.')
+        if not s.config.get('overlay_enabled') or s.config.get('overlay_mode','selected')!='selected': raise ValueError('Enable Selected messages overlay in Companion Tools first.')
         if data.get('immediate') is True:
             s.highlight_current=row['id'];s.highlight_started=time.time()
         elif row['id'] != getattr(s,'highlight_current',None) and row['id'] not in s.highlight_ids:

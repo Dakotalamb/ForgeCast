@@ -1,7 +1,7 @@
 name: Check next FDGCast features
 on:
   push:
-    branches: [next/audio-feedback-backup]
+    branches: [next/audio-feedback-backup, next/tools-navigation]
   workflow_dispatch:
 permissions:
   contents: read

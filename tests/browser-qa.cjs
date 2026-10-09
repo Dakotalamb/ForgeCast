@@ -24,7 +24,7 @@ async function main(){
   assert.equal(await page.locator('#updateBanner').isVisible(),false);
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
-  for(const tab of ['outputs','doctor','hub','setup','help','live']){
+  for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){
    await page.locator('[data-tab="'+tab+'"]').click();
    assert.equal(await page.locator('#'+tab).isVisible(),true);
   }
@@ -76,6 +76,7 @@ async function main(){
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
+  await page.locator('[data-tab="tools"]').click();assert.equal(await page.locator('#tools #overlayForm').isVisible(),true);assert.equal(await page.locator('#tools #audioTestStart').isVisible(),true);assert.equal(await page.locator('#tools #budgetVideo').isVisible(),true);assert.equal(await page.locator('#tools #backupExport').isVisible(),true);assert.equal(await page.locator('#feedbackForm').isVisible(),false);
   await page.locator('[data-tab="help"]').click();await page.locator('#helpSearch').fill('Kick');assert.ok(await page.locator('#helpArticles details').count()>0);await page.locator('#helpSearch').fill('no-matching-article-xyz');assert.match(await page.locator('#helpArticles').textContent(),/No matching article/);assert.equal(await page.locator('#overlayLink').isVisible(),false);
   await page.locator('#helpSearch').fill('');await page.screenshot({path:path.join(output,'help-demo.png'),fullPage:true});
   const overlay=await browser.newPage({viewport:{width:600,height:400}});let overlayVisible=true;
