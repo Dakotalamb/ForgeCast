@@ -109,9 +109,10 @@ class YouTubeStreamTests(unittest.IsolatedAsyncioTestCase):
                 await asyncio.Event().wait()
             finally: closed.append(args[0])
         with patch('forgecast.youtube_stream.stream_responses',source):
-            self.start();await until(lambda:len(calls)==1)
+            self.start();await until(lambda:self.statuses and self.statuses[-1][1]=='connected')
             self.adapter.token='FRESH';await until(lambda:len(calls)==2)
             self.assertEqual(calls[1],('chat-one','FRESH','resume-one'))
+            await until(lambda:self.statuses[-1][1]=='connected')
             self.adapter.config['live_chat_id']='chat-two';await until(lambda:len(calls)==3)
             self.assertEqual(calls[2],('chat-two','FRESH',None))
             self.assertEqual(closed,['chat-one','chat-one'])
