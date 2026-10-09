@@ -25,7 +25,7 @@ closed. Validate completely before atomic write; preserve existing keys
 and destinations. New destination names are unchecked placeholders requiring
 server/key setup. Restart Companion and sync accounts after restoring event choices.
 
-Validation: 179 Python tests passed, including 13 new ownership, restart, privacy,
+Validation: 180 Python tests passed, including 14 new ownership, restart, privacy,
 permission, confirmation and restore-failure checks. JavaScript syntax passed.
 Browser verification is tracked separately. A new Windows installer has not yet
 been built or published for these additions; they are absent from 0.7.0.

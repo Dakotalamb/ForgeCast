@@ -104,3 +104,12 @@ class ProductivityTests(unittest.IsolatedAsyncioTestCase):
     async def test_cannot_open_arbitrary_file_from_client(self):
         with self.assertRaises(ValueError):await productivity_action(self.s,'audio_test_open',{'confirmed':True,'path':'evil.exe'})
         self.assertIsNone(self.s.audio_test.path)
+
+    async def test_connection_change_during_status_read_does_not_stop_new_session(self):
+        await self.s.audio_test.start()
+        async def moved(kind):
+            if kind=='GetRecordStatus':self.s.obs.ws=object();return {'outputActive':True}
+            raise AssertionError('Must not stop after the connection changes')
+        self.s.obs.request.side_effect=moved
+        with self.assertRaises(ValueError):await self.s.audio_test.stop()
+        self.assertFalse(self.s.audio_test.owned)

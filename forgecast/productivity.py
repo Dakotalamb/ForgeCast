@@ -112,7 +112,7 @@ class AudioTest:
             if not self.same_connection():
                 self.owned=False;self.phase='interrupted';raise ValueError('OBS connection changed. Check its recording manually; FDGCast will not stop a different session.')
             status=await self.s.obs.request('GetRecordStatus')
-            if not self.owned or not status.get('outputActive'):
+            if not self.owned or not self.same_connection() or not status.get('outputActive'):
                 self.owned=False;self.phase='interrupted';raise ValueError('The test recording ended outside FDGCast.')
             # Stops only the recording started here, on the same WebSocket session.
             self.phase='stopping'
