@@ -27,7 +27,7 @@ async def api(session, method, url, **kwargs):
                     reason = candidate
             except (ValueError, AttributeError, IndexError, TypeError):
                 pass
-            tips = {'quotaExceeded':'YouTube API quota is exhausted; chat will retry later.',
+            tips = {'quotaExceeded':'YouTube project API quota exhausted; wait for the daily reset. Reconnecting will not restore quota.',
                     'dailyLimitExceeded':'YouTube daily API limit reached.',
                     'insufficientPermissions':'Account permission is missing; reconnect in Hub settings.',
                     'liveChatEnded':'The YouTube broadcast has ended; looking for your next broadcast.',
@@ -226,56 +226,105 @@ class YouTube:
         self.session, self.config, self.token = session, config, token
         self.store, self.status = store, status
         self.task = None
+        self.retry_at = 0
+        self.quota_paused = False
 
     async def run(self):
+        from .youtube_stream import stream_responses, stream_error, quota_retry_seconds
+        import grpc
         page = None
         chat_id = None
         delay = 5
         while True:
+            source = pending = None
             try:
+                if time.monotonic() < self.retry_at:
+                    await asyncio.sleep(min(5, self.retry_at-time.monotonic()))
+                    continue
                 if not self.config.get('live_chat_id'):
-                    await asyncio.sleep(10)
+                    await asyncio.sleep(2)
                     continue
                 if chat_id != self.config['live_chat_id']:
                     chat_id, page = self.config['live_chat_id'], None
-                params = dict(liveChatId=chat_id, part='snippet,authorDetails', maxResults=200)
-                if page:
-                    params['pageToken'] = page
-                result = await api(self.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveChat/messages',
-                                   headers={'Authorization':'Bearer '+self.token}, params=params)
-                invalid = False
-                for item in result.get('items', []):
+                token = self.token
+                self.status('youtube', 'Connecting to YouTube live chat…')
+                source = stream_responses(chat_id, token, page)
+                pending = asyncio.create_task(anext(source))
+                while True:
+                    done, _ = await asyncio.wait({pending}, timeout=1)
+                    if self.config.get('live_chat_id') != chat_id or self.token != token:
+                        # Cancel the old stream before receiving messages for another
+                        # broadcast/account. Token refresh keeps the resume cursor.
+                        break
+                    if not done: continue
                     try:
-                        self.receive(item)
-                    except (KeyError, TypeError, ValueError):
-                        invalid = True
-                # Advance the cursor even if one malformed item was skipped.
-                page = result.get('nextPageToken')
-                self.status('youtube', 'An invalid message was skipped; chat continues.' if invalid else 'connected')
-                if result.get('offlineAt'):
-                    self.config['live_chat_id'] = ''
-                    page = None
-                    self.status('youtube', 'Broadcast ended; waiting for your next broadcast.')
-                delay = 5
-                await asyncio.sleep(max(1, result.get('pollingIntervalMillis', 5000)/1000))
+                        result = pending.result()
+                    except StopAsyncIteration:
+                        self.status('youtube', 'YouTube chat reconnecting…')
+                        self.retry_at = time.monotonic()+5
+                        break
+                    invalid = False
+                    ended = bool(result.get('offlineAt'))
+                    for item in result.get('items', []):
+                        try:
+                            if item.get('snippet', {}).get('type') == 'chatEndedEvent': ended = True
+                            else: self.receive(item)
+                        except (KeyError, TypeError, ValueError):
+                            invalid = True
+                    page = result.get('nextPageToken') or page
+                    delay = 5
+                    self.quota_paused = False
+                    self.status('youtube', 'An invalid message was skipped; chat continues.' if invalid else 'connected')
+                    if ended:
+                        self.config['live_chat_id'] = ''
+                        page = None
+                        self.status('youtube', 'Broadcast ended; waiting for your next broadcast.')
+                        break
+                    pending = asyncio.create_task(anext(source))
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
-                if isinstance(exc, ApiError):
-                    if exc.reason in ('liveChatEnded', 'liveChatNotFound'):
-                        self.config['live_chat_id'] = ''
-                        page = None
-                    elif exc.reason == 'invalidPageToken':
-                        page = None
-                    elif exc.status in (403, 429):
-                        delay = max(delay, 60)
-                self.status('youtube', str(exc) if isinstance(exc, ApiError) else 'Disconnected; check network and authorization.')
-                await asyncio.sleep(delay)
-                delay = min(delay*2, 120)
+                reason = stream_error(exc) if isinstance(exc, grpc.RpcError) else 'network'
+                self.quota_paused = reason == 'quota'
+                if reason == 'quota':
+                    delay = quota_retry_seconds()
+                    message = 'YouTube project API quota exhausted. Chat paused until the daily reset; reconnecting your account will not restore quota.'
+                elif reason == 'limit':
+                    delay = max(delay, 3600)
+                    message = 'YouTube API limit reached. Chat paused for one hour before retrying.'
+                elif reason == 'authorization':
+                    delay = 60
+                    message = 'YouTube authorization expired; waiting for Hub token refresh. Reconnect in Hub settings if it persists.'
+                elif reason == 'permission':
+                    delay = max(delay, 300)
+                    message = 'YouTube denied chat access. Check channel permissions and reconnect in Hub settings.'
+                elif reason in ('not_found', 'ended_or_disabled'):
+                    self.config['live_chat_id'] = ''
+                    page = None
+                    delay = 60
+                    message = 'YouTube chat ended, disabled or unavailable; checking for your next broadcast.'
+                elif reason == 'invalid_cursor':
+                    page = None
+                    delay = max(delay, 60)
+                    message = 'YouTube chat request or resume cursor rejected; retrying with a fresh cursor.'
+                elif reason == 'unsupported':
+                    delay = 300
+                    message = 'YouTube streaming chat unavailable. Check network access; retrying without quota-heavy polling.'
+                else:
+                    message = 'YouTube chat disconnected; retrying automatically. Check network access if it persists.'
+                self.retry_at = time.monotonic()+delay
+                self.status('youtube', message)
+                delay = min(delay*2, 300) if reason not in ('quota', 'limit') else delay
+            finally:
+                if pending and not pending.done(): pending.cancel()
+                if pending: await asyncio.gather(pending, return_exceptions=True)
+                if source: await source.aclose()
 
     def receive(self, item):
         snip = item['snippet']
-        if snip.get('type') == 'messageDeletedEvent':
+        if snip.get('type') == 'tombstone':
+            self.store.delete('youtube', message_id=item['id'])
+        elif snip.get('type') == 'messageDeletedEvent':
             self.store.delete('youtube', message_id=snip['messageDeletedDetails']['deletedMessageId'])
         elif snip.get('type') == 'userBannedEvent':
             self.store.delete('youtube', user_id=snip['userBannedDetails']['bannedUserDetails']['channelId'])

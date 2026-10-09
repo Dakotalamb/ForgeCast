@@ -1,7 +1,7 @@
-# FDGCast 0.7.0 Preview
+# FDGCast 0.8.0 Preview
 
 New chat filters/actions, searchable Help, optional Hub dock, overlays and session summaries.
-See [release notes](docs/RELEASE_0.7.0.md), [roadmap coverage](docs/IMPLEMENTATION_STATUS.md) and [website handoff](docs/HUB_HANDOFF_0.7.0.md).
+See [release notes](docs/RELEASE_0.8.0.md), [roadmap coverage](docs/IMPLEMENTATION_STATUS.md) and [website handoff](docs/HUB_HANDOFF_0.7.0.md).
 
 # FDGCast 0.6.0 preview
 

@@ -76,6 +76,15 @@ def claim_desktop_instance():
 
 
 def launch():
+    if '--stream-self-check' in sys.argv:
+        # CI runs this inside the frozen EXE, without credentials or networking.
+        from forgecast.youtube_stream import proto, response_dict, quota_retry_seconds
+        import grpc
+        response = proto.LiveChatMessageListResponse(next_page_token='test-cursor')
+        assert response_dict(response)['nextPageToken'] == 'test-cursor'
+        assert quota_retry_seconds() > 0
+        assert grpc.ssl_channel_credentials() is not None
+        return
     if not claim_desktop_instance():
         return
     set_windows_identity()
@@ -125,3 +134,4 @@ def launch():
 
 if __name__ == '__main__':
     launch()
+

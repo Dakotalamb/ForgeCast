@@ -15,7 +15,7 @@ import time
 import uuid
 import webbrowser
 from urllib.parse import urlparse
-from aiohttp import ClientSession, ClientTimeout, web
+from aiohttp import ClientSession, ClientTimeout, ClientError, web
 from .core import ChatStore, Doctor, validate_destination, kick_message, username_color
 from .storage import Vault, atomic_json, data_directory
 from .obs import ObsClient
@@ -71,6 +71,9 @@ class State:
         self.paused_platforms = set(self.config.get('paused_platforms', []))
         self.kick_verified = False
         self.kick_received = 0
+        self.kick_delivery = 'unknown'
+        self.kick_relay_issue = ''
+        self.youtube_discovery_retry_at = 0
         self.audio = AudioGuard(self.directory, self.config.get("audio_guard"), demo)
         self.audio_sound_path = self.directory / "audio-warning.wav"
         self.audio_snapshot = None
@@ -921,7 +924,8 @@ async def ensure_kick_subscription(s, token, channel):
     s.kick_verified = False
     result = await api(s.session, 'GET', endpoint, headers=headers, params={'broadcaster_user_id':channel})
     subscribed = any(str(row.get('broadcaster_user_id')) == channel and
-                     row.get('event') == 'chat.message.sent' for row in result.get('data', []))
+                     row.get('event') == 'chat.message.sent' and row.get('method') == 'webhook'
+                     and row.get('subscription_id') for row in result.get('data', []))
     if not subscribed:
         result = await api(s.session, 'POST', endpoint, headers=headers,
             json={'broadcaster_user_id':int(channel), 'events':[{'name':'chat.message.sent','version':1}], 'method':'webhook'})
@@ -957,6 +961,9 @@ async def sync_hub_accounts(s, retry_events=False):
                     if s.config.get('kick', {}).get('channel_id') != channel:
                         if s.checkpoint_channel != channel: s.kick_after = 0
                         s.kick_received = 0
+                        s.kick_verified = False
+                        s.kick_delivery = 'unknown'
+                        s.kick_relay_issue = ''
                     changed_token = s.vault.get('kick_token') != token
                     s.vault.set('kick_token', token)
                     s.config['kick'] = {'channel_id':channel, 'channel_name':conn.get('username') or 'Kick'}
@@ -985,8 +992,12 @@ async def sync_hub_accounts(s, retry_events=False):
                         config = existing.config
                     else:
                         config = {'live_chat_id':'', 'channel_name':conn.get('username') or 'YouTube', 'account_id':user}
+                    if time.monotonic() < s.youtube_discovery_retry_at:
+                        s.vault.set(platform+'_token', token)
+                        continue
                     # Manual refresh enumerates active broadcasts even while chat is connected.
-                    if retry_events or not config.get('live_chat_id'):
+                    quota_hold = existing and existing.quota_paused and time.monotonic() < existing.retry_at
+                    if (retry_events or not config.get('live_chat_id')) and not quota_hold and time.monotonic() >= s.youtube_discovery_retry_at:
                         broadcasts = await api(s.session, 'GET', 'https://www.googleapis.com/youtube/v3/liveBroadcasts',
                             headers={'Authorization':'Bearer '+token},
                             params={'part':'snippet,status', 'broadcastStatus':'active', 'broadcastType':'all', 'maxResults':50})
@@ -1015,6 +1026,13 @@ async def sync_hub_accounts(s, retry_events=False):
                 s.status_details.setdefault(platform, {})['channel'] = conn.get('username') or ''
                 adapter.task = asyncio.create_task(adapter.run())
             except (ApiError, ValueError, ConnectionError, asyncio.TimeoutError) as exc:
+                if platform == 'youtube' and isinstance(exc, ApiError) and exc.reason in ('quotaExceeded', 'dailyLimitExceeded'):
+                    from .youtube_stream import quota_retry_seconds
+                    s.youtube_discovery_retry_at = time.monotonic()+quota_retry_seconds()
+                    adapter = s.adapters.get('youtube')
+                    if adapter:
+                        adapter.quota_paused = True
+                        adapter.retry_at = s.youtube_discovery_retry_at
                 s.status(platform, str(exc) or 'Connection timed out; retrying automatically.')
             except Exception as exc:
                 s.status(platform, 'Account setup failed ('+type(exc).__name__+'). Reconnect in Hub settings.')
@@ -1022,29 +1040,53 @@ async def sync_hub_accounts(s, retry_events=False):
 
 
 def accept_kick_rows(s, result):
+    s.kick_relay_issue = ''
     for row in result.get('messages', []):
         try:
             cursor = int(row['id'])
             if cursor < 0: raise ValueError('Invalid cursor')
         except (KeyError, TypeError, ValueError):
-            s.status('kick', 'An invalid chat message was skipped; checking again automatically.')
+            s.kick_relay_issue = 'Hub delivered an invalid chat row; skipped it. Check Hub webhook logs.'
+            s.status('kick', s.kick_relay_issue)
             continue
         try:
             payload = row['payload']
             if not isinstance(payload, dict) or not isinstance(payload.get('broadcaster'), dict) or not isinstance(payload.get('sender'), dict): raise ValueError('Invalid message')
             if str(payload.get('broadcaster', {}).get('user_id')) != s.config.get('kick', {}).get('channel_id'):
+                s.kick_relay_issue = 'Hub returned chat for another Kick channel; skipped it. Sync linked accounts and check Hub account matching.'
                 continue
             s.chat.add(kick_message(payload))
             s.kick_received = time.time()
             s.status('kick', 'connected')
         except (KeyError, TypeError, ValueError):
-            s.status('kick', 'Hub delivered an invalid chat message; skipped it. Check Hub webhook logs.')
+            s.kick_relay_issue = 'Hub delivered an invalid chat message; skipped it. Check Hub webhook logs.'
+            s.status('kick', s.kick_relay_issue)
         finally:
             s.kick_after = max(s.kick_after, cursor)
 
 
+async def kick_delivery_status(s, url, token):
+    """Optional compatible Hub diagnostics; old Hubs can still relay chat."""
+    try:
+        result = await api(s.session, 'GET', url+'/api/forgecast/v1/kick/diagnostics',
+                           headers={'Authorization':'Bearer '+token})
+        s.kick_delivery = 'received' if result.get('delivery_verified') is True else 'no_delivery'
+    except (ApiError, ClientError, asyncio.TimeoutError):
+        s.kick_delivery = 'unknown'
+
+
+def kick_waiting_status(s):
+    if s.kick_relay_issue: return s.kick_relay_issue
+    if s.kick_received: return 'connected'
+    if s.kick_delivery == 'received':
+        return 'Hub has received Kick chat; no matching messages reached this app yet. Send a new message, then check linked channel/account matching.'
+    if s.kick_delivery == 'no_delivery':
+        return 'Subscription ready; Hub has no recent accepted Kick messages. Send a test message and check Hub webhook verification logs.'
+    return 'Subscription ready; delivery unverified. Send a test message; if absent, check Hub webhook delivery and verification logs.'
+
+
 async def poll_hub(s):
-    next_accounts, next_events = 0, 0
+    next_accounts, next_events, next_kick_diagnostics = 0, 0, 0
     while True:
         url, token = s.config.get('hub_url'), s.vault.get('hub_token')
         if url and token:
@@ -1063,10 +1105,11 @@ async def poll_hub(s):
                     result = await api(s.session, 'GET', url+'/api/forgecast/v1/kick',
                                        headers={'Authorization':'Bearer '+token}, params={'after':str(s.kick_after)})
                     accept_kick_rows(s, result)
-                    if s.kick_verified and s.kick_received:
-                        s.status('kick', 'connected')
-                    if s.kick_verified and not s.kick_received:
-                        s.status('kick', 'Subscription ready; no messages received yet. Send a test message; if absent, check the Hub webhook URL.')
+                    if now >= next_kick_diagnostics:
+                        await kick_delivery_status(s, url, token)
+                        next_kick_diagnostics = now+60
+                    if s.kick_verified:
+                        s.status('kick', kick_waiting_status(s))
                 except Exception as exc:
                     s.status('kick', str(exc) if isinstance(exc, ApiError) else 'Hub chat relay failed; checking again soon.')
             if now >= next_events:

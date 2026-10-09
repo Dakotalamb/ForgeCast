@@ -13,11 +13,17 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.state = State(self.temp.name, demo=True)
         self.state.config['hub_url'] = 'https://hub.example.com'
         self.state.vault.set('hub_token', 'PRIVATE-HUB-TOKEN')
+        async def idle(*args):
+            await asyncio.Event().wait()
+            yield {}
+        self.stream_patch = patch('forgecast.youtube_stream.stream_responses', idle)
+        self.stream_patch.start()
     async def asyncTearDown(self):
         for adapter in self.state.adapters.values():
             adapter.task.cancel()
             await asyncio.gather(adapter.task, return_exceptions=True)
         self.temp.cleanup()
+        self.stream_patch.stop()
     async def test_youtube_finds_broadcast_after_pairing_before_live(self):
         account = {'platform':'youtube','user_id':'creator','username':'Deco','access_token':'TOKEN-ONE'}
         with patch('forgecast.server.api', AsyncMock(side_effect=[{'connections':[account]}, {'items':[]}])):
@@ -42,7 +48,8 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('identity', self.state.statuses['twitch'])
         self.assertIn('youtube', self.state.adapters)
     async def test_kick_reuses_subscription_without_claiming_delivery(self):
-        request = AsyncMock(return_value={'data':[{'event':'chat.message.sent','broadcaster_user_id':123}]})
+        request = AsyncMock(return_value={'data':[{'event':'chat.message.sent','broadcaster_user_id':123,
+                                                  'method':'webhook','subscription_id':'sub-123'}]})
         with patch('forgecast.server.api', request):
             await ensure_kick_subscription(self.state, 'TOKEN', '123')
         self.assertEqual(request.await_count, 1)
@@ -76,3 +83,4 @@ class ReliabilityTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('image', message['fragments'][0])
         store = ChatStore(); store.add(message); store.delete('twitch', message_id='1')
         self.assertEqual(message['fragments'], [{'text':'[Message removed]'}])
+

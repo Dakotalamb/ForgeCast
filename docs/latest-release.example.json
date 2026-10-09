@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
-  "version": "0.7.0-preview",
+  "version": "0.8.0-preview",
   "platform": "windows-x64",
-  "download_url": "/downloads/FDGCast-0.7.0-preview-win-x64-setup.exe",
-  "notes": "Chat filters and viewer actions; searchable Help; optional Hub events dock; output presets; event customization; local chat overlays; post-stream summaries; clearer platform recovery guidance."
+  "download_url": "/downloads/FDGCast-0.8.0-preview-win-x64-setup.exe",
+  "notes": "YouTube streaming chat, guided audio test, reviewed feedback, preference backup and clearer Kick delivery diagnostics.",
+  "sha256": "REPLACE_WITH_SHA256_OF_TESTED_0_8_0_INSTALLER"
 }

@@ -2,7 +2,7 @@ name: Build FDGCast Windows installer
 
 on:
   push:
-    branches: [main]
+    branches: [main, release/0.8.0]
   workflow_dispatch:
 
 permissions:
@@ -36,7 +36,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'FDGCast'
-          $spec.version = '0.7.0'
+          $spec.version = '0.8.0'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -83,10 +83,12 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Browser QA engine failed' }
           node tests/browser-qa.cjs
           if ($LASTEXITCODE -ne 0) { throw 'Browser QA failed' }
+          node tests/browser-productivity-qa.cjs
+          if ($LASTEXITCODE -ne 0) { throw 'Productivity browser QA failed' }
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.7.0-UI-quality-check
+          name: FDGCast-0.8.0-UI-quality-check
           path: qa/*.png
           if-no-files-found: error
       - name: Freeze FDGCast companion
@@ -95,7 +97,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           python -m pip install -r requirements.txt 'pyinstaller==6.16.0' 'pywebview==6.2.1'
           if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
-          python -m PyInstaller --noconfirm --clean --windowed --onedir --name FDGCast --icon "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico" --paths $env:GITHUB_WORKSPACE --add-data "$env:GITHUB_WORKSPACE/web;web" --add-data "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico;packaging" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
+          python -m PyInstaller --noconfirm --clean --windowed --onedir --name FDGCast --icon "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico" --paths $env:GITHUB_WORKSPACE --collect-all grpc --collect-all tzdata --hidden-import google.protobuf.duration_pb2 --add-data "$env:GITHUB_WORKSPACE/web;web" --add-data "$env:GITHUB_WORKSPACE/packaging/FDGCast.ico;packaging" --distpath dist --workpath build-pyinstaller --specpath build-pyinstaller launcher.py
           if ($LASTEXITCODE -ne 0) { throw 'Companion freezing failed' }
           if (-not (Test-Path 'dist/FDGCast/FDGCast.exe')) { throw 'Companion EXE missing' }
           if (-not (Test-Path 'dist/FDGCast/_internal/packaging/FDGCast.ico')) { throw 'Window/taskbar icon missing from packaged app' }
@@ -104,6 +106,8 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
           $app = (Resolve-Path 'dist/FDGCast/FDGCast.exe').Path
+          $check = Start-Process $app -ArgumentList '--stream-self-check' -Wait -PassThru
+          if ($check.ExitCode -ne 0) { throw 'Frozen YouTube transport dependency check failed' }
           $process = Start-Process $app -ArgumentList '--headless' -PassThru
           try {
             $ready = $false
@@ -164,12 +168,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-0.7.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-0.8.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-0.7.0-preview-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-0.8.0-preview-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -182,7 +186,7 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.7.0-OBS-32.2.2-Windows-preview-installer
-          path: release/FDGCast-0.7.0-preview-win-x64-setup.exe
+          name: FDGCast-0.8.0-OBS-32.2.2-Windows-preview-installer
+          path: release/FDGCast-0.8.0-preview-win-x64-setup.exe
           if-no-files-found: error
 

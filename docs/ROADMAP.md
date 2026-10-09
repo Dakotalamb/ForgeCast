@@ -1,4 +1,4 @@
-# October 8 implementation checkpoint
+# October 9 implementation checkpoint
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for delivered features and remaining work, and [HUB_HANDOFF_0.7.0.md](HUB_HANDOFF_0.7.0.md) for the website dependencies.
 
@@ -10,7 +10,7 @@ See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for delivered features 
 - Finish live output lifecycle/error-signal tests and ABI packaging.
 - Live-test the Hub OAuth callback and refresh flows on all three platforms.
 - Validate real Twitch Shared Chat origin fields and cross-channel moderation.
-- Move YouTube from polling to streamList with quota/error-aware recovery.
+- Live-test the new YouTube StreamList reader and quota-aware recovery in 0.8.0.
 - Test Kick webhook signature, subscription and delivery on the deployed Hub.
 - Finish browser accessibility/visual QA and Windows DPAPI tests.
 - Redact platform errors/logs and introduce bounded structured diagnostics.
