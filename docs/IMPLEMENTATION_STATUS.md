@@ -1,13 +1,13 @@
-# Scope against the October 8 offering roadmap
+# Scope against the October 9 offering roadmap (0.8.0 Preview)
 
 | Area | Implemented locally | Remaining dependency or scope |
 |---|---|---|
-| Combined chat | Three adapters; origin/platform labels; filters; emotes; badges/replies; pause; customizable rendering; hashed restart dedup | Real extended outage/reconnect tests; deployment and live verification of the patched Hub refresh/subscription handling; avatar lookup depends on platform availability |
+| Combined chat | Three adapters; origin/platform labels; filters; emotes; badges/replies; pause; customizable rendering; hashed restart dedup; YouTube StreamList/cursor/quota recovery; optional Kick Hub receipt diagnosis | Real extended outage/reconnect tests; deployment and live verification of the patched Hub refresh/subscription handling; avatar lookup depends on platform availability |
 | Replies/moderation | Single/all-connected send; feedback; mention/Twitch reply; Twitch/YouTube delete/timeout/ban; scoped account history/copy/profile | Kick moderation; independently authorized collaborator channels; external role verification on real accounts |
 | Events | Default follow/redeem/raid; optional available subs/gifts/Bits/YouTube paid/membership categories; toggle/merge/test/ack/bounded history | Actual delivery tests; third-party tips; platform-specific Kick audience events |
 | Multistream | Shared main H.264/AAC; Start/Stop All/individual; presets; per-output health; masked keys; upload calculator | Independent encoders/resolutions/audio, vertical canvas and cloud relay |
 | Stream Doctor | Sustained sensitivity profiles; frame classes; health history; optional Windows/sound alerts | Custom thresholds, root-cause profiling beyond measured OBS counters |
-| Audio Guard | Expected sources; mute/silence/meter/routing; scenes; custom WAV; optional near-clipping and chosen VOD track | Final viewer/VOD playback verification; full guided recording/listen workflow |
+| Audio Guard | Expected sources; mute/silence/meter/routing; scenes; custom WAV; optional near-clipping and chosen VOD track; guided recording/listen/checklist | Final viewer/VOD playback verification |
 | Preflight | App/docks/OBS/platform/dest/audio/recording/storage/event checks; native modal and app fix navigation | Per-check saved dismissals; capture verification |
 | Installation | Windows installer/icons; desktop single instance; OBS auto-launch; saved pairing; update notices/reinstall guidance | Full multi-OBS-version matrix; signed distribution and automated rollback |
 | Docks | Existing small minima; spacing/font/filter/preferences/reset; existing arrange preset; optional Hub dock | Real OBS UI/accessibility tests; additional layout presets |
@@ -18,7 +18,8 @@
 | Twitch extension | Existing released extension remains external | Setup/empty/error copy and payload updates in its current source |
 | Overlay | Local transparent read-only, all/recent or selected highlight, duration, themes/text/spacing, preview via Browser Source, sequenced highlight queue, moderation removal | Public hosting |
 | Integrations | Existing OBS WebSocket; setup guidance and authenticated local action interface | Dedicated Stream Deck/Streamer.bot/Crowd Control adapters and verified use cases |
-| Support | Diagnostics preview/export/confirmed upload; issues/notes/known issues/version | Dedicated in-app report form/Hub feature request intake |
+| Support | Diagnostics preview/export/confirmed upload; reviewed in-app problem/feature form; issues/notes/known issues/version | Staff triage/response workflow and richer Hub feature-request intake |
+| Preference backup | Credential-free allowlist export/review/restore with OBS closed; new output names are unchecked placeholders | OBS dock layouts, custom sounds and portable source bindings |
 | Summaries | Locally observed durations/destinations/incidents/warnings/chat/event counts; export | Full platform analytics and team/sponsor reporting |
 | Business offering | Free local features; no payment gates added | Paid themes/team/cloud/AI/billing require service implementation and cost decisions |
 

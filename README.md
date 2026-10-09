@@ -1,7 +1,8 @@
 # FDGCast 0.8.0 Preview
 
-New chat filters/actions, searchable Help, optional Hub dock, overlays and session summaries.
-See [release notes](docs/RELEASE_0.8.0.md), [roadmap coverage](docs/IMPLEMENTATION_STATUS.md) and [website handoff](docs/HUB_HANDOFF_0.7.0.md).
+YouTube streaming chat and quota-aware recovery, clearer Kick delivery diagnosis, guided audio testing, reviewed feedback, and preference backup/restore.
+Earlier version notes below are historical; the 0.8.0 release notes describe current changes.
+See [release notes](docs/RELEASE_0.8.0.md), [roadmap coverage](docs/IMPLEMENTATION_STATUS.md) and [website handoff](docs/HUB_HANDOFF_0.8.0.md).
 
 # FDGCast 0.6.0 preview
 
@@ -39,8 +40,7 @@ Chat in OBS includes Twitch, YouTube and Kick message targets; choose which
 connected channel receives your message. Kick requires a linked Hub account
 and a fresh account sync; the Hub must grant `chat:write`. FDGCast
 Events collects available platform activity, OBS status, and Stream Doctor
-incidents. Twitch follows and Kick alerts require additional platform scopes
-and integrations; they are not included in this preview.
+incidents. Twitch follows/redeems require the matching platform permissions and eligibility. Kick audience events beyond chat remain a separate integration.
 
 YouTube chat reading works with the Hub's current read-only permission. Sending
 YouTube chat needs a broader Google scope and will require creators to reconnect
@@ -87,7 +87,7 @@ No native module is needed for main-output diagnostics, main OBS controls, or ch
 | Desktop app | Dedicated FDGCast window for initial Hub, account and OBS connection setup | Windows app still needs live testing |
 | Shared chat provenance | Platform + original broadcaster + chatter; dedup by source message ID | Unit tested with fixtures |
 | Twitch adapter | EventSub messages/chat notifications/deletes/clears; send to configured receiving channel | Code implemented; live OAuth test needed |
-| YouTube adapter | API polling with server interval; chat/activity/deletion; send | Code implemented; live token/quota test needed |
+| YouTube adapter | Persistent StreamList chat; cursor recovery, quota backoff, activity/deletion; REST send | Code implemented; live token/quota test needed |
 | Stream Doctor | Delta-based rendering/encoding/network classification; sustained thresholds/history; JSON report | Unit tested; real OBS validation needed |
 | OBS controls | Authenticated v5 WebSocket, start/stop main stream/recording, replay | Mock-server integration tested |
 | Preflight | Mute flags, reported disk space, OBS CPU/memory | Code implemented; not an audio/capture quality test |
@@ -137,9 +137,8 @@ YouTube: enable the YouTube Data API in your Google project and use the authoriz
 broadcaster's OAuth access token and the active broadcast's `snippet.liveChatId`.
 For sending, authorize an appropriate scope; the Hub requests `youtube`.
 This is an API chat ID, not the public
-video ID. The alpha uses `liveChatMessages.list`, respects `pollingIntervalMillis`,
-and can consume significant API quota. Active broadcasts are discovered automatically on Hub account sync; typed quota
-errors back off without restarting OBS. A future version can migrate to streamList. Your manually entered channel display name labels origin.
+video ID. 0.8.0 uses the official `liveChatMessages.streamList` persistent connection instead of repeated chat-list polling. It still consumes shared project quota, especially when reconnecting or sending messages. Active broadcasts are discovered automatically on Hub account sync; typed quota
+errors back off without restarting OBS. Your manually entered channel display name labels origin.
 
 Saved Hub accounts sync automatically after restarting and every sixty seconds;
 new YouTube live chats are discovered when the old broadcast ends. Manual chats must be reconnected.

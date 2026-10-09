@@ -68,3 +68,9 @@ streaming-dependency smoke checks, desktop icon and installer placement checks.
 Real-account YouTube StreamList delivery, Kick delivery after the Hub fix,
 Windows OBS docking and multistream lifecycle still require live testing before
 calling this a full public release. Simulated/local tests cannot prove those.
+
+Verified build: 194 Python tests, Windows native/package/desktop/icon/installer checks and both browser suites passed.
+Workflow: https://github.com/Dakotalamb/ForgeCast/actions/runs/37876362565
+Source commit: 8a5169221ad3a91e236ea4bf9796296fc2c2e68a
+Installer: FDGCast-0.8.0-preview-win-x64-setup.exe, 17,242,239 bytes.
+SHA-256: `72947022d800fbff8fe7e4c13426507b2d8e3a83c0a92f5b07a334c6aef4e392`.

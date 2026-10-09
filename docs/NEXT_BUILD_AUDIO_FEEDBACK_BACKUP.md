@@ -1,7 +1,6 @@
-# Next FDGCast build: audio test, feedback and preference backup
+# FDGCast 0.8.0: audio test, feedback and preference backup
 
-Implemented on next/audio-feedback-backup. The 0.7.0 installer and main branch
-remain unchanged while live testing continues. No Hub source was modified.
+Originally prepared on next/audio-feedback-backup and now included in the tested 0.8.0 Preview installer. No Hub source was modified. See RELEASE_0.8.0.md for current build evidence.
 
 Companion Help now offers a 20-second OBS recording test, finishing early,
 opening its returned local media file in Windows, and a listening checklist.
@@ -30,5 +29,4 @@ permission, confirmation and restore-failure checks. JavaScript syntax passed.
 Windows behavior and Chromium verification passed in run
 https://github.com/Dakotalamb/ForgeCast/actions/runs/37863356654
 including the existing interface and simulated recording controls, feedback
-preview/XSS/confirmation/edit reset, backup review/restore and mobile overflow. A new Windows installer has not yet
-been built or published for these additions; they are absent from 0.7.0.
+preview/XSS/confirmation/edit reset, backup review/restore and mobile overflow. These additions were absent from 0.7.0; they are included in the 0.8.0 Preview installer, whose expanded suite passes 194 Python tests and Windows/browser/package checks.
