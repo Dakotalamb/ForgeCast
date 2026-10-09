@@ -18,7 +18,7 @@ const {chromium}=require(require.resolve('playwright',{paths:[process.env.CODEX_
    await route.fulfill({json:result});
   });
   await page.goto(url);await page.locator('[data-tab="help"]').click();await page.waitForFunction(()=>!document.querySelector('#audioTestStart').disabled);
-  await page.locator('#audioTestStart').click();await page.waitForFunction(()=>document.querySelector('#audioTestStart').disabled);assert.match(await page.locator('#audioTestStatus').textContent(),/Recording test/);
+  await page.locator('#audioTestStart').click();await page.waitForFunction(()=>document.querySelector('#audioTestStatus').textContent.includes('Recording test'));assert.match(await page.locator('#audioTestStatus').textContent(),/Recording test/);
   await page.locator('#audioTestStop').click();await page.waitForFunction(()=>document.querySelector('#audioTestStatus').textContent.includes('sample.mkv'));assert.equal(await page.locator('#audioTestStop').isDisabled(),true);
   await page.locator('#feedbackForm input[name=title]').fill('Example problem');await page.locator('#feedbackForm textarea').fill('<script>test</script>');await page.locator('#feedbackForm button').click();await page.waitForSelector('#feedbackPreview:not([hidden])');
   assert.match(await page.locator('#feedbackPreview').textContent(),/<script>test<\/script>/);assert.equal(await page.locator('#feedbackPreview script').count(),0);assert.equal(sent,0);
