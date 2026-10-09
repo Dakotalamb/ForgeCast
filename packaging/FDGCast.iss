@@ -26,6 +26,8 @@ Source: "{#SourcePath}..\stage\forgecast\bin\64bit\forgecast.dll"; DestDir: "{co
 Source: "{#SourcePath}en-US.ini"; DestDir: "{commonappdata}\obs-studio\plugins\forgecast\data\locale"; Flags: ignoreversion
 Source: "{#SourcePath}FDGCast.ico"; DestDir: "{commonappdata}\obs-studio\plugins\forgecast\data"; Flags: ignoreversion
 Source: "{#SourcePath}..\README.md"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourcePath}..\forgecast\youtube_proto\LICENSE.txt"; DestDir: "{app}\licenses"; DestName: "YouTube-streaming-Apache-2.0.txt"; Flags: ignoreversion
+Source: "{#SourcePath}..\forgecast\youtube_proto\NOTICE.txt"; DestDir: "{app}\licenses"; DestName: "YouTube-streaming-NOTICE.txt"; Flags: ignoreversion
 
 [Registry]
 Root: HKLM; Subkey: "Software\Forged Destiny Gaming\FDGCast"; ValueType: string; ValueName: "CompanionPath"; ValueData: "{app}\FDGCast.exe"; Flags: uninsdeletekey

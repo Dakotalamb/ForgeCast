@@ -1,0 +1,5 @@
+YouTube streaming protocol definitions are derived from Google's sample:
+https://developers.google.com/youtube/v3/live/streaming-live-chat
+Google code samples are licensed under the Apache License, Version 2.0.
+FDGCast added the google/protobuf/duration.proto import and generated the
+Python protobuf module with grpcio-tools 1.76.0. No Google endorsement implied.

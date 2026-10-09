@@ -1005,9 +1005,11 @@ async def sync_hub_accounts(s, retry_events=False):
                         chosen = s.config.get('youtube_broadcast_id')
                         active = next((b for b in broadcasts.get('items', []) if b.get('id') == chosen and b.get('snippet', {}).get('liveChatId')), None) if chosen else next((b for b in broadcasts.get('items', []) if b.get('snippet', {}).get('liveChatId')), None)
                         if active:
+                            if config.get('live_chat_id') != active['snippet']['liveChatId']:
+                                s.status('youtube', 'connecting')
                             config['live_chat_id'] = active['snippet']['liveChatId']
-                            s.status('youtube', 'connecting')
                         else:
+                            config['live_chat_id'] = ''
                             s.status('youtube', 'Waiting for an active YouTube broadcast with chat; checking automatically.')
                     if existing and existing.config is config:
                         s.vault.set(platform+'_token', token)
