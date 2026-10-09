@@ -19,3 +19,5 @@ textarea{background:#0e141d;border:1px solid #354153;color:var(--ink);padding:10
 
 
 #reportPreview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:420px;overflow:auto;background:#0e141d;padding:14px;border:1px solid var(--line)}#connectionGuidance{margin-top:16px}#connectionGuidance details{margin:8px 0}#eventKinds{display:grid;gap:6px}#eventKinds label{display:flex;align-items:center;gap:8px}#helpSearch,#overlayLink{width:100%;box-sizing:border-box}#helpArticles{margin-top:16px}.audience-event button{margin-left:8px;padding:4px 8px;font-size:11px}nav{flex-wrap:wrap}
+
+#feedbackPreview,#backupPreview{white-space:pre-wrap;overflow-wrap:anywhere;max-height:360px;overflow:auto;padding:12px;border:1px solid #39485c;border-radius:8px;background:#10151d}#feedbackForm textarea{box-sizing:border-box;width:100%;max-width:100%;font:inherit;color:inherit;background:#10151d;border:1px solid #39485c;border-radius:6px;padding:10px}#audioTestReview label{display:block;margin:8px 0}

@@ -33,6 +33,9 @@ PORT = 17654
 WEB = Path(__file__).resolve().parent.parent/'web'
 
 
+from .productivity import AudioTest, ACTIONS as PRODUCTIVITY_ACTIONS, productivity_action, export_backup
+
+
 class State:
     def __init__(self, directory, demo=False):
         self.directory, self.demo = Path(directory), demo
@@ -56,6 +59,8 @@ class State:
         self.scene = 'OBS disconnected'
         self.hub_connection = 'not_paired'
         self.session = self.obs = None
+        self.audio_test = AudioTest(self)
+        self.feedback_preview = None
         self.hub_events = []
         self.kick_after = 0
         self.lock = asyncio.Lock()
@@ -178,6 +183,7 @@ class State:
         atomic_json(self.config_path, self.config)
 
     def obs_event(self, data):
+        self.audio_test.event(data)
         kind = data['eventType']
         if kind == 'CurrentProgramSceneChanged':
             self.scene = data['eventData']['sceneName']
@@ -195,7 +201,7 @@ class State:
                         'Output names are user-provided; review before sharing.'])
 
     def public(self):
-        return dict(demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
+        return dict(audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
@@ -548,6 +554,8 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op in PRODUCTIVITY_ACTIONS:
+            return web.json_response(await productivity_action(s, op, data))
         if op in SUITE_ACTIONS:
             return web.json_response(await suite_action(s, op, data))
         if op == 'audio_sound_file':
@@ -1156,6 +1164,7 @@ async def lifecycle(app):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)
+        await s.audio_test.close()
         await s.obs.close()
         if not s.demo:
             with contextlib.suppress(FileNotFoundError):
@@ -1180,6 +1189,7 @@ def create_app(state):
     app.router.add_get('/api/pairing', pairing)
     app.router.add_get('/api/obs-connection', obs_connection)
     app.router.add_post('/api/action', action)
+    app.router.add_get('/api/backup', export_backup)
     app.router.add_get('/api/report', report)
     app.router.add_get('/api/report-text', report_text)
     app.router.add_post('/native/poll', native)

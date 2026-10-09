@@ -14,7 +14,7 @@ async function api(path, data) {
 async function action(op, data={}) { return api('/api/action', {op,...data}); }
 function el(tag, text, cls) { const e=document.createElement(tag); if(text!==undefined) e.textContent=text; if(cls) e.className=cls; return e; }
 function button(text, fn) { const e=el('button',text); e.onclick=()=>run(fn,e); return e; }
-async function run(fn, target) { if(target) target.disabled=true; try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target) target.disabled=false; } }
+async function run(fn, target) { if(target) target.disabled=true; try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target) target.disabled=false; if(state)renderProductivity(state); } }
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
@@ -242,6 +242,7 @@ for(const id of ['budgetVideo','budgetAudio','budgetOutputs','budgetUpload'])$(i
 let suiteSignature='';
 function selectOptions(id,rows,selected,placeholder){const box=$(id);if(document.activeElement===box)return;const old=box.value;box.replaceChildren(new Option(placeholder,''),...rows.map(r=>new Option(r.title,r.id)));if(selected&&!rows.some(r=>r.id===selected))box.append(new Option('Selected broadcast is no longer active',selected));box.value=selected??old;}
 function renderSuite(s){
+ renderProductivity(s);
  $('recordingExpected').checked=s.recording_expected;
  $('buildVersion').textContent='Companion version '+s.version;
  $('hubScheduleStatus').textContent=s.coordination.status;
@@ -256,3 +257,26 @@ function renderSuite(s){
  $('connectionGuidance').replaceChildren(...Object.entries(s.connection_help).map(([platform,h])=>{const d=el('details',undefined,'advanced');d.append(el('summary',platform.replaceAll('_',' ')+' · '+h.title));const list=el('ol');for(const step of h.steps)list.append(el('li',step));d.append(list);if(h.settings_url){const a=el('a','Open Hub Settings');a.href=h.settings_url;a.target='_blank';a.rel='noopener noreferrer';d.append(a);}return d;}));
  renderHelp();$('helpLinks').replaceChildren(...s.help_links.map(l=>{const p=el('p'),a=el('a',l.title);a.href=l.url;a.target='_blank';a.rel='noopener noreferrer';p.append(a);return p;}));
 }
+
+let feedbackDraft=null, restoreDraft=null;
+function renderProductivity(s){
+ $('feedbackSend').disabled=!feedbackDraft;$('feedbackDownload').disabled=!feedbackDraft;$('backupRestore').disabled=!restoreDraft;
+ const t=s.audio_test||{phase:'idle',review:{}};
+ const labels={idle:'Ready to test when OBS is connected.',starting:'Starting test recording…',recording:'Recording test: '+t.seconds+' seconds. Stops after about 20 seconds.',stopping:'Finishing recording…',ready:'Test saved: '+t.file_name+'. Open it and listen before completing the checklist.',interrupted:'Test interrupted. Check OBS recording manually; use File → Show Recordings to find the sample.'};
+ $('audioTestStatus').textContent=labels[t.phase]||'Check OBS recording.';
+ $('audioTestStart').disabled=s.demo||!s.obs_connected||['starting','recording','stopping'].includes(t.phase);
+ $('audioTestStop').disabled=s.demo||t.phase!=='recording';$('audioTestOpen').disabled=s.demo||!t.can_open;
+ if(!$('audioTestReview').contains(document.activeElement))for(const input of $('audioTestReview').querySelectorAll('input'))input.checked=!!t.review[input.name];
+ $('audioTestReview').querySelector('button').disabled=s.demo||t.phase!=='ready';
+}
+$('audioTestStart').onclick=()=>{if(confirm('Start a real 20-second OBS recording using your current settings? It will save in your normal recording folder.'))run(()=>action('audio_test_start',{confirmed:true}),$('audioTestStart'));};
+$('audioTestStop').onclick=()=>{if(confirm('Finish the audio test recording now?'))run(()=>action('audio_test_stop',{confirmed:true}),$('audioTestStop'));};
+$('audioTestOpen').onclick=()=>{if(confirm('Open the saved test recording in your Windows media player? Use headphones to avoid feedback.'))run(()=>action('audio_test_open',{confirmed:true}),$('audioTestOpen'));};
+$('audioTestReview').onsubmit=e=>{e.preventDefault();const review=Object.fromEntries([...e.target.querySelectorAll('input')].map(i=>[i.name,i.checked]));run(()=>action('audio_test_review',{review}),e.target.querySelector('button'));};
+$('feedbackForm').oninput=()=>{feedbackDraft=null;$('feedbackPreview').hidden=true;$('feedbackSend').disabled=true;$('feedbackDownload').disabled=true;$('feedbackStatus').textContent='Preview again after editing.';};
+$('feedbackForm').onsubmit=e=>{e.preventDefault();const f=e.target.elements;run(async()=>{feedbackDraft=await action('feedback_preview',{kind:f.kind.value,title:f.title.value,details:f.details.value,diagnostics:f.diagnostics.checked});$('feedbackPreview').textContent=JSON.stringify(feedbackDraft.payload,null,2);$('feedbackPreview').hidden=false;$('feedbackSend').disabled=false;$('feedbackDownload').disabled=false;$('feedbackStatus').textContent='Review this preview. Nothing has been sent.';},e.target.querySelector('button'));};
+$('feedbackDownload').onclick=()=>{if(feedbackDraft)downloadJson(feedbackDraft.payload,'FDGCast-feedback.json');};
+$('feedbackSend').onclick=()=>{if(feedbackDraft&&confirm('Send exactly this reviewed feedback privately to your paired Hub?'))run(async()=>{await action('feedback_send',{preview_id:feedbackDraft.preview_id,confirmed:true});feedbackDraft=null;$('feedbackSend').disabled=true;$('feedbackDownload').disabled=true;$('feedbackStatus').textContent='Feedback sent to the Hub. No response time is promised.';},$('feedbackSend'));};
+$('backupExport').onclick=()=>run(async()=>downloadJson(await api('/api/backup'),'FDGCast-preferences.json'),$('backupExport'));
+$('backupFile').onchange=()=>run(async()=>{restoreDraft=null;$('backupRestore').disabled=true;$('backupPreview').hidden=true;const file=$('backupFile').files[0];if(!file)return;if(file.size>50000)throw Error('Choose a backup under 50 KB.');const data=JSON.parse(await file.text()),preview=await action('backup_preview',{backup:data});restoreDraft=data;$('backupPreview').textContent=JSON.stringify(preview,null,2);$('backupPreview').hidden=false;$('backupRestore').disabled=false;$('backupStatus').textContent='Review the changes. New destination names need server/key setup.';});
+$('backupRestore').onclick=()=>{if(restoreDraft&&confirm('Restore these preferences and add missing destination names? Existing keys stay saved. OBS must be closed.'))run(async()=>{const r=await action('backup_restore',{backup:restoreDraft,confirmed:true});$('backupStatus').textContent=r.message;restoreDraft=null;$('backupRestore').disabled=true;},$('backupRestore'));};
