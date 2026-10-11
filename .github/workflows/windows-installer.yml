@@ -27,6 +27,7 @@ jobs:
           $ErrorActionPreference = 'Stop'
           $template = Join-Path $env:GITHUB_WORKSPACE '.obs-template'
           Copy-Item 'native/forgecast.cpp' (Join-Path $template 'src/plugin-main.cpp') -Force
+          Copy-Item 'native/chat-scroll-follow.hpp' (Join-Path $template 'src/chat-scroll-follow.hpp') -Force
           Copy-Item 'packaging/ci-native-CMakeLists.txt' (Join-Path $template 'CMakeLists.txt') -Force
           $locale = Join-Path $template 'data/locale'
           New-Item -ItemType Directory -Force $locale | Out-Null

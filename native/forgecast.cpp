@@ -60,6 +60,7 @@
 #include <QUrl>
 #include <QVBoxLayout>
 #include <QWidget>
+#include "chat-scroll-follow.hpp"
 #include <map>
 #include <memory>
 #include <cstring>
@@ -334,6 +335,7 @@ class ChatDock : public QWidget {
     QWidget *filterRow;
     QPushButton *jumpLatest;
     QCheckBox *pauseFeed;
+    ChatScrollFollow *scrollFollow;
     std::function<void(const QJsonObject &)> send;
     QByteArray lastMessages;
 public:
@@ -370,9 +372,9 @@ public:
         auto *reading=new QHBoxLayout();pauseFeed=new QCheckBox("Pause",this);pauseFeed->setToolTip("Pause incoming display while you read. Connections keep receiving messages.");
         jumpLatest=new QPushButton("Jump to latest",this);jumpLatest->hide();
         reading->addWidget(pauseFeed);reading->addWidget(jumpLatest);layout->addLayout(reading);
-        connect(pauseFeed,&QCheckBox::toggled,this,[this](bool paused){jumpLatest->setVisible(paused);if(!paused){lastMessages.clear();if(!lastPayload.isEmpty())update(lastPayload);}});
-        connect(jumpLatest,&QPushButton::clicked,this,[this]{pauseFeed->setChecked(false);lastMessages.clear();if(!lastPayload.isEmpty())update(lastPayload);feed->verticalScrollBar()->setValue(feed->verticalScrollBar()->maximum());jumpLatest->hide();});
-        connect(feed->verticalScrollBar(),&QScrollBar::valueChanged,this,[this](int value){jumpLatest->setVisible(pauseFeed->isChecked() || value<feed->verticalScrollBar()->maximum()-60);});
+        scrollFollow=new ChatScrollFollow(feed,[this](bool readingBack){jumpLatest->setVisible(readingBack);});
+        connect(pauseFeed,&QCheckBox::toggled,this,[this](bool paused){scrollFollow->setPaused(paused);if(!paused){lastMessages.clear();if(!lastPayload.isEmpty())update(lastPayload);}});
+        connect(jumpLatest,&QPushButton::clicked,this,[this]{pauseFeed->setChecked(false);scrollFollow->resume();lastMessages.clear();if(!lastPayload.isEmpty())update(lastPayload);});
         for(auto *filter : {platformFilter,channelFilter}) connect(filter,&QComboBox::currentIndexChanged,this,[this]{lastMessages.clear();if(!lastPayload.isEmpty())update(lastPayload);});
         feed->setContextMenuPolicy(Qt::CustomContextMenu);
         connect(feed,&QWidget::customContextMenuRequested,this,[this](const QPoint &point){messageMenu(point);});
@@ -494,7 +496,7 @@ public:
         const auto bytes = QJsonDocument(messages).toJson(QJsonDocument::Compact);
         if (bytes == lastMessages) return;
         lastMessages = bytes;
-        const bool atBottom = feed->verticalScrollBar()->maximum()-feed->verticalScrollBar()->value() < 60;
+        const bool atBottom = scrollFollow->isFollowing();
         const int scroll = feed->verticalScrollBar()->value();
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
         QSet<QUrl> visible;
@@ -549,7 +551,8 @@ public:
         if (shown==0) html += "<p style='color:#a8afb8'>No messages yet.</p>";
         feed->setVisibleImages(visible);
         feed->setHtml(html + "</div>");
-        feed->verticalScrollBar()->setValue(atBottom ? feed->verticalScrollBar()->maximum() : scroll);
+        if (atBottom) scrollFollow->layoutChanged();
+        else feed->verticalScrollBar()->setValue(scroll);
     }
 };
 

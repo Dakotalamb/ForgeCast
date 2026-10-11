@@ -1,0 +1,29 @@
+name: Check native chat scrolling
+on:
+  push:
+    branches: [next/chat-autoscroll]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  native-chat:
+    runs-on: windows-2022
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.8.3'
+          arch: win64_msvc2022_64
+          cache: true
+      - name: Build and run native Qt scroll regression
+        shell: pwsh
+        run: |
+          cmake -S tests/native -B build-chat -G Ninja
+          if ($LASTEXITCODE -ne 0) { throw 'Chat test configuration failed' }
+          cmake --build build-chat
+          if ($LASTEXITCODE -ne 0) { throw 'Chat test compilation failed' }
+          $env:QT_QPA_PLATFORM = 'offscreen'
+          ./build-chat/chat-scroll-regression.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Chat scroll regression failed' }
