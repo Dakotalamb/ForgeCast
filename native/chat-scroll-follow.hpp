@@ -38,7 +38,9 @@ protected:
             if (dy > 0 && feed->verticalScrollBar()->maximum() > 0) { following = false; changed(); }
             else if (dy < 0) checkReaderPosition();
         } else if (event->type() == QEvent::KeyPress) {
-            const int key = static_cast<QKeyEvent *>(event)->key();
+            auto *press = static_cast<QKeyEvent *>(event);
+            const int key = press->key();
+            if (key == Qt::Key_End && press->modifiers().testFlag(Qt::ControlModifier)) { resume(); return true; }
             if (key == Qt::Key_Up || key == Qt::Key_PageUp || key == Qt::Key_Home) {
                 if (feed->verticalScrollBar()->maximum() > 0) { following = false; changed(); }
             } else if (key == Qt::Key_Down || key == Qt::Key_PageDown || key == Qt::Key_End) checkReaderPosition();
