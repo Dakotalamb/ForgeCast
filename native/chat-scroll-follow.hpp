@@ -1,6 +1,7 @@
 #pragma once
 #include <QObject>
 #include <functional>
+#include <utility>
 #include <QEvent>
 #include <QKeyEvent>
 #include <QWheelEvent>
@@ -58,7 +59,7 @@ public:
         connect(bar, &QScrollBar::actionTriggered, this, [this](int action) {
             if (action == QAbstractSlider::SliderSingleStepSub || action == QAbstractSlider::SliderPageStepSub || action == QAbstractSlider::SliderToMinimum) {
                 following = false; changed();
-            } else if (action != QAbstractSlider::SliderNoAction) checkReaderPosition();
+            } else if (action == QAbstractSlider::SliderSingleStepAdd || action == QAbstractSlider::SliderPageStepAdd || action == QAbstractSlider::SliderToMaximum) checkReaderPosition();
         });
     }
     bool isFollowing() const { return following; }
