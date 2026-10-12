@@ -55,3 +55,13 @@ existing OBS canvas; independent vertical output is not included. Manual goals a
 not automatically counted audience totals. Events depend on existing platform access
 and delivery. Live platform video/chat, long-stream recovery, dock behavior, paid
 access against the deployed Hub and real upgrade use still require creator testing.
+
+## Build validation
+
+215 Python tests, native Windows compilation, Chromium interface checks, packaged
+YouTube/TikTok dependency checks, desktop startup/icon checks and installer smoke
+testing passed. Final build: https://github.com/Dakotalamb/ForgeCast/actions/runs/38195227856
+
+Installer: `FDGCast-0.9.0-preview-win-x64-setup.exe`
+
+Size: 22657399 bytes. SHA-256: `9d10f74f65035c90ab9b1912ed1c9602721d1a60b79248c3b43e7c96a4565136`.
