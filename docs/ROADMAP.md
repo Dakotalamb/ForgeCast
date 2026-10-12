@@ -44,3 +44,24 @@ Keep local chat and basic diagnosis usable without Hub sign-in. Paid cloud featu
 are a product decision, not implemented in this package. Do not promise free
 unlimited hosted relays or storage before measuring operating costs.
 
+## Future Overlay Studio feature: animated stream credits
+
+Requested October 12, 2026, from the supplied end-of-stream overlay examples.
+Backlog only; not a 0.9.0 or 1.0.0 release requirement.
+
+- A customizable OBS Browser Source showing end-of-stream credits over the camera
+  or an ending scene, with a thank-you heading and closing message.
+- Animated sections for top chatters, new followers, subscribers, and other
+  supporters such as raiders or donors where authorized platform events exist.
+- Colorful name cards with platform icons, combining supported platforms while
+  keeping each person's platform identity visible.
+- Creator controls for section order/visibility, fonts, colors, backgrounds,
+  layout, animation style, scroll speed, duration, and saved designs/presets.
+- Simple Preview, Play credits, Replay, and Reset controls. Define stream-session
+  boundaries so a reconnect does not erase credit counts or double-count events.
+- Count messages FDGCast actually receives during the current stream; do not imply
+  complete platform totals or merge identities across platforms automatically.
+  Only show supporter categories with real, authorized event delivery.
+- Fit the paid Overlay Studio entitlement and per-design OBS URL model, with
+  lightweight bounded animations and reduced-motion support.
+
