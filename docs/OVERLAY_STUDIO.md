@@ -95,3 +95,7 @@ image policy and hidden-source cleanup. This does not verify browser layout.
 Browser interaction, OBS visibility, long-session resource usage and Windows packaged
 startup still need verification before distributing a new installer. The current
 0.8.0 installer is unchanged; full release is reserved for 1.0.0.
+
+Paid overlay flags are trusted only from the official HTTPS Hub at
+`https://hub.forgeddestinygaming.com`. Custom Hub connections cannot self-grant this
+feature; other connection features retain their existing behavior.

@@ -14,6 +14,7 @@ class StudioTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory();self.s=State(self.temp.name,demo=True)
         self.client=TestClient(TestServer(create_app(self.s)));await self.client.start_server()
+        self.s.config['hub_url']='https://hub.forgeddestinygaming.com'
         self.headers={'Host':'127.0.0.1:17654','Authorization':'Bearer '+self.s.browser_key}
         self.uid=(await studio_action(self.s,'overlay_design_save',{'design':design()}))['id']
     async def asyncTearDown(self):await self.client.close();self.temp.cleanup()
@@ -69,6 +70,11 @@ class StudioTests(unittest.IsolatedAsyncioTestCase):
         accept_entitlements(self.s,{'entitlements':{'fdgcast_overlays':True}});self.assertTrue(overlay_access(self.s))
         self.s.overlay_access_until=time.monotonic()-1;self.assertFalse(overlay_access(self.s))
         loaded=State(self.temp.name,demo=True);self.assertFalse(overlay_access(loaded))
+    async def test_custom_hub_cannot_self_grant_paid_access(self):
+        for url in ('https://fake.example','https://hub.forgeddestinygaming.com.fake.example','https://hub.forgeddestinygaming.com/custom','http://hub.forgeddestinygaming.com'):
+            self.s.config['hub_url']=url
+            accept_entitlements(self.s,{'entitlements':{'fdgcast_overlays':True}})
+            self.assertFalse(overlay_access(self.s))
     async def test_editor_asset_and_scoped_player_csp(self):
         r=await self.client.get('/studio-editor.js',headers=self.headers);self.assertEqual(r.status,200)
         r=await self.client.get('/overlay/studio?id='+self.uid,headers=self.headers);self.assertEqual(r.status,200);self.assertIn("frame-ancestors 'self'",r.headers['Content-Security-Policy'])

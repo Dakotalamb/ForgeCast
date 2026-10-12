@@ -37,9 +37,9 @@ do not disconnect working Twitch/YouTube/Kick chats.
 5. Keep the label Preview and target Windows x64 / OBS 32.2.2. Full release is 1.0.0.
 6. Tell users to close OBS and Companion before upgrading. Settings and pairing persist.
 
-This handoff does not contain a final installer hash yet: the Windows build remains
-blocked on authorized public repository upload. Never advertise the installer until
-its build, browser and packaged-dependency checks pass.
+The final installer size and SHA-256 will be supplied with the tested download.
+Never advertise the installer until its build, browser and packaged-dependency
+checks pass, and the hosted file matches those release values.
 
 ## Platform notes
 
@@ -49,3 +49,7 @@ the desktop vault. TikTok uses an unofficial third-party signing service and is
 experimental. Facebook and the other new manual destinations send video only;
 combined chat is not automatically connected. Keep existing Kick webhook and
 YouTube refresh fixes intact.
+
+Paid overlay flags are trusted only from the official HTTPS Hub at
+`https://hub.forgeddestinygaming.com`. Custom Hub connections cannot self-grant this
+feature; other connection features retain their existing behavior.

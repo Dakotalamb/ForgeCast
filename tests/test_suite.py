@@ -24,6 +24,7 @@ class SuiteTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory();self.state=State(self.temp.name,demo=True)
         from forgecast.entitlements import accept_entitlements
+        self.state.config['hub_url']='https://hub.forgeddestinygaming.com'
         accept_entitlements(self.state,{'entitlements':{'fdgcast_overlays':True}})
     async def asyncTearDown(self):
         for adapter in self.state.adapters.values():
@@ -144,6 +145,7 @@ class OverlayTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
         self.temp=tempfile.TemporaryDirectory();self.state=State(self.temp.name,demo=True)
         from forgecast.entitlements import accept_entitlements
+        self.state.config['hub_url']='https://hub.forgeddestinygaming.com'
         accept_entitlements(self.state,{'entitlements':{'fdgcast_overlays':True}})
         self.client=TestClient(TestServer(create_app(self.state)));await self.client.start_server();self.state.chat.messages.clear()
         self.headers={'Host':'127.0.0.1:17654','Authorization':'Bearer '+self.state.browser_key}
