@@ -88,7 +88,7 @@ the response contract against its current source before paid overlays can go liv
 Python tests cover saved identity, scoped URLs, key rotation/deletion, atomic
 validation, imports, paid expiration/denial, fake local flags, token isolation,
 unpaid sample privacy and both feed gates. JavaScript syntax checks pass.
-214 Python tests pass. The actual player also passes an in-memory DOM regression
+215 Python tests pass. The actual player also passes an in-memory DOM regression
 check for bounded particles, duplicate snapshots, deleted messages, text escaping,
 image policy and hidden-source cleanup. This does not verify browser layout.
 
