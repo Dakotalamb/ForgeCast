@@ -19,14 +19,25 @@ function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.to
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
 function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
+bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
+$('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
+let destinationCatalog=[];
 function destinationPlatformChanged(){
- const platform=$('destinationPlatform').value, custom=platform==='custom';
- $('destinationAdvanced').open=custom;
- $('destinationForm').elements.server.required=custom;
+ const platform=$('destinationPlatform').value, row=destinationCatalog.find(r=>r.id===platform);
+ const required=row?row.requires_server:platform==='custom';
+ $('destinationAdvanced').open=required;
+ $('destinationForm').elements.server.required=required;
  $('destinationForm').elements.server.value='';
- $('destinationForm').elements.name.placeholder={twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
- $('destinationHelp').textContent=custom?'Paste your server address and stream key.':platform==='kick'?'Uses your connected Kick account to find its server. If unavailable, paste the server address under Advanced settings.':'Server is selected automatically. Just paste your stream key.';
+ $('destinationForm').elements.name.placeholder=row?.name||{twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
+ $('destinationHelp').textContent=row?.help||'Paste your server address and stream key.';
+}
+function renderDestinationCatalog(rows){
+ if(!rows?.length||JSON.stringify(rows)===JSON.stringify(destinationCatalog))return;
+ const selected=$('destinationPlatform').value;destinationCatalog=rows;
+ $('destinationPlatform').replaceChildren(...rows.map(r=>{const o=el('option',r.name);o.value=r.id;return o;}));
+ $('destinationPlatform').value=rows.some(r=>r.id===selected)?selected:rows[0].id;
+ destinationPlatformChanged();
 }
 $('destinationPlatform').onchange=destinationPlatformChanged;
 destinationPlatformChanged();
@@ -137,11 +148,13 @@ function renderHistory(s){
  if(document.activeElement!==$('doctorSensitivity'))$('doctorSensitivity').value=s.doctor_sensitivity||'balanced';
 }
 function render(s) {
+ if(typeof renderStudio==='function')renderStudio(s);
+ renderDestinationCatalog(s.destination_platforms);
  state=s;
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.8.0';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.9.0';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -175,7 +188,7 @@ function render(s) {
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');
-     f.elements.platform.value='custom';destinationPlatformChanged();
+     f.elements.platform.value=d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
      f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';
      f.scrollIntoView({behavior:'smooth'});
    }));

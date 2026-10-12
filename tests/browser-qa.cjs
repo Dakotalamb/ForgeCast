@@ -33,7 +33,15 @@ async function main(){
   await page.selectOption('#destinationPlatform','custom');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
-  await page.selectOption('#destinationPlatform','youtube');
+  for(const platform of ['rumble','tiktok','x','instagram','linkedin','dlive','vimeo']){
+   await page.selectOption('#destinationPlatform',platform);
+   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
+   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
+ }
+ await page.selectOption('#destinationPlatform','facebook');
+ assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+ assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
+ await page.selectOption('#destinationPlatform','youtube');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
   await page.locator('[data-tab="doctor"]').click();
@@ -45,6 +53,9 @@ async function main(){
   assert.equal(await page.locator('#audioSoundVolume').getAttribute('value'),'45');
   await page.screenshot({path:path.join(output,'doctor-demo.png'),fullPage:true});
   await page.locator('[data-tab="setup"]').click();
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#tiktokForm input[name=experimental]').getAttribute('required'),'');
+  assert.equal(await page.locator('#tiktokForm input[name=token]').count(),0);
   assert.equal(await page.locator('#showPairCode').isVisible(),true);
   await page.locator('#showPairCode').click();
   assert.equal(await page.locator('#hubForm input[name=token]').getAttribute('type'),'text');

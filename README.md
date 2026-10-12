@@ -1,3 +1,21 @@
+# FDGCast 0.9.0 Preview
+
+New platform destinations, receive-only Rumble chat, experimental TikTok LIVE chat,
+a saved Overlay Studio with paid live access, a dedicated Tools tab and the native
+chat auto-follow fix. Full release is reserved for 1.0.0 after live verification.
+
+See [0.9.0 release notes](docs/RELEASE_0.9.0.md),
+[overlay setup and paid-access handoff](docs/OVERLAY_STUDIO.md), and
+[platform coverage](docs/MORE_PLATFORMS.md).
+
+Close OBS and Companion before upgrading. The installer preserves settings,
+credentials and dock identity. Live overlays require the Hub's verified
+`fdgcast_overlays` entitlement. Until that server update is deployed, the designer
+and sample previews work but live overlay feeds remain locked. Official FDG and
+other complimentary access must be resolved by the Hub's shared entitlement service.
+
+Earlier release notes below are historical.
+
 # FDGCast 0.8.0 Preview
 
 YouTube streaming chat and quota-aware recovery, clearer Kick delivery diagnosis, guided audio testing, reviewed feedback, and preference backup/restore.

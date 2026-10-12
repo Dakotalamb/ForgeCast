@@ -4,6 +4,7 @@ import time
 from urllib.parse import quote
 from aiohttp import web
 from .chat import api, ApiError
+from .entitlements import overlay_access, require_overlays
 from .suite import EVENT_KINDS, DEFAULT_EVENTS
 
 SUITE_ACTIONS = {'preflight_settings','preflight','event_settings','event_test','event_ack','hub_select','youtube_select','youtube_refresh',
@@ -16,7 +17,9 @@ def chat_capabilities(s):
     return {'twitch':{'delete':'moderator:manage:chat_messages' in scopes, 'ban':'moderator:manage:banned_users' in scopes,
                       'timeout':'moderator:manage:banned_users' in scopes, 'reply':bool(twitch)},
             'youtube':{'delete':bool(s.adapters.get('youtube')), 'ban':bool(s.adapters.get('youtube')), 'timeout':bool(s.adapters.get('youtube')), 'reply':False},
-            'kick':{'delete':False,'ban':False,'timeout':False,'reply':False}}
+            'kick':{'delete':False,'ban':False,'timeout':False,'reply':False},
+            'rumble':{'delete':False,'ban':False,'timeout':False,'reply':False},
+            'tiktok':{'delete':False,'ban':False,'timeout':False,'reply':False}}
 
 
 def find_message(s, uid):
@@ -136,6 +139,7 @@ async def suite_action(s, op, data):
             if len(s.highlight_ids)>=20:raise ValueError('Highlight queue is full. Wait for displayed messages to finish.')
             s.highlight_ids.append(row['id'])
     elif op == 'overlay_settings':
+        if data.get('enabled'):require_overlays(s)
         if not isinstance(data.get('enabled'),bool) or data.get('mode') not in ('all','selected'): raise ValueError('Choose an overlay mode and enable or disable it.')
         seconds=data.get('seconds',30)
         if isinstance(seconds,bool) or not isinstance(seconds,int) or not 5<=seconds<=120: raise ValueError('Overlay duration must be 5–120 seconds.')
@@ -169,13 +173,14 @@ async def overlay_script(request): return web.FileResponse(request.app['web_path
 async def overlay_style(request): return web.FileResponse(request.app['web_path']/'overlay.css')
 async def overlay_link(request):
     s=request.app['state']
+    require_overlays(s)
     return web.json_response({'url':'http://127.0.0.1:17654/overlay#'+s.overlay_key})
 async def overlay_feed(request):
     s=request.app['state']
     supplied=request.headers.get('Authorization','').removeprefix('Bearer ')
     if not secrets.compare_digest(supplied,s.overlay_key): raise web.HTTPUnauthorized()
     rows=[]
-    if s.config.get('overlay_enabled'):
+    if s.config.get('overlay_enabled') and overlay_access(s):
         if s.config.get('overlay_mode','selected') == 'selected':
             available={r['id']:r for r in s.chat_view() if not r.get('deleted')}
             current=getattr(s,'highlight_current',None)

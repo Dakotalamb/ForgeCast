@@ -154,6 +154,10 @@ class ChatFeed : public QTextBrowser {
             painter.drawRect(3,3,7,26); painter.drawRect(10,12,7,8);
             painter.drawRect(17,3,7,9); painter.drawRect(17,20,7,9);
             painter.drawRect(24,3,5,5); painter.drawRect(24,24,5,5);
+        } else if(platform=="rumble"||platform=="tiktok") {
+            painter.setBrush(QColor(platform=="rumble"?"#85c742":"#252525"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(22);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="rumble"?"R":"♪");
         } else {
             painter.setBrush(QColor("#9146ff")); painter.drawPolygon(QPolygon{{3,1},{31,1},{31,22},{22,31},{15,31},{15,26},{3,26}});
             painter.setBrush(Qt::white); painter.drawPolygon(QPolygon{{7,4},{28,4},{28,19},{21,26},{15,26},{15,22},{7,22}});
@@ -359,7 +363,7 @@ public:
         layout->addWidget(connection);
         auto *filters=new QHBoxLayout();
         platformFilter=new QComboBox(this);platformFilter->addItem("All platforms","");
-        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick")}) platformFilter->addItem(name,name);
+        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok")}) platformFilter->addItem(name,name);
         channelFilter=new QComboBox(this);channelFilter->addItem("All channels","");
         platformFilter->setMinimumWidth(0);channelFilter->setMinimumWidth(0);
         platformFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);channelFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -384,7 +388,7 @@ public:
         sendTo->addItem("YouTube", "youtube");
         sendTo->addItem("Kick", "kick");
         sendTo->addItem("All connected platforms", "all");
-        sendTo->setToolTip("Send to your own linked channel. All connected platforms sends separately with per-platform results.");
+        sendTo->setToolTip("Send to your linked Twitch, YouTube or Kick channel. TikTok and Rumble are receive-only.");
         compose = new QLineEdit(this);
         compose->setPlaceholderText("Message your channel…");
         compose->setMaxLength(200);
@@ -454,13 +458,13 @@ public:
         QMenu menu(this);const QString platform=row.value("platform").toString(),user=row.value("user").toString(),origin=row.value("origin").toString();
         menu.addAction(user+" · "+platform+" · "+origin)->setEnabled(false);
         auto *copy=menu.addAction("Copy message");connect(copy,&QAction::triggered,this,[row]{QApplication::clipboard()->setText(row.value("text").toString());});
-        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && r.value("user_id")==row.value("user_id"))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
-        auto *reply=menu.addAction("Reply in my "+platform+" channel");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
+        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && (r.value("user_id").toString().isEmpty()?r.value("user")==row.value("user"):r.value("user_id")==row.value("user_id")))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
+        auto *reply=menu.addAction("Reply in my "+platform+" channel");reply->setEnabled(platform=="twitch"||platform=="youtube"||platform=="kick");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
         auto *highlight=menu.addAction("Show on selected-message overlay");connect(highlight,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id},{"immediate",true}});});
         auto *queue=menu.addAction("Queue for selected-message overlay");connect(queue,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id}});});
         QString profile;
         if(platform=="youtube" && QRegularExpression("^[A-Za-z0-9_-]{1,100}$").match(row.value("user_id").toString()).hasMatch())profile="https://www.youtube.com/channel/"+row.value("user_id").toString();
-        else if(QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
+        else if((platform=="twitch"||platform=="kick")&&QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
         if(!profile.isEmpty()){auto *open=menu.addAction("Open platform profile");connect(open,&QAction::triggered,this,[profile]{QDesktopServices::openUrl(QUrl(profile));});}
         const auto capabilities=lastPayload.value("capabilities").toObject().value(platform).toObject();
         menu.addSeparator();
@@ -478,9 +482,10 @@ public:
         const auto statuses = payload.value("statuses").toObject();
         lastPayload=payload;
         QStringList shortStates,details;
-        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick")}) {
+        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok")}) {
+            if(!statuses.contains(platform))continue;
             const QString full=statuses.value(platform).toString("offline");
-            const QString state=full=="connected"?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
+            const QString state=full.startsWith("connected",Qt::CaseInsensitive)?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
             shortStates.append(platform.left(1).toUpper()+platform.mid(1)+" "+state);
             details.append(platform+": "+full);
         }
@@ -838,8 +843,9 @@ public:
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
             QComboBox platform(&dialog);
-            platform.addItem("Twitch", "twitch");platform.addItem("YouTube", "youtube");
-            platform.addItem("Kick", "kick");platform.addItem("Other / Custom", "custom");
+            const auto catalog=lastPayload.value("destination_platforms").toArray();
+            for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
+            if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
             QCheckBox advanced("Use a custom server address", &dialog);
             QLabel help(&dialog);help.setWordWrap(true);
             key.setEchoMode(QLineEdit::Password);
@@ -852,14 +858,13 @@ public:
             form.addRow(&help);
             auto updatePlatform = [&] {
                 const QString selected=platform.currentData().toString();
-                const bool custom=selected=="custom";
+                QJsonObject metadata;for(const auto &entry:catalog)if(entry.toObject().value("id").toString()==selected)metadata=entry.toObject();
+                const bool custom=metadata.isEmpty()||metadata.value("requires_server").toBool();
                 server.setVisible(custom||advanced.isChecked());
                 form.labelForField(&server)->setVisible(custom||advanced.isChecked());
                 advanced.setVisible(!custom);
                 name.setPlaceholderText(platform.currentText());
-                help.setText(custom?"Paste the server address and key from your platform.":selected=="kick"?
-                    "Uses your connected Kick account. If unavailable, choose a custom server address from your Kick dashboard.":
-                    "The server is selected automatically. Just paste your stream key.");
+                help.setText(metadata.value("help").toString("Paste the server address and key from your platform."));
                 dialog.adjustSize();
             };
             connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
