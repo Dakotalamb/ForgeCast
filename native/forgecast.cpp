@@ -233,7 +233,7 @@ class DockView : public QObject {
     }
     void toggle(QMenu *menu,const QString &label,const QString &key,bool current) {
         auto *action=menu->addAction(label);
-        action->setToolTip(key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
+        action->setToolTip(key=="badges"?"Show role and special badge labels beside viewer names, including moderator, bot and game badges. Off by default.":key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
         action->setCheckable(true); action->setChecked(current);
         connect(action,&QAction::triggered,owner,[this,key](bool value) { save(key,value); });
     }
@@ -252,8 +252,9 @@ public:
         body->setLayout(content); // Qt transfers the existing layout from the dock.
         auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
         auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
-        auto *options=new QToolButton(dock);options->setText("⋮");options->setToolTip("Dock appearance and controls");
-        options->setFixedSize(22,20);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
+        auto *options=new QToolButton(dock);options->setText("Options");options->setToolTip("Change text size, badge visibility and other dock settings");
+        options->setAccessibleName("Dock options");
+        options->setMinimumSize(76,26);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
         openButton=new QPushButton("Open app",dock);
         openButton->setToolTip("FDGCast Companion is offline. Open it to reconnect your docks.");
         connect(openButton,&QPushButton::clicked,dock,[] { openCompanionWindow(); });
@@ -274,7 +275,7 @@ public:
                 toggle(menu,"Show channel avatars","avatars",showAvatars);
                 toggle(menu,"Show chat filters","filters",showFilters);
                 toggle(menu,"Alternating message backgrounds","alternate",alternate);
-                toggle(menu,"Show badge labels","badges",showBadges);
+                toggle(menu,"Show badges (roles & special badges)","badges",showBadges);
                 auto *icons=menu->addMenu("Platform icon size");
                 for (int size : {16,18,22,26}) {
                     auto *item=icons->addAction(QString::number(size)+" px");item->setCheckable(true);item->setChecked(size==iconPixels);
@@ -594,11 +595,20 @@ public:
         for (const auto &entry : events) {
             const auto row = entry.toObject();
             const QString kind=row.value("kind").toString();
-            const QString title=(row.value("simulated").toBool()?"TEST · ":"")+kind.left(1).toUpper()+kind.mid(1)+(row.value("acknowledged").toBool()?" ✓":"");
+            const QString title=kind.left(1).toUpper()+kind.mid(1);
             const QString color=kind=="follow"?"#94e6b0":kind=="redeem"?"#ffb891":"#d3baff";
             const auto description = row.value("text").toString().toHtmlEscaped();
             const QString timestamp=view->showTimes ? " · "+QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble())).toLocalTime().toString("h:mm AP") : QString();
-            html += "<p style='margin:0 0 "+QString::number(view->compact?6:12)+"px'><b style='color:"+color+"'>"+title+"</b><small>"+timestamp+"</small>"+(view->compact?" · ":"<br>")+description+"<small style='color:#a8afb8'> · "+row.value("source").toString().toHtmlEscaped()+"</small></p>";
+            // QTextBrowser supports table cell backgrounds reliably at narrow dock widths.
+            // Keep the event type on its own line even in compact mode.
+            const QString heading=kind=="raid"?"Incoming raid":kind=="follow"?"New follower":kind=="redeem"?"Channel point redeem":title;
+            const QString background=kind=="raid"?"#35294b":kind=="follow"?"#203c36":"#423026";
+            const QString flags=QString(row.value("simulated").toBool()?"TEST · ":"")+(row.value("acknowledged").toBool()?"Acknowledged · ":"");
+            html += "<table width='100%' cellspacing='0' cellpadding='0'><tr><td width='5' bgcolor='"+color+"'></td><td bgcolor='"+background+"' style='padding:"+QString::number(view->compact?10:14)+"px'>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+3)+"px;color:"+color+"'><b>"+flags+heading.toHtmlEscaped()+"</b></p>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+1)+"px;color:#ffffff'>"+description+"</p>"
+                    "<p style='margin:0;color:#bdc8d7;font-size:"+QString::number(qMax(11,view->pixels-1))+"px'>"+row.value("source").toString().toHtmlEscaped()+timestamp+"</p>"
+                    "</td></tr></table><p style='margin:0;font-size:6px'>&nbsp;</p>";
         }
         feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect Twitch in the Hub for follows, redeems and incoming raids."));
         if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for Twitch events.</p>";
