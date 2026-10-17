@@ -28,6 +28,7 @@ from .suite import EVENT_KINDS, DEFAULT_EVENTS, connection_help, normalize_event
 from .help import ARTICLES, LINKS
 from .operations import SUITE_ACTIONS, suite_action, chat_capabilities, refresh_origin_avatars, overlay_page, overlay_script, overlay_style, overlay_feed, overlay_link
 from .extra_chat import connect_extra, restore_extra
+from .meta_chat import MetaChat
 from .entitlements import accept_entitlements, overlay_access
 from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
 from .platforms import PLATFORMS, CATALOG
@@ -66,6 +67,7 @@ class State:
         self.audio_test = AudioTest(self)
         self.feedback_preview = None
         self.hub_events = []
+        self.meta_chat = MetaChat(self)
         self.kick_after = 0
         self.lock = asyncio.Lock()
         self.status_details = {}
@@ -504,7 +506,7 @@ async def page(request):
 
 async def platform_icon(request):
     platform = request.match_info['platform']
-    if platform not in ('twitch', 'youtube', 'kick', 'rumble', 'tiktok'): raise web.HTTPNotFound()
+    if platform not in ('twitch', 'youtube', 'kick', 'rumble', 'tiktok', 'facebook', 'instagram'): raise web.HTTPNotFound()
     return web.FileResponse(WEB/'icons'/(platform+'.svg'))
 
 
@@ -696,6 +698,9 @@ async def action(request):
             if adapter:
                 adapter.task.cancel()
                 await asyncio.gather(adapter.task, return_exceptions=True)
+            if platform in ('facebook', 'instagram'):
+                s.meta_chat.clear(platform)
+                s.meta_chat.readers.pop(platform, None)
             s.status(platform, 'disconnected')
             if data.get('forget'):
                 s.vault.delete(platform+'_token')
@@ -718,6 +723,7 @@ async def action(request):
                 s.kick_verified = False
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
+            s.meta_chat.reset()
             s.hub_connection = 'checking'
             s.save()
             try:
@@ -729,6 +735,7 @@ async def action(request):
             url = s.config.get('hub_url')
             if not url or not s.vault.get('hub_token'):
                 raise ValueError('Save your Hub URL and pairing token first.')
+            s.meta_chat.unauthorized = False
             s.paused_platforms.clear()
             s.config['paused_platforms'] = []
             await sync_hub_accounts(s, retry_events=True)
@@ -956,6 +963,7 @@ async def sync_hub_accounts(s, retry_events=False):
                            headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
         s.hub_connection = 'connected'
         accept_entitlements(s,result)
+        s.meta_chat.discover(result.get('chat_connections', []))
         for conn in result.get('connections', []):
             platform, token = conn.get('platform'), conn.get('access_token')
             if platform not in ('twitch', 'youtube', 'kick') or platform in s.paused_platforms: continue
@@ -1108,7 +1116,8 @@ async def poll_hub(s):
         url, token = s.config.get('hub_url'), s.vault.get('hub_token')
         if url and token:
             now = time.monotonic()
-            if now >= next_accounts:
+            if now >= next_accounts or s.meta_chat.rediscover:
+                s.meta_chat.rediscover = False
                 try:
                     async with s.lock: await sync_hub_accounts(s)
                     await refresh_origin_avatars(s)
@@ -1202,6 +1211,7 @@ async def lifecycle(app):
         if not s.demo: await restore_extra(s)
         task = asyncio.create_task(poll(s)) if not s.demo else None
         hub_task = asyncio.create_task(poll_hub(s)) if not s.demo else None
+        meta_task = asyncio.create_task(s.meta_chat.run()) if not s.demo else None
         audio_task = asyncio.create_task(poll_audio(s)) if not s.demo else None
         notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
         history_task = asyncio.create_task(poll_history(s)) if not s.demo else None
@@ -1221,7 +1231,7 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
-        for background in (audio_task, notify_task, history_task, doctor_notify_task, update_task):
+        for background in (meta_task, audio_task, notify_task, history_task, doctor_notify_task, update_task):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)

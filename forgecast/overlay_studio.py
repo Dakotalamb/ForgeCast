@@ -10,7 +10,7 @@ from .storage import atomic_json
 
 ACTIONS={'overlay_design_save','overlay_design_copy','overlay_design_delete','overlay_design_link','overlay_design_rotate','overlay_design_import'}
 TYPES=('chat','emotes','alerts','text','goal')
-PLATFORMS=('twitch','youtube','kick','rumble','tiktok')
+PLATFORMS=('twitch','youtube','kick','rumble','tiktok','facebook','instagram')
 
 def integer(value,low,high,label):
     if type(value) is not int or not low<=value<=high:raise ValueError(label+' is out of range.')
@@ -50,7 +50,7 @@ def validate_design(raw):
         row['style']=layer.get('style','float')
         if row['style'] not in ('float','rain','burst','minimal','panel'):raise ValueError('Unsupported widget style.')
         platforms=layer.get('platforms',list(PLATFORMS))
-        if not isinstance(platforms,list) or len(platforms)>5 or any(p not in PLATFORMS for p in platforms):raise ValueError('Choose supported chat platforms.')
+        if not isinstance(platforms,list) or len(platforms)>len(PLATFORMS) or any(p not in PLATFORMS for p in platforms):raise ValueError('Choose supported chat platforms.')
         row['platforms']=list(dict.fromkeys(platforms));row['content']=text(layer.get('content',''),2000,'widget text')
         result['layers'].append(row)
     return result

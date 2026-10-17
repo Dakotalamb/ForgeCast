@@ -19,6 +19,8 @@ def chat_capabilities(s):
             'youtube':{'delete':bool(s.adapters.get('youtube')), 'ban':bool(s.adapters.get('youtube')), 'timeout':bool(s.adapters.get('youtube')), 'reply':False},
             'kick':{'delete':False,'ban':False,'timeout':False,'reply':False},
             'rumble':{'delete':False,'ban':False,'timeout':False,'reply':False},
+            'facebook':{'delete':False,'ban':False,'timeout':False,'reply':False},
+            'instagram':{'delete':False,'ban':False,'timeout':False,'reply':False},
             'tiktok':{'delete':False,'ban':False,'timeout':False,'reply':False}}
 
 

@@ -154,6 +154,10 @@ class ChatFeed : public QTextBrowser {
             painter.drawRect(3,3,7,26); painter.drawRect(10,12,7,8);
             painter.drawRect(17,3,7,9); painter.drawRect(17,20,7,9);
             painter.drawRect(24,3,5,5); painter.drawRect(24,24,5,5);
+        } else if(platform=="facebook"||platform=="instagram") {
+            painter.setBrush(QColor(platform=="facebook"?"#1877f2":"#c13584"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(24);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="facebook"?"f":"IG");
         } else if(platform=="rumble"||platform=="tiktok") {
             painter.setBrush(QColor(platform=="rumble"?"#85c742":"#252525"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
             painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(22);painter.setFont(font);
@@ -362,9 +366,14 @@ public:
         feed->setMinimumSize(0,0);
         feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         layout->addWidget(connection);
+        auto *chatSetup=new QPushButton("Set up chats / Rumble",this);
+        chatSetup->setProperty("dockMenuAction",true);
+        chatSetup->setToolTip("Open Companion, then choose Connect Rumble chat or Connections to set up platform chats.");
+        layout->addWidget(chatSetup);
+        connect(chatSetup,&QPushButton::clicked,this,[] { openCompanionWindow(); });
         auto *filters=new QHBoxLayout();
         platformFilter=new QComboBox(this);platformFilter->addItem("All platforms","");
-        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok")}) platformFilter->addItem(name,name);
+        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) platformFilter->addItem(name,name);
         channelFilter=new QComboBox(this);channelFilter->addItem("All channels","");
         platformFilter->setMinimumWidth(0);channelFilter->setMinimumWidth(0);
         platformFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);channelFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -389,7 +398,7 @@ public:
         sendTo->addItem("YouTube", "youtube");
         sendTo->addItem("Kick", "kick");
         sendTo->addItem("All connected platforms", "all");
-        sendTo->setToolTip("Send to your linked Twitch, YouTube or Kick channel. TikTok and Rumble are receive-only.");
+        sendTo->setToolTip("Send to your linked Twitch, YouTube or Kick channel. Facebook, Instagram, TikTok and Rumble are receive-only.");
         compose = new QLineEdit(this);
         compose->setPlaceholderText("Message your channel…");
         compose->setMaxLength(200);
@@ -483,7 +492,7 @@ public:
         const auto statuses = payload.value("statuses").toObject();
         lastPayload=payload;
         QStringList shortStates,details;
-        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok")}) {
+        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) {
             if(!statuses.contains(platform))continue;
             const QString full=statuses.value(platform).toString("offline");
             const QString state=full.startsWith("connected",Qt::CaseInsensitive)?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";

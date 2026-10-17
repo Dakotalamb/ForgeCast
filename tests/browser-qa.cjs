@@ -22,6 +22,14 @@ async function main(){
   assert.match(await page.locator('#mode').textContent(),/DEMO/);
   assert.equal(await page.locator('#messages,#send,.panel.chat').count(),0,'Chat belongs in OBS');
   assert.equal(await page.locator('#updateBanner').isVisible(),false);
+  await page.locator('[data-open-rumble]').click();
+  assert.equal(await page.locator('#setup').isVisible(),true);
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#connectFacebook').isVisible(),true);
+  assert.equal(await page.locator('#connectInstagram').isVisible(),true);
+  assert.equal(await page.locator('#studioPlatforms option[value=facebook]').count(),1);
+  assert.equal(await page.locator('#studioPlatforms option[value=instagram]').count(),1);
+  await page.locator('[data-tab=live]').click();
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){

@@ -19,6 +19,8 @@ function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.to
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
 function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
+document.querySelectorAll('[data-open-rumble]').forEach(b=>b.onclick=()=>{openTab('setup');$('rumbleChat').scrollIntoView({behavior:'smooth'});$('rumbleForm').elements.api_url.focus();});
+for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCase()+platform.slice(1)).onclick=()=>{if(!state?.hub_paired){error('Pair with your Hub first.');return;}window.open(state.hub_url+'/auth/'+platform,'_blank','noopener,noreferrer');};
 bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
 $('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
@@ -151,6 +153,8 @@ function render(s) {
  if(typeof renderStudio==='function')renderStudio(s);
  renderDestinationCatalog(s.destination_platforms);
  state=s;
+ $('rumbleChatStatus').textContent=s.statuses.rumble||'Not connected';
+ $('metaChatStatus').textContent=['facebook','instagram'].map(p=>p[0].toUpperCase()+p.slice(1)+': '+(s.statuses[p]||'Connect in Hub, then sync linked accounts.')).join(' · ');
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
