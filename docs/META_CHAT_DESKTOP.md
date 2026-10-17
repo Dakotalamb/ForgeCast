@@ -58,3 +58,19 @@ Windows native/installer workflow. A successful build does not verify a real
 Facebook, Instagram or Rumble broadcast. Creator testing must cover authorized
 comments in OBS, platform filters/icons, account switches, reconnects, revocation,
 private-URL masking and free/paid overlay behavior before stable release.
+
+### Automated validation for this preview
+
+227 Python tests passed. Native OBS 32.2.2 compilation, Chromium UI checks,
+packaged dependency/service checks, desktop startup checks and installer smoke
+checks passed in:
+https://github.com/Dakotalamb/ForgeCast/actions/runs/39058290174
+
+Tested source commit: a01bf4547b8bc629befd0f4571dfb2485359b1b8.
+
+Manual-test installer: `FDGCast-0.9.0-preview-meta-chat-win-x64-setup.exe`.
+Size: 22672625 bytes.
+SHA-256: `5df117f4df22d2ee94c758d02551f2668f38941caa7fa320742f46a64172c370`.
+This is a separate test build of 0.9.0 Preview, requiring manual installation.
+It is not a stable release or a replacement of the hosted update manifest.
+Actual platform delivery and OBS rendering on a creator's live setup remain unverified.
