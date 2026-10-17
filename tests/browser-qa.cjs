@@ -22,6 +22,14 @@ async function main(){
   assert.match(await page.locator('#mode').textContent(),/DEMO/);
   assert.equal(await page.locator('#messages,#send,.panel.chat').count(),0,'Chat belongs in OBS');
   assert.equal(await page.locator('#updateBanner').isVisible(),false);
+  await page.locator('[data-open-rumble]').click();
+  assert.equal(await page.locator('#setup').isVisible(),true);
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#connectFacebook').isVisible(),true);
+  assert.equal(await page.locator('#connectInstagram').isVisible(),true);
+  assert.equal(await page.locator('#studioPlatforms option[value=facebook]').count(),1);
+  assert.equal(await page.locator('#studioPlatforms option[value=instagram]').count(),1);
+  await page.locator('[data-tab=live]').click();
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){
@@ -30,10 +38,29 @@ async function main(){
   }
   await page.locator('[data-tab="outputs"]').click();
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+  assert.equal(await page.locator('#destinationPicture').inputValue(),'main');
+  assert.equal(await page.locator('#pictureGuide').isVisible(),false);
+  await page.selectOption('#destinationPicture','vertical_fill');
+  assert.match(await page.locator('#pictureHelp').textContent(),/sides.*cropped/);
+  assert.equal(await page.locator('#pictureGuide').isVisible(),true);
+  await page.screenshot({path:path.join(output,'vertical-fill.png'),fullPage:true});
+  await page.selectOption('#destinationPicture','vertical_fit');
+  assert.match(await page.locator('#pictureHelp').textContent(),/whole scene.*black space/);
+  assert.equal(await page.locator('#pictureGuide').getAttribute('class'),'vertical_fit');
+  assert.match(await page.locator('#startAll').getAttribute('title'),/every checked/);
+  await page.selectOption('#destinationPicture','main');
   await page.selectOption('#destinationPlatform','custom');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
-  await page.selectOption('#destinationPlatform','youtube');
+  for(const platform of ['rumble','tiktok','x','instagram','linkedin','dlive','vimeo']){
+   await page.selectOption('#destinationPlatform',platform);
+   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
+   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
+ }
+ await page.selectOption('#destinationPlatform','facebook');
+ assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+ assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
+ await page.selectOption('#destinationPlatform','youtube');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
   await page.locator('[data-tab="doctor"]').click();
@@ -45,6 +72,9 @@ async function main(){
   assert.equal(await page.locator('#audioSoundVolume').getAttribute('value'),'45');
   await page.screenshot({path:path.join(output,'doctor-demo.png'),fullPage:true});
   await page.locator('[data-tab="setup"]').click();
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#tiktokForm input[name=experimental]').getAttribute('required'),'');
+  assert.equal(await page.locator('#tiktokForm input[name=token]').count(),0);
   assert.equal(await page.locator('#showPairCode').isVisible(),true);
   await page.locator('#showPairCode').click();
   assert.equal(await page.locator('#hubForm input[name=token]').getAttribute('type'),'text');

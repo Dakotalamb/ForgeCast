@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "version": "0.8.0-preview",
+  "version": "0.9.0-preview",
   "platform": "windows-x64",
-  "download_url": "/downloads/FDGCast-0.8.0-preview-win-x64-setup.exe",
-  "notes": "YouTube streaming chat, guided audio test, reviewed feedback, preference backup and clearer Kick delivery diagnostics.",
-  "sha256": "72947022d800fbff8fe7e4c13426507b2d8e3a83c0a92f5b07a334c6aef4e392"
+  "download_url": "/downloads/FDGCast-0.9.0-preview-win-x64-setup.exe",
+  "notes": "New platform destinations, Rumble and experimental TikTok chat, saved paid overlays, Tools tab and chat auto-follow fixes.",
+  "sha256": "9d10f74f65035c90ab9b1912ed1c9602721d1a60b79248c3b43e7c96a4565136"
 }

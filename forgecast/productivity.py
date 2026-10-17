@@ -56,6 +56,12 @@ def redact(s,value):
     for k in s.vault.values:
         secret=s.vault.get(k)
         if secret: text=text.replace(json.dumps(secret,ensure_ascii=False)[1:-1],'[credential removed]')
+        if k == 'rumble_api_url':
+            from urllib.parse import urlparse, parse_qs
+            for name, values in parse_qs(urlparse(secret).query).items():
+                if name.lower() in ('key', 'token', 'api_key'):
+                    for item in values:
+                        if item: text=text.replace(json.dumps(item,ensure_ascii=False)[1:-1],'[credential removed]')
     text=re.sub(r'fc_[A-Za-z0-9_-]{32,}','[pairing removed]',text)
     text=re.sub(r'(?i)(?:rtmps?|https?)://[^\s"\\]+','[URL removed]',text)
     text=re.sub(r'(?i)Bearer\s+[A-Za-z0-9._~+/-]+','[credential removed]',text)

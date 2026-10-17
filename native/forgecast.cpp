@@ -61,6 +61,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include "chat-scroll-follow.hpp"
+#include "portrait-layout.hpp"
 #include <map>
 #include <memory>
 #include <cstring>
@@ -75,7 +76,79 @@ MODULE_EXPORT const char *obs_module_description(void)
     return "FDGCast by Forged Destiny Gaming: multistream output control";
 }
 
+// A video-only wrapper reads the current program source each frame, including
+// OBS transitions. Audio continues through the existing main AAC encoder.
+static const char *portraitName(void *) { return "FDGCast portrait picture"; }
+static void *portraitCreate(obs_data_t *settings, obs_source_t *)
+{
+    return new bool(obs_data_get_bool(settings, "fill"));
+}
+static void portraitRender(void *data, gs_effect_t *)
+{
+    auto *program = obs_get_output_source(0);
+    if (!program) return;
+    const auto layout = fdgcast::portraitLayout(static_cast<float>(obs_source_get_width(program)),
+                                               static_cast<float>(obs_source_get_height(program)),
+                                               *static_cast<bool *>(data));
+    if (layout.scale > 0) {
+        gs_matrix_push();
+        gs_matrix_translate3f(layout.x, layout.y, 0.f);
+        gs_matrix_scale3f(layout.scale, layout.scale, 1.f);
+        obs_source_video_render(program);
+        gs_matrix_pop();
+    }
+    obs_source_release(program);
+}
+
+struct PortraitVideo {
+    obs_view_t *view = nullptr;
+    obs_encoder_t *encoder = nullptr;
+    bool added = false;
+    bool create(obs_encoder_t *main, bool fill)
+    {
+        obs_video_info info{};
+        if (!obs_get_video_info(&info)) return false;
+        info.base_width = info.output_width = 720;
+        info.base_height = info.output_height = 1280;
+        info.output_format = VIDEO_FORMAT_NV12;
+        info.colorspace = VIDEO_CS_709;
+        info.range = VIDEO_RANGE_PARTIAL;
+        view = obs_view_create();
+        if (!view) return false;
+        auto *settings = obs_data_create();
+        obs_data_set_bool(settings, "fill", fill);
+        auto *source = obs_source_create_private("fdgcast_portrait", "FDGCast portrait", settings);
+        obs_data_release(settings);
+        if (!source) return false;
+        obs_view_set_source(view, 0, source);
+        obs_source_release(source);
+        auto *video = obs_view_add2(view, &info);
+        if (!video) return false;
+        added = true;
+        auto *mainSettings = obs_encoder_get_settings(main);
+        settings = obs_data_create();
+        obs_data_apply(settings, mainSettings);
+        obs_data_release(mainSettings);
+        obs_data_set_string(settings, "rate_control", "CBR");
+        obs_data_set_int(settings, "bitrate", 4500);
+        obs_data_set_int(settings, "keyint_sec", 2);
+        encoder = obs_video_encoder_create(obs_encoder_get_id(main),
+            fill ? "FDGCast portrait fill" : "FDGCast portrait fit", settings, nullptr);
+        obs_data_release(settings);
+        if (!encoder) return false;
+        obs_encoder_set_video(encoder, video);
+        return true;
+    }
+    ~PortraitVideo()
+    {
+        if (encoder) obs_encoder_release(encoder);
+        if (added) obs_view_remove(view);
+        if (view) obs_view_destroy(view);
+    }
+};
+
 struct Destination {
+    std::shared_ptr<PortraitVideo> portrait;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
@@ -154,6 +227,14 @@ class ChatFeed : public QTextBrowser {
             painter.drawRect(3,3,7,26); painter.drawRect(10,12,7,8);
             painter.drawRect(17,3,7,9); painter.drawRect(17,20,7,9);
             painter.drawRect(24,3,5,5); painter.drawRect(24,24,5,5);
+        } else if(platform=="facebook"||platform=="instagram") {
+            painter.setBrush(QColor(platform=="facebook"?"#1877f2":"#c13584"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(24);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="facebook"?"f":"IG");
+        } else if(platform=="rumble"||platform=="tiktok") {
+            painter.setBrush(QColor(platform=="rumble"?"#85c742":"#252525"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(22);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="rumble"?"R":"♪");
         } else {
             painter.setBrush(QColor("#9146ff")); painter.drawPolygon(QPolygon{{3,1},{31,1},{31,22},{22,31},{15,31},{15,26},{3,26}});
             painter.setBrush(Qt::white); painter.drawPolygon(QPolygon{{7,4},{28,4},{28,19},{21,26},{15,26},{15,22},{7,22}});
@@ -229,7 +310,7 @@ class DockView : public QObject {
     }
     void toggle(QMenu *menu,const QString &label,const QString &key,bool current) {
         auto *action=menu->addAction(label);
-        action->setToolTip(key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
+        action->setToolTip(key=="badges"?"Show role and special badge labels beside viewer names, including moderator, bot and game badges. Off by default.":key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
         action->setCheckable(true); action->setChecked(current);
         connect(action,&QAction::triggered,owner,[this,key](bool value) { save(key,value); });
     }
@@ -248,8 +329,9 @@ public:
         body->setLayout(content); // Qt transfers the existing layout from the dock.
         auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
         auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
-        auto *options=new QToolButton(dock);options->setText("⋮");options->setToolTip("Dock appearance and controls");
-        options->setFixedSize(22,20);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
+        auto *options=new QToolButton(dock);options->setText("Options");options->setToolTip("Change text size, badge visibility and other dock settings");
+        options->setAccessibleName("Dock options");
+        options->setMinimumSize(76,26);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
         openButton=new QPushButton("Open app",dock);
         openButton->setToolTip("FDGCast Companion is offline. Open it to reconnect your docks.");
         connect(openButton,&QPushButton::clicked,dock,[] { openCompanionWindow(); });
@@ -270,7 +352,7 @@ public:
                 toggle(menu,"Show channel avatars","avatars",showAvatars);
                 toggle(menu,"Show chat filters","filters",showFilters);
                 toggle(menu,"Alternating message backgrounds","alternate",alternate);
-                toggle(menu,"Show badge labels","badges",showBadges);
+                toggle(menu,"Show badges (roles & special badges)","badges",showBadges);
                 auto *icons=menu->addMenu("Platform icon size");
                 for (int size : {16,18,22,26}) {
                     auto *item=icons->addAction(QString::number(size)+" px");item->setCheckable(true);item->setChecked(size==iconPixels);
@@ -357,9 +439,14 @@ public:
         feed->setMinimumSize(0,0);
         feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         layout->addWidget(connection);
+        auto *chatSetup=new QPushButton("Set up chats / Rumble",this);
+        chatSetup->setProperty("dockMenuAction",true);
+        chatSetup->setToolTip("Open Companion, then choose Connect Rumble chat or Connections to set up platform chats.");
+        layout->addWidget(chatSetup);
+        connect(chatSetup,&QPushButton::clicked,this,[] { openCompanionWindow(); });
         auto *filters=new QHBoxLayout();
         platformFilter=new QComboBox(this);platformFilter->addItem("All platforms","");
-        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick")}) platformFilter->addItem(name,name);
+        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) platformFilter->addItem(name,name);
         channelFilter=new QComboBox(this);channelFilter->addItem("All channels","");
         platformFilter->setMinimumWidth(0);channelFilter->setMinimumWidth(0);
         platformFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);channelFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -384,7 +471,7 @@ public:
         sendTo->addItem("YouTube", "youtube");
         sendTo->addItem("Kick", "kick");
         sendTo->addItem("All connected platforms", "all");
-        sendTo->setToolTip("Send to your own linked channel. All connected platforms sends separately with per-platform results.");
+        sendTo->setToolTip("Send to your linked Twitch, YouTube or Kick channel. Facebook, Instagram, TikTok and Rumble are receive-only.");
         compose = new QLineEdit(this);
         compose->setPlaceholderText("Message your channel…");
         compose->setMaxLength(200);
@@ -454,13 +541,13 @@ public:
         QMenu menu(this);const QString platform=row.value("platform").toString(),user=row.value("user").toString(),origin=row.value("origin").toString();
         menu.addAction(user+" · "+platform+" · "+origin)->setEnabled(false);
         auto *copy=menu.addAction("Copy message");connect(copy,&QAction::triggered,this,[row]{QApplication::clipboard()->setText(row.value("text").toString());});
-        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && r.value("user_id")==row.value("user_id"))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
-        auto *reply=menu.addAction("Reply in my "+platform+" channel");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
+        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && (r.value("user_id").toString().isEmpty()?r.value("user")==row.value("user"):r.value("user_id")==row.value("user_id")))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
+        auto *reply=menu.addAction("Reply in my "+platform+" channel");reply->setEnabled(platform=="twitch"||platform=="youtube"||platform=="kick");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
         auto *highlight=menu.addAction("Show on selected-message overlay");connect(highlight,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id},{"immediate",true}});});
         auto *queue=menu.addAction("Queue for selected-message overlay");connect(queue,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id}});});
         QString profile;
         if(platform=="youtube" && QRegularExpression("^[A-Za-z0-9_-]{1,100}$").match(row.value("user_id").toString()).hasMatch())profile="https://www.youtube.com/channel/"+row.value("user_id").toString();
-        else if(QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
+        else if((platform=="twitch"||platform=="kick")&&QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
         if(!profile.isEmpty()){auto *open=menu.addAction("Open platform profile");connect(open,&QAction::triggered,this,[profile]{QDesktopServices::openUrl(QUrl(profile));});}
         const auto capabilities=lastPayload.value("capabilities").toObject().value(platform).toObject();
         menu.addSeparator();
@@ -478,9 +565,10 @@ public:
         const auto statuses = payload.value("statuses").toObject();
         lastPayload=payload;
         QStringList shortStates,details;
-        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick")}) {
+        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) {
+            if(!statuses.contains(platform))continue;
             const QString full=statuses.value(platform).toString("offline");
-            const QString state=full=="connected"?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
+            const QString state=full.startsWith("connected",Qt::CaseInsensitive)?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
             shortStates.append(platform.left(1).toUpper()+platform.mid(1)+" "+state);
             details.append(platform+": "+full);
         }
@@ -589,11 +677,20 @@ public:
         for (const auto &entry : events) {
             const auto row = entry.toObject();
             const QString kind=row.value("kind").toString();
-            const QString title=(row.value("simulated").toBool()?"TEST · ":"")+kind.left(1).toUpper()+kind.mid(1)+(row.value("acknowledged").toBool()?" ✓":"");
+            const QString title=kind.left(1).toUpper()+kind.mid(1);
             const QString color=kind=="follow"?"#94e6b0":kind=="redeem"?"#ffb891":"#d3baff";
             const auto description = row.value("text").toString().toHtmlEscaped();
             const QString timestamp=view->showTimes ? " · "+QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble())).toLocalTime().toString("h:mm AP") : QString();
-            html += "<p style='margin:0 0 "+QString::number(view->compact?6:12)+"px'><b style='color:"+color+"'>"+title+"</b><small>"+timestamp+"</small>"+(view->compact?" · ":"<br>")+description+"<small style='color:#a8afb8'> · "+row.value("source").toString().toHtmlEscaped()+"</small></p>";
+            // QTextBrowser supports table cell backgrounds reliably at narrow dock widths.
+            // Keep the event type on its own line even in compact mode.
+            const QString heading=kind=="raid"?"Incoming raid":kind=="follow"?"New follower":kind=="redeem"?"Channel point redeem":title;
+            const QString background=kind=="raid"?"#35294b":kind=="follow"?"#203c36":"#423026";
+            const QString flags=QString(row.value("simulated").toBool()?"TEST · ":"")+(row.value("acknowledged").toBool()?"Acknowledged · ":"");
+            html += "<table width='100%' cellspacing='0' cellpadding='0'><tr><td width='5' bgcolor='"+color+"'></td><td bgcolor='"+background+"' style='padding:"+QString::number(view->compact?10:14)+"px'>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+3)+"px;color:"+color+"'><b>"+flags+heading.toHtmlEscaped()+"</b></p>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+1)+"px;color:#ffffff'>"+description+"</p>"
+                    "<p style='margin:0;color:#bdc8d7;font-size:"+QString::number(qMax(11,view->pixels-1))+"px'>"+row.value("source").toString().toHtmlEscaped()+timestamp+"</p>"
+                    "</td></tr></table><p style='margin:0;font-size:6px'>&nbsp;</p>";
         }
         feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect Twitch in the Hub for follows, redeems and incoming raids."));
         if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for Twitch events.</p>";
@@ -837,29 +934,34 @@ public:
             dialog.setWindowTitle("Add FDGCast destination");
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
-            QComboBox platform(&dialog);
-            platform.addItem("Twitch", "twitch");platform.addItem("YouTube", "youtube");
-            platform.addItem("Kick", "kick");platform.addItem("Other / Custom", "custom");
+            QComboBox platform(&dialog), picture(&dialog);
+            picture.addItem("Same as OBS", "main");
+            picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
+            picture.addItem("Vertical · show whole picture", "vertical_fit");
+            picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
+            const auto catalog=lastPayload.value("destination_platforms").toArray();
+            for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
+            if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
             QCheckBox advanced("Use a custom server address", &dialog);
             QLabel help(&dialog);help.setWordWrap(true);
             key.setEchoMode(QLineEdit::Password);
             server.setPlaceholderText("Paste your platform's server address");
             form.addRow("Platform", &platform);
             form.addRow("Stream key", &key);
+            form.addRow("Picture format", &picture);
             form.addRow("Name (optional)", &name);
             form.addRow(&advanced);
             form.addRow("Server address", &server);
             form.addRow(&help);
             auto updatePlatform = [&] {
                 const QString selected=platform.currentData().toString();
-                const bool custom=selected=="custom";
+                QJsonObject metadata;for(const auto &entry:catalog)if(entry.toObject().value("id").toString()==selected)metadata=entry.toObject();
+                const bool custom=metadata.isEmpty()||metadata.value("requires_server").toBool();
                 server.setVisible(custom||advanced.isChecked());
                 form.labelForField(&server)->setVisible(custom||advanced.isChecked());
                 advanced.setVisible(!custom);
                 name.setPlaceholderText(platform.currentText());
-                help.setText(custom?"Paste the server address and key from your platform.":selected=="kick"?
-                    "Uses your connected Kick account. If unavailable, choose a custom server address from your Kick dashboard.":
-                    "The server is selected automatically. Just paste your stream key.");
+                help.setText(metadata.value("help").toString("Paste the server address and key from your platform."));
                 dialog.adjustSize();
             };
             connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
@@ -871,7 +973,7 @@ public:
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
                 send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
-                                 {"server", server.text()}, {"key", key.text()}});
+                                 {"server", server.text()}, {"key", key.text()}, {"picture", picture.currentData().toString()}});
             key.clear();
         });
         connect(startButton, &QPushButton::clicked, this, [this] {
@@ -942,7 +1044,8 @@ public:
                     }
                 }
                 if (!error.isEmpty()) state = "ERROR";
-                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + "   " + state, list);
+                const QString format = dest.value("picture").toString("main");
+                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + (format == "main" ? "" : " · 9:16") + "   " + state, list);
                 item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
                 item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
                 item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
@@ -976,6 +1079,7 @@ class ForgeDock : public QWidget {
     QTimer timer;
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
+    std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
     QJsonArray results;
     QJsonArray bulkStarts;
     int bulkTicks = 0;
@@ -998,7 +1102,7 @@ public:
                       "QPushButton:hover { background: #ff7549; }");
         auto *layout = new QVBoxLayout(this);
         label = new QLabel("FDGCAST · FORGED DESTINY GAMING\nStart the local companion to connect.\n"
-                           "Secondary outputs reuse OBS main H.264 + AAC encoders.\n"
+                           "Destinations use the OBS picture or a vertical crop/fit.\n"
                            "Start the main OBS stream first. No automatic starts.", this);
         label->setWordWrap(true);
         layout->addWidget(label);
@@ -1220,6 +1324,9 @@ public:
 
     QString start(const QJsonObject &obj)
     {
+        const auto picture = obj.value("picture").toString("main");
+        if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit")
+            return "invalid_picture_format";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
         if (id.isEmpty() || id.size() > 40 || url.host().isEmpty() ||
@@ -1248,6 +1355,18 @@ public:
             return "requires_main_h264_aac_disable_enhanced_broadcasting";
         }
         auto d = std::make_unique<Destination>();
+        if (picture != "main") {
+            d->portrait = portraitVideos[picture].lock();
+            if (!d->portrait) {
+                d->portrait = std::make_shared<PortraitVideo>();
+                if (!d->portrait->create(video, picture == "vertical_fill")) {
+                    obs_output_release(mainOutput);
+                    return "vertical_setup_failed";
+                }
+                portraitVideos[picture] = d->portrait;
+            }
+            video = d->portrait->encoder;
+        }
         d->name = obj.value("name").toString();
         obs_data_t *settings = obs_data_create();
         QByteArray server = obj.value("server").toString().toUtf8();
@@ -1378,6 +1497,10 @@ public:
                 d.wasLive = false;
             }
             if (!active && d.stopping) d.stopping = false;
+            if (!active && !d.starting && !d.stopping && d.portrait) {
+                obs_output_set_video_encoder(d.output, nullptr);
+                d.portrait.reset();
+            }
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
@@ -1567,6 +1690,17 @@ static void frontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
+    obs_source_info portrait{};
+    portrait.id = "fdgcast_portrait";
+    portrait.type = OBS_SOURCE_TYPE_INPUT;
+    portrait.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
+    portrait.get_name = portraitName;
+    portrait.create = portraitCreate;
+    portrait.destroy = [](void *data) { delete static_cast<bool *>(data); };
+    portrait.get_width = [](void *) -> uint32_t { return 720; };
+    portrait.get_height = [](void *) -> uint32_t { return 1280; };
+    portrait.video_render = portraitRender;
+    obs_register_source(&portrait);
     return true;
 }
 

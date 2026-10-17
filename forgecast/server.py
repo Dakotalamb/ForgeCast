@@ -27,6 +27,11 @@ from .updates import Updates
 from .suite import EVENT_KINDS, DEFAULT_EVENTS, connection_help, normalize_events, session_summaries, audience_counts
 from .help import ARTICLES, LINKS
 from .operations import SUITE_ACTIONS, suite_action, chat_capabilities, refresh_origin_avatars, overlay_page, overlay_script, overlay_style, overlay_feed, overlay_link
+from .extra_chat import connect_extra, restore_extra
+from .meta_chat import MetaChat
+from .entitlements import accept_entitlements, overlay_access
+from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
+from .platforms import PLATFORMS, CATALOG
 from . import __version__
 
 PORT = 17654
@@ -46,7 +51,15 @@ class State:
         self.browser_key = secrets.token_urlsafe(32)
         self.native_key = secrets.token_urlsafe(32)
         self.chat, self.doctor = ChatStore(), Doctor(self.config.get("doctor_sensitivity", "balanced"))
-        self.statuses = {'twitch':'not connected', 'youtube':'not connected', 'kick':'not connected'}
+        self.statuses = {
+            'twitch':'not connected',
+            'youtube':'not connected',
+            'kick':'not connected',
+            'facebook':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'instagram':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'rumble':'Not connected. Add your private API URL in Connections (receive-only).',
+            'tiktok':'Not connected. Add your LIVE username in Connections (experimental, receive-only).',
+        }
         self.adapters = {}
         self.events = deque(maxlen=100)
         self.commands = deque(maxlen=30)
@@ -62,6 +75,7 @@ class State:
         self.audio_test = AudioTest(self)
         self.feedback_preview = None
         self.hub_events = []
+        self.meta_chat = MetaChat(self)
         self.kick_after = 0
         self.lock = asyncio.Lock()
         self.status_details = {}
@@ -204,14 +218,14 @@ class State:
                         'Output names are user-provided; review before sharing.'])
 
     def public(self):
-        return dict(audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
+        return dict(overlay_access=overlay_access(self), overlay_designs=designs(self), audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
                     stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sound=self.config.get("doctor_sound",False), doctor_sensitivity=self.doctor.sensitivity,
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
-                    destinations=self.config.get('destinations', []), statuses=self.statuses,
+                    destination_platforms=PLATFORMS, destinations=self.config.get('destinations', []), statuses=self.statuses,
                     status_details=self.status_details, combined_events=combined_events(self),
                     messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
                     version=__version__, hub_events=self.coordination()['events'], coordination=self.coordination(),
@@ -247,6 +261,8 @@ OUTPUT_ERRORS = {
     'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
     'invalid_destination':'This destination has invalid settings.',
     'destination_limit':'The maximum number of destinations has been reached.',
+    'vertical_setup_failed':'Vertical video could not be created. Stop this destination, check OBS encoder resources, then retry. The main stream is unchanged.',
+    'invalid_picture_format':'Choose Same as OBS or a supported vertical picture format, then save the destination again.',
 }
 
 
@@ -332,6 +348,10 @@ def preflight(s):
         if output.get('reconnecting'): result='Reconnecting — check Stream Doctor.'
         if s.output_errors.get(dest['id']): result=s.output_errors[dest['id']]
         checks.append({'label':dest['name'],'result':result})
+        if dest.get('picture', 'main') != 'main':
+            checks.append({'label':dest['name']+' picture', 'result':
+                'Vertical 720 × 1280 at 4500 kbps; '+('sides are cropped.' if dest['picture']=='vertical_fill' else 'whole picture with black space.')+
+                ' Uses an additional video encoder; check framing and viewer playback on the platform.', 'help_tab':'outputs'})
     for platform, status in s.statuses.items():
         checks.append({'label':platform.title()+' chat','result':status})
     if not s.config.get('destinations'): checks.append({'label':'Multistream destinations','result':'None saved — add destinations before Start All.'})
@@ -488,17 +508,19 @@ async def secure(request, handler):
     response.headers.update({'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff',
                              'Referrer-Policy':'no-referrer',
                              'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'"})
+    if request.path == '/overlay/studio':
+        response.headers['Content-Security-Policy'] = response.headers['Content-Security-Policy'].replace("frame-ancestors 'none'","frame-ancestors 'self'")
     return response
 
 
 async def page(request):
     return web.FileResponse(WEB/({'/':'index.html', '/app.js':'app.js', '/style.css':'style.css',
-                                  '/favicon.png':'favicon.png'}[request.path]))
+                                  '/studio-editor.js':'studio-editor.js', '/favicon.png':'favicon.png'}[request.path]))
 
 
 async def platform_icon(request):
     platform = request.match_info['platform']
-    if platform not in ('twitch', 'youtube', 'kick'): raise web.HTTPNotFound()
+    if platform not in ('twitch', 'youtube', 'kick', 'rumble', 'tiktok', 'facebook', 'instagram'): raise web.HTTPNotFound()
     return web.FileResponse(WEB/'icons'/(platform+'.svg'))
 
 
@@ -522,12 +544,13 @@ async def obs_connection(request):
 
 async def resolve_destination(s, data):
     platform = data.get('platform', 'custom')
-    if platform not in ('twitch', 'youtube', 'kick', 'custom'):
+    if platform not in CATALOG:
         raise ValueError('Choose a supported platform or Other / Custom.')
     server = str(data.get('server') or '').strip()
-    if not server and platform in ('twitch', 'youtube'):
-        server = {'twitch':'rtmp://live.twitch.tv/app',
-                  'youtube':'rtmps://a.rtmps.youtube.com:443/live2'}[platform]
+    if not server:
+        server = CATALOG[platform]['server']
+    if not server and CATALOG[platform]['requires_server']:
+        raise ValueError('Paste the server URL from '+CATALOG[platform]['name']+' in the Server address field.')
     if not server and platform == 'kick':
         token = s.vault.get('kick_token')
         if token:
@@ -540,8 +563,9 @@ async def resolve_destination(s, data):
         if not server:
             raise ValueError('Kick server unavailable. Enable the custom server option and paste the address from your Kick dashboard (Advanced settings in Companion).')
     dest = validate_destination({**data, 'id':data.get('id') or uuid.uuid4().hex[:12],
-                                 'name':data.get('name') or {'twitch':'Twitch','youtube':'YouTube','kick':'Kick','custom':'Custom destination'}[platform],
+                                 'name':data.get('name') or CATALOG[platform]['name'],
                                  'server':server})
+    dest['platform'] = platform
     return dest
 
 
@@ -557,6 +581,8 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op in STUDIO_ACTIONS:
+            return web.json_response(await studio_action(s,op,data))
         if op in PRODUCTIVITY_ACTIONS:
             return web.json_response(await productivity_action(s, op, data))
         if op in SUITE_ACTIONS:
@@ -650,6 +676,8 @@ async def action(request):
             queue_outputs(s, data.get('command'), data.get('id'))
         elif op == 'destination_enabled':
             set_destination_enabled(s, data)
+        elif op == 'extra_chat_connect':
+            await connect_extra(s, data)
         elif op == 'chat_connect':
             platform = data['platform']
             s.paused_platforms.discard(platform)
@@ -684,9 +712,13 @@ async def action(request):
             if adapter:
                 adapter.task.cancel()
                 await asyncio.gather(adapter.task, return_exceptions=True)
+            if platform in ('facebook', 'instagram'):
+                s.meta_chat.clear(platform)
+                s.meta_chat.readers.pop(platform, None)
             s.status(platform, 'disconnected')
             if data.get('forget'):
                 s.vault.delete(platform+'_token')
+                if platform == 'rumble': s.vault.delete('rumble_api_url')
                 s.config.pop(platform, None)
                 s.save()
         elif op == 'chat_send':
@@ -700,10 +732,12 @@ async def action(request):
             if not token:
                 raise ValueError('A dedicated FDGCast Hub integration token is required.')
             if s.config.get('hub_url') != url or s.vault.get('hub_token') != token:
+                s.overlay_access_granted=False;s.overlay_access_until=0
                 s.kick_after = 0
                 s.kick_verified = False
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
+            s.meta_chat.reset()
             s.hub_connection = 'checking'
             s.save()
             try:
@@ -715,6 +749,7 @@ async def action(request):
             url = s.config.get('hub_url')
             if not url or not s.vault.get('hub_token'):
                 raise ValueError('Save your Hub URL and pairing token first.')
+            s.meta_chat.unauthorized = False
             s.paused_platforms.clear()
             s.config['paused_platforms'] = []
             await sync_hub_accounts(s, retry_events=True)
@@ -779,7 +814,7 @@ async def native(request):
     # OBS owns the operator view. Send only bounded, non-credential telemetry to
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
-        'updates': s.updates.public(),
+        'destination_platforms': PLATFORMS, 'updates': s.updates.public(),
         'commands': commands, 'version':__version__, 'coordination':s.coordination(), 'output_presets':s.config.get('output_presets',{}), 'summaries':session_summaries(s), 'capabilities':chat_capabilities(s),
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') in {'chat','superchat','supersticker','membership'} or (s.config.get('merge_events') and m.get('kind') in set(s.config.get('event_kinds', DEFAULT_EVENTS)))][-200:],
         'events': combined_events(s),
@@ -941,9 +976,11 @@ async def sync_hub_accounts(s, retry_events=False):
         result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/connections',
                            headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
         s.hub_connection = 'connected'
+        accept_entitlements(s,result)
+        s.meta_chat.discover(result.get('chat_connections', []))
         for conn in result.get('connections', []):
             platform, token = conn.get('platform'), conn.get('access_token')
-            if platform not in s.statuses or platform in s.paused_platforms: continue
+            if platform not in ('twitch', 'youtube', 'kick') or platform in s.paused_platforms: continue
             if not token:
                 old = s.adapters.pop(platform, None)
                 if old:
@@ -1093,7 +1130,8 @@ async def poll_hub(s):
         url, token = s.config.get('hub_url'), s.vault.get('hub_token')
         if url and token:
             now = time.monotonic()
-            if now >= next_accounts:
+            if now >= next_accounts or s.meta_chat.rediscover:
+                s.meta_chat.rediscover = False
                 try:
                     async with s.lock: await sync_hub_accounts(s)
                     await refresh_origin_avatars(s)
@@ -1184,8 +1222,10 @@ async def lifecycle(app):
                 bridge.chmod(0o600)
         else:
             seed_demo(s)
+        if not s.demo: await restore_extra(s)
         task = asyncio.create_task(poll(s)) if not s.demo else None
         hub_task = asyncio.create_task(poll_hub(s)) if not s.demo else None
+        meta_task = asyncio.create_task(s.meta_chat.run()) if not s.demo else None
         audio_task = asyncio.create_task(poll_audio(s)) if not s.demo else None
         notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
         history_task = asyncio.create_task(poll_history(s)) if not s.demo else None
@@ -1205,7 +1245,7 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
-        for background in (audio_task, notify_task, history_task, doctor_notify_task, update_task):
+        for background in (meta_task, audio_task, notify_task, history_task, doctor_notify_task, update_task):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)
@@ -1221,10 +1261,14 @@ def create_app(state):
     app['state'] = state
     app['web_path'] = WEB
     app.cleanup_ctx.append(lifecycle)
-    for path in ('/', '/app.js', '/style.css', '/favicon.png'):
+    for path in ('/', '/app.js', '/studio-editor.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
     app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
+    app.router.add_get('/overlay/studio', studio_asset)
+    app.router.add_get('/studio-player.js', studio_asset)
+    app.router.add_get('/studio-player.css', studio_asset)
+    app.router.add_get('/overlay/design-feed/{id}', studio_feed)
     app.router.add_get('/overlay', overlay_page)
     app.router.add_get('/overlay.js', overlay_script)
     app.router.add_get('/overlay.css', overlay_style)

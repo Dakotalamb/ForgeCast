@@ -10,7 +10,11 @@ DEFAULT_EVENTS = ['follow', 'redeem', 'raid']
 
 def connection_help(platform, message, hub_url=''):
     lower = message.lower()
-    if platform == 'twitch_events' and 'permission' in lower:
+    if platform == 'rumble':
+        title, steps = 'Rumble receive-only chat', ['Paste the private Live Stream API URL from Rumble account settings into Connections.', 'Start a Rumble LIVE; it can be sent from any encoder.', 'Use Rumble for replies and moderation. Only the most recent 50 messages are available, so busy chat may have gaps.']
+    elif platform == 'tiktok':
+        title, steps = 'TikTok LIVE chat (experimental)', ['Enter the public LIVE creator username in Connections.', 'A LIVE must be running; FDGCast does not need to stream to TikTok.', 'The unofficial reader uses a third-party signing service and can be interrupted by TikTok changes or service limits.']
+    elif platform == 'twitch_events' and 'permission' in lower:
         title, steps = 'Twitch needs event permissions', ['Reconnect Twitch in Hub Settings, then Sync linked accounts.', 'If follows are still unavailable, the Hub OAuth app must request moderator:read:followers.', 'Redeems require channel:read:redemptions and an eligible channel with channel points. Raids are independent.']
     elif platform == 'kick' and ('ready' in lower or 'webhook' in lower):
         title, steps = 'Kick is subscribed; delivery is not verified', ['Send a new message in your connected Kick channel.', 'If it stays empty, check the Hub webhook receipt and relay diagnostics. Sync cannot repair a server rejecting signed webhooks.', 'The developer webhook endpoint is /api/forgecast/v1/webhooks/kick on your Hub.']

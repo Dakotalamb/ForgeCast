@@ -18,15 +18,40 @@ async function run(fn, target) { if(target) target.disabled=true; try { await fn
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
-function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');},f.querySelector('button')); }; }
+function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');if(form==='destinationForm'){resetDestinationForm();$('destinationSaved').textContent='Destination saved. Check its picture format and platform preview before going live.';}},f.querySelector('button')); }; }
+document.querySelectorAll('[data-open-rumble]').forEach(b=>b.onclick=()=>{openTab('setup');$('rumbleChat').scrollIntoView({behavior:'smooth'});$('rumbleForm').elements.api_url.focus();});
+for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCase()+platform.slice(1)).onclick=()=>{if(!state?.hub_paired){error('Pair with your Hub first.');return;}window.open(state.hub_url+'/auth/'+platform,'_blank','noopener,noreferrer');};
+bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
+$('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
+const pictureLabels={main:'Same as OBS',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture'};
+function pictureChanged(){
+ const mode=$('destinationPicture').value;
+ $('pictureHelp').textContent=mode==='main'?'Uses your current OBS picture, resolution and bitrate. No extra video encoder.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
+ $('pictureGuide').hidden=mode==='main';$('pictureGuide').className=mode;
+}
+$('destinationPicture').onchange=pictureChanged;pictureChanged();
+function resetDestinationForm(){
+ const f=$('destinationForm');f.elements.id.value='';f.elements.name.value='';f.elements.key.value='';f.elements.picture.value='main';
+ destinationPlatformChanged();pictureChanged();$('destinationFormTitle').textContent='Add destination';$('destinationSave').textContent='Save destination';$('destinationCancel').hidden=true;$('destinationSaved').textContent='';
+}
+$('destinationCancel').onclick=resetDestinationForm;
+let destinationCatalog=[];
 function destinationPlatformChanged(){
- const platform=$('destinationPlatform').value, custom=platform==='custom';
- $('destinationAdvanced').open=custom;
- $('destinationForm').elements.server.required=custom;
+ const platform=$('destinationPlatform').value, row=destinationCatalog.find(r=>r.id===platform);
+ const required=row?row.requires_server:platform==='custom';
+ $('destinationAdvanced').open=required;
+ $('destinationForm').elements.server.required=required;
  $('destinationForm').elements.server.value='';
- $('destinationForm').elements.name.placeholder={twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
- $('destinationHelp').textContent=custom?'Paste your server address and stream key.':platform==='kick'?'Uses your connected Kick account to find its server. If unavailable, paste the server address under Advanced settings.':'Server is selected automatically. Just paste your stream key.';
+ $('destinationForm').elements.name.placeholder=row?.name||{twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
+ $('destinationHelp').textContent=row?.help||'Paste your server address and stream key.';
+}
+function renderDestinationCatalog(rows){
+ if(!rows?.length||JSON.stringify(rows)===JSON.stringify(destinationCatalog))return;
+ const selected=$('destinationPlatform').value;destinationCatalog=rows;
+ $('destinationPlatform').replaceChildren(...rows.map(r=>{const o=el('option',r.name);o.value=r.id;return o;}));
+ $('destinationPlatform').value=rows.some(r=>r.id===selected)?selected:rows[0].id;
+ destinationPlatformChanged();
 }
 $('destinationPlatform').onchange=destinationPlatformChanged;
 destinationPlatformChanged();
@@ -137,11 +162,15 @@ function renderHistory(s){
  if(document.activeElement!==$('doctorSensitivity'))$('doctorSensitivity').value=s.doctor_sensitivity||'balanced';
 }
 function render(s) {
+ if(typeof renderStudio==='function')renderStudio(s);
+ renderDestinationCatalog(s.destination_platforms);
  state=s;
+ $('rumbleChatStatus').textContent=s.statuses.rumble||'Not connected';
+ $('metaChatStatus').textContent=['facebook','instagram'].map(p=>p[0].toUpperCase()+p.slice(1)+': '+(s.statuses[p]||'Connect in Hub, then sync linked accounts.')).join(' · ');
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'PREVIEW · 0.8.0';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC1';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -170,14 +199,14 @@ function render(s) {
    enabled.title='Choose destinations for the next Start All. Unchecking does not stop a live stream.';
    enabled.append(check,el('strong',d.name));
    const health=el('span','● '+status.text,'output-status '+status.level);health.title=status.detail||status.text;
-   card.append(enabled,health);if(status.detail)card.append(el('p',status.detail,'danger'));
+   card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'));if(status.detail)card.append(el('p',status.detail,'danger'));
    const controls=el('div',undefined,'controls');
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');
-     f.elements.platform.value='custom';destinationPlatformChanged();
-     f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';
-     f.scrollIntoView({behavior:'smooth'});
+     f.elements.platform.value=d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
+     f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';f.elements.picture.value=d.picture||'main';pictureChanged();
+     $('destinationFormTitle').textContent='Edit '+d.name;$('destinationSave').textContent='Save changes';$('destinationCancel').hidden=false;$('destinationSaved').textContent='';f.scrollIntoView({behavior:'smooth'});f.elements.picture.focus();
    }));
    controls.append(button('Remove',async()=>{if(confirm('Remove destination '+d.name+' and its saved key?'))await action('delete_destination',{id:d.id});}));
    card.append(controls);return card;
@@ -280,3 +309,25 @@ $('feedbackSend').onclick=()=>{if(feedbackDraft&&confirm('Send exactly this revi
 $('backupExport').onclick=()=>run(async()=>downloadJson(await api('/api/backup'),'FDGCast-preferences.json'),$('backupExport'));
 $('backupFile').onchange=()=>run(async()=>{restoreDraft=null;$('backupRestore').disabled=true;$('backupPreview').hidden=true;const file=$('backupFile').files[0];if(!file)return;if(file.size>50000)throw Error('Choose a backup under 50 KB.');const data=JSON.parse(await file.text()),preview=await action('backup_preview',{backup:data});restoreDraft=data;$('backupPreview').textContent=JSON.stringify(preview,null,2);$('backupPreview').hidden=false;$('backupRestore').disabled=false;$('backupStatus').textContent='Review the changes. New destination names need server/key setup.';});
 $('backupRestore').onclick=()=>{if(restoreDraft&&confirm('Restore these preferences and add missing destination names? Existing keys stay saved. OBS must be closed.'))run(async()=>{const r=await action('backup_restore',{backup:restoreDraft,confirmed:true});$('backupStatus').textContent=r.message;restoreDraft=null;$('backupRestore').disabled=true;},$('backupRestore'));};
+
+const controlHints={
+ preflight:'Check connections, audio and destinations. This never starts a stream.',
+ startAll:'Starts the main OBS stream and every checked destination after confirmation.',
+ stopAll:'Stops the main OBS stream and all FDGCast destinations after confirmation.',
+ destinationPicture:'Choose normal OBS video or a separate 9:16 portrait encode. Read the framing guidance below.',
+ studioLink:'Get a private, read-only URL for this saved design. Paste it into an OBS Browser Source.',
+ studioRotate:'Replaces this design’s link. The old OBS link immediately stops working.',
+ studioPreview:'Refresh the sample preview using your saved design. Save edits first.',
+ studioMax:'Limits simultaneous messages or effects. Lower limits reduce clutter and rendering work.',
+ studioCooldown:'Minimum wait between emoji effects. Increase this to make busy chat calmer.',
+ studioOpacity:'0 is fully transparent; 100 is a solid background.',
+ studioCurrent:'Manual progress. Incoming subscriptions and donations do not update this value.',
+ studioPlatforms:'Choose which connected platforms this widget displays. This does not connect accounts.',
+ audioAck:'Acknowledge current Audio Guard warnings until those conditions clear.',
+ audioSnooze:'Pause Audio Guard alerts for ten minutes. Monitoring continues.',
+ connectFacebook:'Open Facebook authorization on your paired Hub, then select a managed Page. Chat is receive-only.',
+ connectInstagram:'Open Instagram authorization on your paired Hub. Requires a professional account; chat is receive-only.',
+ hubSync:'Refresh linked accounts and access from your paired Hub.',
+ showPairCode:'Show or hide the pairing code. Keep this code private.',
+};
+for(const [id,hint] of Object.entries(controlHints))if($(id))$(id).title=hint;

@@ -1,3 +1,23 @@
+# FDGCast 1.0.0 RC1
+
+Release candidate with portrait crop/fit per destination, seven chat readers,
+saved Overlay Studio designs with paid live access, and clearer setup guidance.
+Actual broadcast acceptance remains outstanding before the stable 1.0.0 release.
+See [RC1 notes](docs/RELEASE_1.0.0_RC1.md).
+
+See [0.9.0 release notes](docs/RELEASE_0.9.0.md),
+[1.0.0 release checklist](docs/RELEASE_1.0.0_CHECKLIST.md),
+[overlay setup and paid-access handoff](docs/OVERLAY_STUDIO.md), and
+[platform coverage](docs/MORE_PLATFORMS.md).
+
+Close OBS and Companion before upgrading. The installer preserves settings,
+credentials and dock identity. Live overlays require the Hub's verified
+`fdgcast_overlays` entitlement. Until that server update is deployed, the designer
+and sample previews work but live overlay feeds remain locked. Official FDG and
+other complimentary access must be resolved by the Hub's shared entitlement service.
+
+Earlier release notes below are historical.
+
 # FDGCast 0.8.0 Preview
 
 YouTube streaming chat and quota-aware recovery, clearer Kick delivery diagnosis, guided audio testing, reviewed feedback, and preference backup/restore.
@@ -158,8 +178,9 @@ See `docs/NATIVE_BUILD.md`. Install only into an isolated OBS test copy first.
 Requires OBS 30+ APIs, compatible Qt6, and a matching 64-bit OBS SDK.
 
 The main stream must be active with H.264/AAC. Disable Enhanced Broadcasting for
-the test. Additional destinations reuse these encoders and the same scene/output
-format; no separate bitrate or vertical composition. Each destination uses its
+the test. Same as OBS destinations reuse these encoders. Vertical fill/fit destinations
+use a separate 720 × 1280 H.264 encoder at 4500 kbps while sharing main audio.
+Vertical framing follows the main program; it is not a separate scene editor. Each destination uses its
 own upload bandwidth. Start one at a time and verify arrival on each platform.
 
 Stopping the main OBS stream also stops all FDGCast secondary streams. Closing
