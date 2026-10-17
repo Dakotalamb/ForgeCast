@@ -1,3 +1,9 @@
+# Release target: 1.0.0
+
+Use [the 1.0.0 checklist](RELEASE_1.0.0_CHECKLIST.md) for current release scope
+and acceptance work. The broader gates below are historical planning; they are
+not all required for 1.0.0.
+
 # October 9 implementation checkpoint
 
 See [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) for delivered features and remaining work, and [HUB_HANDOFF_0.7.0.md](HUB_HANDOFF_0.7.0.md) for the website dependencies.

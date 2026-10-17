@@ -5,6 +5,7 @@ a saved Overlay Studio with paid live access, a dedicated Tools tab and the nati
 chat auto-follow fix. Full release is reserved for 1.0.0 after live verification.
 
 See [0.9.0 release notes](docs/RELEASE_0.9.0.md),
+[1.0.0 release checklist](docs/RELEASE_1.0.0_CHECKLIST.md),
 [overlay setup and paid-access handoff](docs/OVERLAY_STUDIO.md), and
 [platform coverage](docs/MORE_PLATFORMS.md).
 

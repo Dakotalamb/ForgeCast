@@ -67,6 +67,18 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(self.state.commands),0)
         self.state.demo=True
 
+    async def test_all_chat_platforms_visible_before_account_discovery(self):
+        from forgecast.server import preflight
+        platforms={'twitch','youtube','kick','facebook','instagram','rumble','tiktok'}
+        self.assertEqual(set(self.state.statuses),platforms)
+        response=await self.client.get('/api/state',headers=self.headers)
+        self.assertEqual(set((await response.json())['statuses']),platforms)
+        checks={r['label']:r for r in preflight(self.state)}
+        for p in platforms:
+            self.assertEqual(checks[p.title()+' chat']['help_tab'],'setup')
+        self.assertIn('private API URL',checks['Rumble chat']['result'])
+        self.assertIn('experimental',checks['Tiktok chat']['result'])
+
     async def test_doctor_notification_setting_validates_boolean(self):
         self.state.demo=False
         response=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','notifications':'false'})

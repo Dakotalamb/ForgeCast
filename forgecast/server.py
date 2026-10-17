@@ -51,7 +51,15 @@ class State:
         self.browser_key = secrets.token_urlsafe(32)
         self.native_key = secrets.token_urlsafe(32)
         self.chat, self.doctor = ChatStore(), Doctor(self.config.get("doctor_sensitivity", "balanced"))
-        self.statuses = {'twitch':'not connected', 'youtube':'not connected', 'kick':'not connected'}
+        self.statuses = {
+            'twitch':'not connected',
+            'youtube':'not connected',
+            'kick':'not connected',
+            'facebook':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'instagram':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'rumble':'Not connected. Add your private API URL in Connections (receive-only).',
+            'tiktok':'Not connected. Add your LIVE username in Connections (experimental, receive-only).',
+        }
         self.adapters = {}
         self.events = deque(maxlen=100)
         self.commands = deque(maxlen=30)

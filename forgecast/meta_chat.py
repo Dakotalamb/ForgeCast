@@ -65,7 +65,9 @@ class MetaChat:
         s.highlight_ids = type(s.highlight_ids)((mid for mid in s.highlight_ids if mid not in removed), maxlen=s.highlight_ids.maxlen)
 
     def reset(self):
-        for p in PLATFORMS: self.clear(p)
+        for p in PLATFORMS:
+            self.clear(p)
+            self.s.status(p, 'Not checked. Sync linked accounts to check this Hub pairing (receive-only).')
         self.readers.clear()
         self.scope = self.pairing()
         self.unauthorized = False

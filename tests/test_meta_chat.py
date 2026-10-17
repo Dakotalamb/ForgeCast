@@ -69,6 +69,16 @@ class RelayTests(unittest.IsolatedAsyncioTestCase):
             task=asyncio.create_task(self.m.poll('facebook'));await ready.wait()
             self.s.vault.set('hub_token','OWNER-TWO');self.m.reset();self.m.discover([descriptor()]);release.set();await task
         self.assertEqual(len(self.s.chat.messages),0)
+    async def test_pairing_reset_removes_old_connection_claim(self):
+        self.ingest();self.ingest(page('instagram'),'instagram')
+        self.s.status('rumble','Connected; reading chat (receive-only).')
+        self.s.vault.set('hub_token','OWNER-TWO');self.m.reset()
+        self.assertEqual(len(self.s.chat.messages),0)
+        self.assertEqual(self.m.readers,{})
+        for p in ('facebook','instagram'):
+            self.assertIn('Not checked',self.s.statuses[p])
+            self.assertNotIn('receiving',self.s.statuses[p])
+        self.assertIn('Connected',self.s.statuses['rumble'])
     async def test_401_clears_both_and_stops_until_repair(self):
         self.ingest();self.ingest(page('instagram'),'instagram')
         with patch('forgecast.meta_chat.relay_request',AsyncMock(side_effect=ApiError('secret',401))):await self.m.poll('facebook')
