@@ -38,6 +38,17 @@ async function main(){
   }
   await page.locator('[data-tab="outputs"]').click();
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+  assert.equal(await page.locator('#destinationPicture').inputValue(),'main');
+  assert.equal(await page.locator('#pictureGuide').isVisible(),false);
+  await page.selectOption('#destinationPicture','vertical_fill');
+  assert.match(await page.locator('#pictureHelp').textContent(),/sides.*cropped/);
+  assert.equal(await page.locator('#pictureGuide').isVisible(),true);
+  await page.screenshot({path:path.join(output,'vertical-fill.png'),fullPage:true});
+  await page.selectOption('#destinationPicture','vertical_fit');
+  assert.match(await page.locator('#pictureHelp').textContent(),/whole scene.*black space/);
+  assert.equal(await page.locator('#pictureGuide').getAttribute('class'),'vertical_fit');
+  assert.match(await page.locator('#startAll').getAttribute('title'),/every checked/);
+  await page.selectOption('#destinationPicture','main');
   await page.selectOption('#destinationPlatform','custom');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');

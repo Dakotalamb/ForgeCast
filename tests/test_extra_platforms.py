@@ -33,6 +33,21 @@ class PlatformTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(d['server'],'rtmps://rtmp-api.facebook.com:443/rtmp/')
         d=await resolve_destination(self.s,{'platform':'facebook','server':'rtmps://custom.example/live'})
         self.assertEqual(d['server'],'rtmps://custom.example/live');self.assertEqual(d['platform'],'facebook')
+    async def test_picture_formats_default_validate_and_reach_native_command(self):
+        from forgecast.server import preflight
+        for picture in ('main','vertical_fill','vertical_fit'):
+            d=await resolve_destination(self.s,{'platform':'youtube','picture':picture})
+            self.assertEqual(d['picture'],picture)
+            self.s.config['destinations']=[d];self.s.vault.set('stream:'+d['id'],'KEY')
+            self.s.native_seen=__import__('time').time()
+            for command in ('start','start_all'):
+                queue_outputs(self.s,command,d['id'])
+                row=self.s.commands.pop()
+                self.assertEqual((row['destination'] if command=='start' else row['destinations'][0])['picture'],picture)
+            self.assertEqual(any(r['label'].endswith(' picture') for r in preflight(self.s)),picture!='main')
+        self.assertEqual((await resolve_destination(self.s,{'platform':'youtube'}))['picture'],'main')
+        for bad in ('vertical','squash','',None,False):
+            with self.assertRaises(ValueError):await resolve_destination(self.s,{'platform':'youtube','picture':bad})
     async def test_rumble_private_url_host_and_redirect_validation(self):
         self.assertEqual(rumble_api_url(PRIVATE),PRIVATE)
         for url in ('http://rumble.com/-livestream-api/get-data?key=x',

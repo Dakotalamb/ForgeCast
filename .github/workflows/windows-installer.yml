@@ -21,6 +21,15 @@ jobs:
           repository: obsproject/obs-plugintemplate
           ref: master
           path: .obs-template
+      - name: Check vertical framing geometry
+        shell: pwsh
+        run: |
+          cmake -S tests/portrait -B build-portrait
+          if ($LASTEXITCODE -ne 0) { throw 'Portrait test configuration failed' }
+          cmake --build build-portrait --config Release
+          if ($LASTEXITCODE -ne 0) { throw 'Portrait test compilation failed' }
+          ./build-portrait/Release/portrait-layout-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Portrait framing tests failed' }
       - name: Configure OBS 32.2.2 native build
         shell: pwsh
         run: |
@@ -28,6 +37,7 @@ jobs:
           $template = Join-Path $env:GITHUB_WORKSPACE '.obs-template'
           Copy-Item 'native/forgecast.cpp' (Join-Path $template 'src/plugin-main.cpp') -Force
           Copy-Item 'native/chat-scroll-follow.hpp' (Join-Path $template 'src/chat-scroll-follow.hpp') -Force
+          Copy-Item 'native/portrait-layout.hpp' (Join-Path $template 'src/portrait-layout.hpp') -Force
           Copy-Item 'packaging/ci-native-CMakeLists.txt' (Join-Path $template 'CMakeLists.txt') -Force
           $locale = Join-Path $template 'data/locale'
           New-Item -ItemType Directory -Force $locale | Out-Null
@@ -37,7 +47,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'FDGCast'
-          $spec.version = '0.9.0'
+          $spec.version = '1.0.0'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -94,7 +104,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.9.0-UI-quality-check
+          name: FDGCast-1.0.0-RC1-UI-quality-check
           path: |
             qa/*.png
             qa-next/*.png
@@ -178,12 +188,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-0.9.0-preview-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-1.0.0-rc.1-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-0.9.0-preview-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-1.0.0-rc.1-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -196,7 +206,7 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-0.9.0-OBS-32.2.2-Windows-preview-installer
-          path: release/FDGCast-0.9.0-preview-win-x64-setup.exe
+          name: FDGCast-1.0.0-RC1-OBS-32.2.2-Windows-installer
+          path: release/FDGCast-1.0.0-rc.1-win-x64-setup.exe
           if-no-files-found: error
 

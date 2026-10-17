@@ -61,6 +61,7 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include "chat-scroll-follow.hpp"
+#include "portrait-layout.hpp"
 #include <map>
 #include <memory>
 #include <cstring>
@@ -75,7 +76,79 @@ MODULE_EXPORT const char *obs_module_description(void)
     return "FDGCast by Forged Destiny Gaming: multistream output control";
 }
 
+// A video-only wrapper reads the current program source each frame, including
+// OBS transitions. Audio continues through the existing main AAC encoder.
+static const char *portraitName(void *) { return "FDGCast portrait picture"; }
+static void *portraitCreate(obs_data_t *settings, obs_source_t *)
+{
+    return new bool(obs_data_get_bool(settings, "fill"));
+}
+static void portraitRender(void *data, gs_effect_t *)
+{
+    auto *program = obs_get_output_source(0);
+    if (!program) return;
+    const auto layout = fdgcast::portraitLayout(static_cast<float>(obs_source_get_width(program)),
+                                               static_cast<float>(obs_source_get_height(program)),
+                                               *static_cast<bool *>(data));
+    if (layout.scale > 0) {
+        gs_matrix_push();
+        gs_matrix_translate3f(layout.x, layout.y, 0.f);
+        gs_matrix_scale3f(layout.scale, layout.scale, 1.f);
+        obs_source_video_render(program);
+        gs_matrix_pop();
+    }
+    obs_source_release(program);
+}
+
+struct PortraitVideo {
+    obs_view_t *view = nullptr;
+    obs_encoder_t *encoder = nullptr;
+    bool added = false;
+    bool create(obs_encoder_t *main, bool fill)
+    {
+        obs_video_info info{};
+        if (!obs_get_video_info(&info)) return false;
+        info.base_width = info.output_width = 720;
+        info.base_height = info.output_height = 1280;
+        info.output_format = VIDEO_FORMAT_NV12;
+        info.colorspace = VIDEO_CS_709;
+        info.range = VIDEO_RANGE_PARTIAL;
+        view = obs_view_create();
+        if (!view) return false;
+        auto *settings = obs_data_create();
+        obs_data_set_bool(settings, "fill", fill);
+        auto *source = obs_source_create_private("fdgcast_portrait", "FDGCast portrait", settings);
+        obs_data_release(settings);
+        if (!source) return false;
+        obs_view_set_source(view, 0, source);
+        obs_source_release(source);
+        auto *video = obs_view_add2(view, &info);
+        if (!video) return false;
+        added = true;
+        auto *mainSettings = obs_encoder_get_settings(main);
+        settings = obs_data_create();
+        obs_data_apply(settings, mainSettings);
+        obs_data_release(mainSettings);
+        obs_data_set_string(settings, "rate_control", "CBR");
+        obs_data_set_int(settings, "bitrate", 4500);
+        obs_data_set_int(settings, "keyint_sec", 2);
+        encoder = obs_video_encoder_create(obs_encoder_get_id(main),
+            fill ? "FDGCast portrait fill" : "FDGCast portrait fit", settings, nullptr);
+        obs_data_release(settings);
+        if (!encoder) return false;
+        obs_encoder_set_video(encoder, video);
+        return true;
+    }
+    ~PortraitVideo()
+    {
+        if (encoder) obs_encoder_release(encoder);
+        if (added) obs_view_remove(view);
+        if (view) obs_view_destroy(view);
+    }
+};
+
 struct Destination {
+    std::shared_ptr<PortraitVideo> portrait;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
@@ -861,7 +934,11 @@ public:
             dialog.setWindowTitle("Add FDGCast destination");
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
-            QComboBox platform(&dialog);
+            QComboBox platform(&dialog), picture(&dialog);
+            picture.addItem("Same as OBS", "main");
+            picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
+            picture.addItem("Vertical · show whole picture", "vertical_fit");
+            picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
             const auto catalog=lastPayload.value("destination_platforms").toArray();
             for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
             if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
@@ -871,6 +948,7 @@ public:
             server.setPlaceholderText("Paste your platform's server address");
             form.addRow("Platform", &platform);
             form.addRow("Stream key", &key);
+            form.addRow("Picture format", &picture);
             form.addRow("Name (optional)", &name);
             form.addRow(&advanced);
             form.addRow("Server address", &server);
@@ -895,7 +973,7 @@ public:
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
                 send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
-                                 {"server", server.text()}, {"key", key.text()}});
+                                 {"server", server.text()}, {"key", key.text()}, {"picture", picture.currentData().toString()}});
             key.clear();
         });
         connect(startButton, &QPushButton::clicked, this, [this] {
@@ -966,7 +1044,8 @@ public:
                     }
                 }
                 if (!error.isEmpty()) state = "ERROR";
-                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + "   " + state, list);
+                const QString format = dest.value("picture").toString("main");
+                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + (format == "main" ? "" : " · 9:16") + "   " + state, list);
                 item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
                 item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
                 item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
@@ -1000,6 +1079,7 @@ class ForgeDock : public QWidget {
     QTimer timer;
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
+    std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
     QJsonArray results;
     QJsonArray bulkStarts;
     int bulkTicks = 0;
@@ -1022,7 +1102,7 @@ public:
                       "QPushButton:hover { background: #ff7549; }");
         auto *layout = new QVBoxLayout(this);
         label = new QLabel("FDGCAST · FORGED DESTINY GAMING\nStart the local companion to connect.\n"
-                           "Secondary outputs reuse OBS main H.264 + AAC encoders.\n"
+                           "Destinations use the OBS picture or a vertical crop/fit.\n"
                            "Start the main OBS stream first. No automatic starts.", this);
         label->setWordWrap(true);
         layout->addWidget(label);
@@ -1244,6 +1324,9 @@ public:
 
     QString start(const QJsonObject &obj)
     {
+        const auto picture = obj.value("picture").toString("main");
+        if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit")
+            return "invalid_picture_format";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
         if (id.isEmpty() || id.size() > 40 || url.host().isEmpty() ||
@@ -1272,6 +1355,18 @@ public:
             return "requires_main_h264_aac_disable_enhanced_broadcasting";
         }
         auto d = std::make_unique<Destination>();
+        if (picture != "main") {
+            d->portrait = portraitVideos[picture].lock();
+            if (!d->portrait) {
+                d->portrait = std::make_shared<PortraitVideo>();
+                if (!d->portrait->create(video, picture == "vertical_fill")) {
+                    obs_output_release(mainOutput);
+                    return "vertical_setup_failed";
+                }
+                portraitVideos[picture] = d->portrait;
+            }
+            video = d->portrait->encoder;
+        }
         d->name = obj.value("name").toString();
         obs_data_t *settings = obs_data_create();
         QByteArray server = obj.value("server").toString().toUtf8();
@@ -1402,6 +1497,10 @@ public:
                 d.wasLive = false;
             }
             if (!active && d.stopping) d.stopping = false;
+            if (!active && !d.starting && !d.stopping && d.portrait) {
+                obs_output_set_video_encoder(d.output, nullptr);
+                d.portrait.reset();
+            }
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
@@ -1591,6 +1690,17 @@ static void frontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
+    obs_source_info portrait{};
+    portrait.id = "fdgcast_portrait";
+    portrait.type = OBS_SOURCE_TYPE_INPUT;
+    portrait.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
+    portrait.get_name = portraitName;
+    portrait.create = portraitCreate;
+    portrait.destroy = [](void *data) { delete static_cast<bool *>(data); };
+    portrait.get_width = [](void *) -> uint32_t { return 720; };
+    portrait.get_height = [](void *) -> uint32_t { return 1280; };
+    portrait.video_render = portraitRender;
+    obs_register_source(&portrait);
     return true;
 }
 

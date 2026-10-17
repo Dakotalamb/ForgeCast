@@ -1,6 +1,6 @@
 # FDGCast 1.0.0 release checklist
 
-Target: stable Windows x64 release. Current packages remain 0.9.0 Preview.
+Target: stable Windows x64 release. Current candidate is 1.0.0 RC1; stable release acceptance remains outstanding.
 This checklist supersedes the older release priorities in NEXT_STEPS.md.
 
 ## Included scope
@@ -8,7 +8,7 @@ This checklist supersedes the older release priorities in NEXT_STEPS.md.
 - Combined Twitch, YouTube and Kick chat; receive-only Facebook, Instagram,
   Rumble and experimental TikTok chat. Meta delivery requires the separately
   deployed and configured Hub. A saved credential is not proof of chat delivery.
-- Named multistream destinations using the shared OBS encoder and canvas.
+- Named multistream destinations with shared OBS video or 9:16 portrait crop/fit.
 - Stream Doctor, Audio Guard, preflight checks, local diagnostics and backups.
 - Saved paid Overlay Studio designs, independent revocable OBS URLs, chat,
   bounded emoji effects, alerts, text and manual goals. Core chat stays free.
@@ -45,7 +45,7 @@ that preview; new changes require their own validation.
 
 ## After 1.0.0
 
-Animated ending credits, independent encoders/vertical canvases, deeper hardware
+Animated ending credits, independently composed vertical scenes, deeper hardware
 profiling, advanced automation and team controls remain future work. They are
 not required to finish this release. TikTok remains explicitly experimental;
 unsupported platform sending/moderation is not advertised.

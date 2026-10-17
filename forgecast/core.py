@@ -212,5 +212,8 @@ def validate_destination(data):
         raise ValueError('Server URLs with query strings/fragments are unsupported; use the stream key field.')
     if not data.get('name', '').strip() or len(data['name']) > 80:
         raise ValueError('Enter a destination name (maximum 80 characters).')
-    return {k: data[k] for k in ('id', 'name', 'server')}
+    picture = data.get('picture', 'main')
+    if picture not in ('main', 'vertical_fill', 'vertical_fit'):
+        raise ValueError('Choose Same as OBS or a supported vertical picture format.')
+    return {**{k: data[k] for k in ('id', 'name', 'server')}, 'picture':picture}
 

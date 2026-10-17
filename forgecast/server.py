@@ -261,6 +261,8 @@ OUTPUT_ERRORS = {
     'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
     'invalid_destination':'This destination has invalid settings.',
     'destination_limit':'The maximum number of destinations has been reached.',
+    'vertical_setup_failed':'Vertical video could not be created. Stop this destination, check OBS encoder resources, then retry. The main stream is unchanged.',
+    'invalid_picture_format':'Choose Same as OBS or a supported vertical picture format, then save the destination again.',
 }
 
 
@@ -346,6 +348,10 @@ def preflight(s):
         if output.get('reconnecting'): result='Reconnecting — check Stream Doctor.'
         if s.output_errors.get(dest['id']): result=s.output_errors[dest['id']]
         checks.append({'label':dest['name'],'result':result})
+        if dest.get('picture', 'main') != 'main':
+            checks.append({'label':dest['name']+' picture', 'result':
+                'Vertical 720 × 1280 at 4500 kbps; '+('sides are cropped.' if dest['picture']=='vertical_fill' else 'whole picture with black space.')+
+                ' Uses an additional video encoder; check framing and viewer playback on the platform.', 'help_tab':'outputs'})
     for platform, status in s.statuses.items():
         checks.append({'label':platform.title()+' chat','result':status})
     if not s.config.get('destinations'): checks.append({'label':'Multistream destinations','result':'None saved — add destinations before Start All.'})

@@ -1,6 +1,6 @@
 # Current target: 1.0.0 stable
 
-Current installers remain 0.9.0 Preview. Follow
+Current candidate is 1.0.0 RC1; the existing hosted preview remains unchanged. Follow
 [the 1.0.0 checklist](RELEASE_1.0.0_CHECKLIST.md) for current release work and
 [Meta desktop setup](META_CHAT_DESKTOP.md) for the latest integration handoff.
 
