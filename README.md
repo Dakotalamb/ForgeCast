@@ -1,11 +1,13 @@
-# FDGCast 1.0.0 RC5
+# FDGCast 1.0.0
 
-Release candidate with a dedicated Vertical Studio, draw-on-scene camera crops,
+Windows release with a dedicated Vertical Studio, draw-on-scene camera crops,
 prominent automatic scene following, live-source previews and saved
 per-scene layouts, portrait crop/fit per destination, seven chat readers,
 saved Overlay Studio designs with paid live access, and clearer setup guidance.
-Actual broadcast acceptance remains outstanding before the stable 1.0.0 release.
-See [release candidate notes](docs/RELEASE_1.0.0_RC1.md).
+Includes picture selection for the service configured as OBS main stream.
+See [1.0.0 release notes and known limitations](docs/RELEASE_1.0.0.md).
+Live platform, reconnect and resource acceptance remain follow-up work; Meta
+requires separate Hub deployment/configuration and TikTok is experimental.
 
 See [Vertical Studio setup](docs/VERTICAL_STUDIO.md),
 [0.9.0 release notes](docs/RELEASE_0.9.0.md),

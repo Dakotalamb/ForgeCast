@@ -10,6 +10,8 @@ permissions:
 
 jobs:
   windows-installer:
+    permissions:
+      contents: write
     runs-on: windows-2022
     timeout-minutes: 90
     steps:
@@ -111,7 +113,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.0-RC5-UI-quality-check
+          name: FDGCast-1.0.0-UI-quality-check
           path: |
             qa/*.png
             qa-next/*.png
@@ -195,12 +197,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-1.0.0-rc.5-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-1.0.0-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-1.0.0-rc.5-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-1.0.0-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -210,10 +212,36 @@ jobs:
           if ($installedHash -ne $builtHash) { throw 'Installed OBS module differs from compiled module' }
           $companion = Get-ItemPropertyValue 'HKLM:\Software\Forged Destiny Gaming\FDGCast' 'CompanionPath'
           if (-not (Test-Path $companion)) { throw 'OBS Companion launch path was not registered' }
-      - name: Upload installer for private testing
+      - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.0-RC5-OBS-32.2.2-Windows-installer
-          path: release/FDGCast-1.0.0-rc.5-win-x64-setup.exe
+          name: FDGCast-1.0.0-OBS-32.2.2-Windows-installer
+          path: release/FDGCast-1.0.0-win-x64-setup.exe
           if-no-files-found: error
 
+      - name: Publish approved stable 1.0.0 release
+        if: github.ref == 'refs/heads/release/0.9.0' && github.event_name == 'push'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $version = python -c "from forgecast import __version__; print(__version__)"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read package version' }
+          if ($version -ne '1.0.0') { Write-Host 'Not the approved stable version; skipping publication.'; exit 0 }
+          $tag = 'v1.0.0'
+          $installer = 'release/FDGCast-1.0.0-win-x64-setup.exe'
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+          "$hash  FDGCast-1.0.0-win-x64-setup.exe" | Set-Content 'release/SHA256SUMS.txt' -Encoding utf8NoBOM
+          $manifest = Get-Content 'docs/latest-release.example.json' -Raw | ConvertFrom-Json
+          $manifest | Add-Member -NotePropertyName sha256 -NotePropertyValue $hash -Force
+          $manifest | ConvertTo-Json -Depth 6 | Set-Content 'release/latest.json' -Encoding utf8NoBOM
+          gh release view $tag --json tagName 2>$null | Out-Null
+          if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published binaries' }
+          gh release create $tag --target '${{ github.sha }}' --title 'FDGCast 1.0.0' --notes-file 'docs/RELEASE_1.0.0.md' --draft
+          if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
+          gh release upload $tag $installer 'release/SHA256SUMS.txt' 'release/latest.json'
+          if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed; release remains draft' }
+          gh release edit $tag --draft=false --latest
+          if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }

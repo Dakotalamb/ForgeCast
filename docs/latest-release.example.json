@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "version": "0.9.0-preview",
+  "version": "1.0.0",
   "platform": "windows-x64",
-  "download_url": "/downloads/FDGCast-0.9.0-preview-win-x64-setup.exe",
-  "notes": "New platform destinations, Rumble and experimental TikTok chat, saved paid overlays, Tools tab and chat auto-follow fixes.",
-  "sha256": "9d10f74f65035c90ab9b1912ed1c9602721d1a60b79248c3b43e7c96a4565136"
+  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.0/FDGCast-1.0.0-win-x64-setup.exe",
+  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.0",
+  "notes": "FDGCast 1.0.0: Vertical Studio with direct camera crops and per-scene layouts, main stream picture selection, multistream, combined chat, Stream Doctor and saved paid overlays. Meta requires Hub setup; TikTok remains experimental. See release notes for known limitations."
 }

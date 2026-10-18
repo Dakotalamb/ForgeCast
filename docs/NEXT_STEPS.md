@@ -1,6 +1,7 @@
-# Current target: 1.0.0 stable
+# FDGCast 1.0.0 follow-up
 
-Current candidate is 1.0.0 RC5; the existing hosted preview remains unchanged. Follow
+The owner approved the RC5 feature set for 1.0.0 publication with remaining live
+checks accepted as follow-up work. See [release notes](RELEASE_1.0.0.md). Follow
 [the 1.0.0 checklist](RELEASE_1.0.0_CHECKLIST.md) for current release work and
 [Meta desktop setup](META_CHAT_DESKTOP.md) for the latest integration handoff.
 

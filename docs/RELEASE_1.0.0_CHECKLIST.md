@@ -1,6 +1,8 @@
 # FDGCast 1.0.0 release checklist
 
-Target: stable Windows x64 release. Current candidate is 1.0.0 RC5; stable release acceptance remains outstanding.
+Target: Windows x64 1.0.0. Owner approved shipping the RC5 feature set as stable
+on October 17, 2026 (Eastern), with the unchecked live acceptance items below
+explicitly retained as follow-up work. Approval does not mark them passed.
 This checklist supersedes the older release priorities in NEXT_STEPS.md.
 
 ## Included scope
@@ -14,7 +16,7 @@ This checklist supersedes the older release priorities in NEXT_STEPS.md.
   bounded emoji effects, alerts, text and manual goals. Core chat stays free.
 - Clear connection status, noticeable events and optional chat badges.
 
-## Next work, in order
+## Follow-up acceptance and deployment
 
 - [ ] Deploy the Meta Hub changes with both chat flags disabled. Preserve the
   existing encryption key and pairing service; register callback/webhook URLs
@@ -38,10 +40,10 @@ This checklist supersedes the older release priorities in NEXT_STEPS.md.
   prepare 1.0.0 notes, package version, installer hash and matching update feed.
 - [ ] Publish the stable installer and update metadata together after acceptance.
 
-Automated baseline: the previous Meta preview passed 227 Python tests, Windows
-native compilation, Chromium UI checks, packaged dependency checks, desktop
-startup and installer smoke checks (run 39058290174). That evidence applies to
-that preview; new changes require their own validation.
+Automated baseline: RC5 passed 240 Python tests, native framing/routing tests,
+OBS 32.2.2 compilation, four browser suites, packaged startup and installer
+checks (run 39088300418). The stable package is rebuilt with matching 1.0.0
+metadata; its receipt is recorded in RELEASE_1.0.0.md after successful packaging.
 
 ## After 1.0.0
 
