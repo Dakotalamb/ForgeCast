@@ -5,6 +5,10 @@ static bool near(float a, float b) { return std::abs(a-b)<0.01f; }
 int main()
 {
     using fdgcast::portraitLayout;
+    const auto region=fdgcast::regionLayout(1920,1080,720,384,true,2.f,1.f,0.f);
+    if (!near(region.x+1920*region.scale,720)) return 8;
+    const auto centered=fdgcast::regionLayout(1920,1080,720,384,false,1.f,0.f,0.f);
+    if (!near(centered.x+1920*centered.scale/2,360)) return 9;
     auto fill = portraitLayout(1920,1080,true);
     auto fit = portraitLayout(1920,1080,false);
     if (!near(fill.scale*1080,1280) || fill.x>=0 || !near(fill.y,0)) return 1;

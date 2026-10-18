@@ -29,6 +29,7 @@ from .help import ARTICLES, LINKS
 from .operations import SUITE_ACTIONS, suite_action, chat_capabilities, refresh_origin_avatars, overlay_page, overlay_script, overlay_style, overlay_feed, overlay_link
 from .extra_chat import connect_extra, restore_extra
 from .meta_chat import MetaChat
+from .vertical import VerticalStudio, settings as vertical_settings, catalog as vertical_catalog, preview as vertical_preview
 from .entitlements import accept_entitlements, overlay_access
 from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
 from .platforms import PLATFORMS, CATALOG
@@ -77,6 +78,7 @@ class State:
         self.feedback_preview = None
         self.hub_events = []
         self.meta_chat = MetaChat(self)
+        self.vertical = VerticalStudio(self)
         self.kick_after = 0
         self.lock = asyncio.Lock()
         self.status_details = {}
@@ -292,6 +294,8 @@ def queue_outputs(s, command, dest_id=None):
     starting = cmd.get('destinations', []) if command == 'start_all' else [cmd['destination']] if command == 'start' else []
     if any(d.get('picture', 'main') != 'main' for d in starting) and 'portrait_v1' not in s.native_features:
         raise ValueError('The OBS module does not support vertical video yet. Close OBS and Companion, install the matching FDGCast update, then reopen OBS.')
+    if any(d.get('picture') == 'vertical_studio' for d in starting) and 'vertical_studio_v1' not in s.native_features:
+        raise ValueError('Install the matching FDGCast update and restart OBS to use Vertical Studio layouts.')
     s.commands.append(cmd)
     ids = [d['id'] for d in s.config.get('destinations', [])] if command.endswith('_all') else [dest_id]
     s.history.command(command, ids)
@@ -354,7 +358,7 @@ def preflight(s):
         checks.append({'label':dest['name'],'result':result})
         if dest.get('picture', 'main') != 'main':
             checks.append({'label':dest['name']+' picture', 'result':
-                'Vertical 720 × 1280 at 4500 kbps; '+('sides are cropped.' if dest['picture']=='vertical_fill' else 'whole picture with black space.')+
+                'Vertical 720 × 1280 at 4500 kbps; '+('saved per-scene Vertical Studio layout.' if dest['picture']=='vertical_studio' else 'sides are cropped.' if dest['picture']=='vertical_fill' else 'whole picture with black space.')+
                 ' Uses an additional video encoder; check framing and viewer playback on the platform.', 'help_tab':'outputs'})
     for platform, status in s.statuses.items():
         checks.append({'label':platform.title()+' chat','result':status})
@@ -514,12 +518,14 @@ async def secure(request, handler):
                              'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'"})
     if request.path == '/overlay/studio':
         response.headers['Content-Security-Policy'] = response.headers['Content-Security-Policy'].replace("frame-ancestors 'none'","frame-ancestors 'self'")
+    if request.path == '/':
+        response.headers['Content-Security-Policy']=response.headers['Content-Security-Policy'].replace("img-src 'self'", "img-src 'self' data:")
     return response
 
 
 async def page(request):
     return web.FileResponse(WEB/({'/':'index.html', '/app.js':'app.js', '/style.css':'style.css',
-                                  '/studio-editor.js':'studio-editor.js', '/favicon.png':'favicon.png'}[request.path]))
+                                  '/studio-editor.js':'studio-editor.js', '/vertical-studio.js':'vertical-studio.js', '/favicon.png':'favicon.png'}[request.path]))
 
 
 async def platform_icon(request):
@@ -585,6 +591,17 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op == 'vertical_save': return web.json_response(await s.vertical.save(data))
+        if op == 'vertical_reset':
+            uid=data.get('scene_id'); value=vertical_settings(s)
+            if not isinstance(uid,str): raise ValueError('Choose a scene.')
+            value['layouts'].pop(uid,None);s.config['vertical_studio']=value;s.save()
+            return web.json_response({'ok':True,'settings':value})
+        if op == 'vertical_assign':
+            uid=data.get('id');dest=next((d for d in s.config.get('destinations',[]) if d['id']==uid),None)
+            if not dest: raise ValueError('Add a destination first.')
+            if any(o.get('id')==uid and (o.get('active') or o.get('busy')) for o in s.native_outputs): raise ValueError('Stop this destination before changing its picture format.')
+            dest['picture']='vertical_studio';s.save();return web.json_response({'ok':True})
         if op in STUDIO_ACTIONS:
             return web.json_response(await studio_action(s,op,data))
         if op in PRODUCTIVITY_ACTIONS:
@@ -789,7 +806,7 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     features = data.get('features', [])
-    s.native_features = {'portrait_v1'} if isinstance(features, list) and 'portrait_v1' in features else set()
+    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1') if isinstance(features,list) and v in features}
     s.native_outputs = data.get('outputs', [])[:8]
     s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
     if isinstance(data.get('audio'), dict):
@@ -820,6 +837,7 @@ async def native(request):
     # OBS owns the operator view. Send only bounded, non-credential telemetry to
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
+        'vertical_studio':vertical_settings(s),
         'destination_platforms': PLATFORMS, 'updates': s.updates.public(),
         'commands': commands, 'version':__version__, 'coordination':s.coordination(), 'output_presets':s.config.get('output_presets',{}), 'summaries':session_summaries(s), 'capabilities':chat_capabilities(s),
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') in {'chat','superchat','supersticker','membership'} or (s.config.get('merge_events') and m.get('kind') in set(s.config.get('event_kinds', DEFAULT_EVENTS)))][-200:],
@@ -1267,7 +1285,7 @@ def create_app(state):
     app['state'] = state
     app['web_path'] = WEB
     app.cleanup_ctx.append(lifecycle)
-    for path in ('/', '/app.js', '/studio-editor.js', '/style.css', '/favicon.png'):
+    for path in ('/', '/app.js', '/studio-editor.js', '/vertical-studio.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
     app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
@@ -1281,6 +1299,8 @@ def create_app(state):
     app.router.add_get('/overlay/feed', overlay_feed)
     app.router.add_get('/api/overlay-link', overlay_link)
     app.router.add_get('/api/state', get_state)
+    app.router.add_get('/api/vertical', vertical_catalog)
+    app.router.add_post('/api/vertical/preview', vertical_preview)
     app.router.add_get('/api/pairing', pairing)
     app.router.add_get('/api/obs-connection', obs_connection)
     app.router.add_post('/api/action', action)

@@ -24,11 +24,12 @@ for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCa
 bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
 $('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
-const pictureLabels={main:'Same as OBS',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture'};
+const pictureLabels={main:'Same as OBS',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture',vertical_studio:'Vertical Studio · saved scene layouts'};
 function pictureChanged(){
  const mode=$('destinationPicture').value;
  $('pictureHelp').textContent=mode==='main'?'Uses your current OBS picture, resolution and bitrate. No extra video encoder.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
- $('pictureGuide').hidden=mode==='main';$('pictureGuide').className=mode;
+ if(mode==='vertical_studio')$('pictureHelp').textContent='Uses saved layouts from the Vertical Studio tab. Arrange existing camera/game sources per OBS scene, save layouts there, then use Start All.';
+ $('pictureGuide').hidden=mode==='main'||mode==='vertical_studio';$('pictureGuide').className=mode;
 }
 $('destinationPicture').onchange=pictureChanged;pictureChanged();
 function resetDestinationForm(){
@@ -163,6 +164,7 @@ function renderHistory(s){
 }
 function render(s) {
  if(typeof renderStudio==='function')renderStudio(s);
+ if(typeof renderVerticalStatus==='function')renderVerticalStatus(s);
  renderDestinationCatalog(s.destination_platforms);
  state=s;
  $('rumbleChatStatus').textContent=s.statuses.rumble||'Not connected';
@@ -170,7 +172,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC2';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC3';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';

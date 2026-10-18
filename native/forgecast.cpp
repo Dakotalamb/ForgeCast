@@ -62,6 +62,7 @@
 #include <QWidget>
 #include "chat-scroll-follow.hpp"
 #include "portrait-layout.hpp"
+#include "vertical-render.hpp"
 #include <map>
 #include <memory>
 #include <cstring>
@@ -79,17 +80,19 @@ MODULE_EXPORT const char *obs_module_description(void)
 // A video-only wrapper reads the current program source each frame, including
 // OBS transitions. Audio continues through the existing main AAC encoder.
 static const char *portraitName(void *) { return "FDGCast portrait picture"; }
-static void *portraitCreate(obs_data_t *settings, obs_source_t *)
+static void *portraitCreate(obs_data_t *settings, obs_source_t *source)
 {
-    return new bool(obs_data_get_bool(settings, "fill"));
+    return new PortraitData(obs_data_get_bool(settings,"fill"),obs_data_get_bool(settings,"studio"),source);
 }
 static void portraitRender(void *data, gs_effect_t *)
 {
     auto *program = obs_get_output_source(0);
     if (!program) return;
+    auto *picture=static_cast<PortraitData *>(data);
+    if(picture->studio){picture->render(program);obs_source_release(program);return;}
     const auto layout = fdgcast::portraitLayout(static_cast<float>(obs_source_get_width(program)),
                                                static_cast<float>(obs_source_get_height(program)),
-                                               *static_cast<bool *>(data));
+                                               picture->fill);
     if (layout.scale > 0) {
         gs_matrix_push();
         gs_matrix_translate3f(layout.x, layout.y, 0.f);
@@ -104,7 +107,7 @@ struct PortraitVideo {
     obs_view_t *view = nullptr;
     obs_encoder_t *encoder = nullptr;
     bool added = false;
-    bool create(obs_encoder_t *main, bool fill)
+    bool create(obs_encoder_t *main, bool fill, bool studio=false)
     {
         obs_video_info info{};
         if (!obs_get_video_info(&info)) return false;
@@ -117,6 +120,7 @@ struct PortraitVideo {
         if (!view) return false;
         auto *settings = obs_data_create();
         obs_data_set_bool(settings, "fill", fill);
+        obs_data_set_bool(settings, "studio", studio);
         auto *source = obs_source_create_private("fdgcast_portrait", "FDGCast portrait", settings);
         obs_data_release(settings);
         if (!source) return false;
@@ -938,6 +942,7 @@ public:
             picture.addItem("Same as OBS", "main");
             picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
             picture.addItem("Vertical · show whole picture", "vertical_fit");
+            picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
             picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
             const auto catalog=lastPayload.value("destination_platforms").toArray();
             for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
@@ -1325,7 +1330,7 @@ public:
     QString start(const QJsonObject &obj)
     {
         const auto picture = obj.value("picture").toString("main");
-        if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit")
+        if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit" && picture != "vertical_studio")
             return "invalid_picture_format";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
@@ -1359,7 +1364,7 @@ public:
             d->portrait = portraitVideos[picture].lock();
             if (!d->portrait) {
                 d->portrait = std::make_shared<PortraitVideo>();
-                if (!d->portrait->create(video, picture == "vertical_fill")) {
+                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio")) {
                     obs_output_release(mainOutput);
                     return "vertical_setup_failed";
                 }
@@ -1521,13 +1526,14 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
             if (reply->error() == QNetworkReply::NoError) {
                 for (int i = 0; i < sentResults && !results.isEmpty(); ++i) results.removeAt(0);
                 auto payload = QJsonDocument::fromJson(reply->readAll()).object();
+                std::atomic_store(&verticalStudioConfig,std::make_shared<const QJsonObject>(payload.value("vertical_studio").toObject()));
                 updateInfo=payload.value("updates").toObject();
                 updateButton->setVisible(updateInfo.value("show_notice").toBool());
                 updateButton->setText("Update to "+updateInfo.value("latest").toObject().value("version").toString());
@@ -1696,7 +1702,12 @@ bool obs_module_load(void)
     portrait.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
     portrait.get_name = portraitName;
     portrait.create = portraitCreate;
-    portrait.destroy = [](void *data) { delete static_cast<bool *>(data); };
+    portrait.destroy = [](void *data) { delete static_cast<PortraitData *>(data); };
+    portrait.video_tick = [](void *data,float) {static_cast<PortraitData *>(data)->tick();};
+    portrait.enum_active_sources = [](void *data,obs_source_enum_proc_t callback,void *param) {
+        auto *p=static_cast<PortraitData *>(data);std::lock_guard<std::recursive_mutex> lock(p->mutex);
+        for(const auto &entry:p->children)callback(p->self,entry.second,param);
+    };
     portrait.get_width = [](void *) -> uint32_t { return 720; };
     portrait.get_height = [](void *) -> uint32_t { return 1280; };
     portrait.video_render = portraitRender;

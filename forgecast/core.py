@@ -213,7 +213,7 @@ def validate_destination(data):
     if not data.get('name', '').strip() or len(data['name']) > 80:
         raise ValueError('Enter a destination name (maximum 80 characters).')
     picture = data.get('picture', 'main')
-    if picture not in ('main', 'vertical_fill', 'vertical_fit'):
+    if picture not in ('main', 'vertical_fill', 'vertical_fit', 'vertical_studio'):
         raise ValueError('Choose Same as OBS or a supported vertical picture format.')
     return {**{k: data[k] for k in ('id', 'name', 'server')}, 'picture':picture}
 
