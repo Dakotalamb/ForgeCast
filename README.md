@@ -1,5 +1,7 @@
 # FDGCast 1.0.0
 
+[Download Windows installer and release notes](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.0).
+
 Windows release with a dedicated Vertical Studio, draw-on-scene camera crops,
 prominent automatic scene following, live-source previews and saved
 per-scene layouts, portrait crop/fit per destination, seven chat readers,

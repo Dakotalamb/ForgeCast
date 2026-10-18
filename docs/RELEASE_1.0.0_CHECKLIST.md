@@ -36,9 +36,11 @@ This checklist supersedes the older release priorities in NEXT_STEPS.md.
   recording, Audio Guard and Stream Doctor using the real OBS setup.
 - [ ] Test installation over the previous preview: pairing, protected keys,
   saved designs and preferences survive; uninstall/reinstall guidance is clear.
-- [ ] Resolve failures, run the full Windows build and regression checks, then
-  prepare 1.0.0 notes, package version, installer hash and matching update feed.
-- [ ] Publish the stable installer and update metadata together after acceptance.
+- [x] Run the stable Windows build and regression checks; prepare 1.0.0 notes,
+  package version, installer hash and matching updater manifest.
+- [x] Publish the stable installer, checksum and updater manifest together as
+  GitHub release v1.0.0, per owner approval of the remaining follow-up checks.
+- [ ] Deploy the published latest.json to the Hub updater endpoint.
 
 Automated baseline: RC5 passed 240 Python tests, native framing/routing tests,
 OBS 32.2.2 compilation, four browser suites, packaged startup and installer
