@@ -65,3 +65,19 @@ Stop controls remain available. Native capabilities refresh on every poll.
 
 Unavailable buttons use the normal disabled cursor. Only an action actually
 in progress uses a progress cursor and an accessible busy state.
+
+### RC2 automated validation and installer
+
+232 Python tests passed. Windows portrait framing tests, native OBS 32.2.2
+compilation, all three Chromium interface suites, packaged service/dependency
+checks, desktop startup and installer placement checks passed in:
+https://github.com/Dakotalamb/ForgeCast/actions/runs/39083642640
+
+Tested source: c5b808d35b33f592f07bf131ee4b2a0b698e7032.
+Installer: `FDGCast-1.0.0-rc.2-win-x64-setup.exe`.
+Size: 22677066 bytes.
+SHA-256: `a79ac3bcf10ddf09461e3b6f13e998129605567b7528b07760f63bbe4499aa3d`.
+
+Stable 1.0.0 and the hosted update feed were not published. Actual OBS portrait
+playback, platform chat delivery, deployed Hub/Meta setup and real upgrade
+acceptance remain outstanding. Automated compilation is not a live video test.
