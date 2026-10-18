@@ -55,3 +55,13 @@ feeds retain the existing Hub entitlement requirement. TikTok remains experiment
 Close OBS and Companion before installing. Saved pairing, keys and designs remain
 in the existing data directory. No stable release or website deployment is performed
 by building this candidate.
+
+## RC2 follow-up
+
+The current candidate is 1.0.0 RC2. It requires the native module to advertise
+portrait support before starting a vertical destination. An older module gives
+a clear update instruction instead of silently streaming landscape video.
+Stop controls remain available. Native capabilities refresh on every poll.
+
+Unavailable buttons use the normal disabled cursor. Only an action actually
+in progress uses a progress cursor and an accessible busy state.

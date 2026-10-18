@@ -64,6 +64,7 @@ class State:
         self.events = deque(maxlen=100)
         self.commands = deque(maxlen=30)
         self.native_seen = 0
+        self.native_features = set()
         self.native_outputs = []
         self.output_errors = {}
         self.stats = {}
@@ -288,6 +289,9 @@ def queue_outputs(s, command, dest_id=None):
         if not dest: raise ValueError('Destination not found.')
         cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
     if len(s.commands) >= 30: raise ValueError('Command queue is full.')
+    starting = cmd.get('destinations', []) if command == 'start_all' else [cmd['destination']] if command == 'start' else []
+    if any(d.get('picture', 'main') != 'main' for d in starting) and 'portrait_v1' not in s.native_features:
+        raise ValueError('The OBS module does not support vertical video yet. Close OBS and Companion, install the matching FDGCast update, then reopen OBS.')
     s.commands.append(cmd)
     ids = [d['id'] for d in s.config.get('destinations', [])] if command.endswith('_all') else [dest_id]
     s.history.command(command, ids)
@@ -784,6 +788,8 @@ async def native(request):
     s = request.app['state']
     data = await request.json()
     s.native_seen = time.time()
+    features = data.get('features', [])
+    s.native_features = {'portrait_v1'} if isinstance(features, list) and 'portrait_v1' in features else set()
     s.native_outputs = data.get('outputs', [])[:8]
     s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
     if isinstance(data.get('audio'), dict):

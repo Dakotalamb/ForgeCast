@@ -48,6 +48,7 @@ async function main(){
   assert.match(await page.locator('#pictureHelp').textContent(),/whole scene.*black space/);
   assert.equal(await page.locator('#pictureGuide').getAttribute('class'),'vertical_fit');
   assert.match(await page.locator('#startAll').getAttribute('title'),/every checked/);
+  assert.equal(await page.locator('#startAll').evaluate(e=>getComputedStyle(e).cursor),'not-allowed');
   await page.selectOption('#destinationPicture','main');
   await page.selectOption('#destinationPlatform','custom');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);

@@ -14,7 +14,7 @@ async function api(path, data) {
 async function action(op, data={}) { return api('/api/action', {op,...data}); }
 function el(tag, text, cls) { const e=document.createElement(tag); if(text!==undefined) e.textContent=text; if(cls) e.className=cls; return e; }
 function button(text, fn) { const e=el('button',text); e.onclick=()=>run(fn,e); return e; }
-async function run(fn, target) { if(target) target.disabled=true; try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target) target.disabled=false; if(state)renderProductivity(state); } }
+async function run(fn, target) { if(target){target.disabled=true;target.setAttribute('aria-busy','true');} try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target){target.disabled=false;target.removeAttribute('aria-busy');} if(state)renderProductivity(state); } }
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
@@ -170,7 +170,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC1';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC2';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';

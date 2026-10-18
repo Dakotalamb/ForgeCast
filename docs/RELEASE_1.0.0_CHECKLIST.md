@@ -1,6 +1,6 @@
 # FDGCast 1.0.0 release checklist
 
-Target: stable Windows x64 release. Current candidate is 1.0.0 RC1; stable release acceptance remains outstanding.
+Target: stable Windows x64 release. Current candidate is 1.0.0 RC2; stable release acceptance remains outstanding.
 This checklist supersedes the older release priorities in NEXT_STEPS.md.
 
 ## Included scope

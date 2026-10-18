@@ -1,9 +1,9 @@
-# FDGCast 1.0.0 RC1
+# FDGCast 1.0.0 RC2
 
 Release candidate with portrait crop/fit per destination, seven chat readers,
 saved Overlay Studio designs with paid live access, and clearer setup guidance.
 Actual broadcast acceptance remains outstanding before the stable 1.0.0 release.
-See [RC1 notes](docs/RELEASE_1.0.0_RC1.md).
+See [release candidate notes](docs/RELEASE_1.0.0_RC1.md).
 
 See [0.9.0 release notes](docs/RELEASE_0.9.0.md),
 [1.0.0 release checklist](docs/RELEASE_1.0.0_CHECKLIST.md),

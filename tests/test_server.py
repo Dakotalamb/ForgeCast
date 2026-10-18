@@ -79,6 +79,16 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('private API URL',checks['Rumble chat']['result'])
         self.assertIn('experimental',checks['Tiktok chat']['result'])
 
+    async def test_native_capability_is_refreshed_and_old_module_clears_it(self):
+        headers={**self.headers,'Authorization':'Bearer '+self.state.native_key}
+        for value,expected in [(['portrait_v1'],{'portrait_v1'}),([],set()),(['unknown'],set()),('portrait_v1',set())]:
+            response=await self.client.post('/native/poll',headers=headers,json={'features':value,'outputs':[]})
+            self.assertEqual(response.status,200)
+            self.assertEqual(self.state.native_features,expected)
+        self.state.native_features={'portrait_v1'}
+        response=await self.client.post('/native/poll',headers=headers,json={'outputs':[]})
+        self.assertEqual(response.status,200);self.assertEqual(self.state.native_features,set())
+
     async def test_doctor_notification_setting_validates_boolean(self):
         self.state.demo=False
         response=await self.client.post('/api/action',headers=self.headers,json={'op':'doctor_settings','notifications':'false'})
