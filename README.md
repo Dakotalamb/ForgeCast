@@ -1,6 +1,7 @@
-# FDGCast 1.0.0 RC3
+# FDGCast 1.0.0 RC4
 
-Release candidate with a dedicated Vertical Studio, live-source previews, saved
+Release candidate with a dedicated Vertical Studio, draw-on-scene camera crops,
+prominent automatic scene following, live-source previews and saved
 per-scene layouts, portrait crop/fit per destination, seven chat readers,
 saved Overlay Studio designs with paid live access, and clearer setup guidance.
 Actual broadcast acceptance remains outstanding before the stable 1.0.0 release.

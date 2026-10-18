@@ -4,19 +4,30 @@ Open the dedicated Vertical Studio tab in Companion. Connect OBS WebSocket in
 Connections, then refresh OBS sources. No extra OBS docks, camera captures or
 Browser Sources are created.
 
-1. Choose the OBS scene to arrange, or leave Follow the live OBS scene enabled.
-2. Choose Full screen, Whole picture, Camera top, Camera bottom, Camera corner,
-   Two cameras or Freeform. Presets are starting points, not face tracking.
-3. Select a picture layer and choose its existing OBS game/camera source. Full
-   OBS scene reuses the scene picture. Empty sources remain empty until assigned.
-4. Drag/resize on the vertical preview or enter pixel positions/sizes. Adjust
-   fill/fit, zoom, crop position, mirroring, visibility, layer order and background.
-5. Save scene layout. Save applies to live vertical outputs; unsaved edits only
-   change the preview. Scene-specific layouts fall back to the saved default,
-   then to a full-scene center crop. Unsaved edits pause editor scene following.
-6. Select a saved destination and click Use Vertical Studio. Stop that
-   destination before changing its picture format. Start it in Destinations or
-   use Start All, which starts the main OBS stream and checked destinations.
+1. Leave **Follow horizontal scene — ON** enabled (the default). It is prominent
+   at the top; switch it off explicitly to choose a different scene to edit.
+2. Choose a layout such as Camera top, Camera bottom or Camera corner.
+3. Click **Mark camera area**, then drag a box around your camera on the large
+   horizontal preview. The selected picture uses that part of the horizontal
+   scene. Move the box or resize its bottom-right corner to adjust the crop.
+4. Drag/resize the result in the vertical preview to place it. **Add crop** adds
+   another region from the same horizontal picture. **Use whole picture** clears
+   the selected crop. No separate camera selection is needed.
+5. Save scene layout. Saved layouts follow OBS scenes. Unsaved edits only change
+   the preview and pause editor following until saved or reverted.
+6. Choose a destination and click Use Vertical Studio. Start it in Destinations
+   or use Start All. Stop a destination before changing its picture format.
+
+The optional Advanced picture controls retain source selection, exact pixel
+positions/sizes, zoom, mirroring, visibility and layer ordering. Selecting an
+existing source still reuses it; it does not create another camera device.
+
+Crops store normalized coordinates and follow the horizontal scene dimensions.
+Only content present in the horizontal picture can be extracted. A small camera
+area is enlarged with that picture's available detail; direct source selection
+in Advanced remains an option for independent camera framing/detail. Cropping
+avoids extra camera-source setup and extra camera preview requests, but lower
+GPU use is not guaranteed: vertical rendering and encoding still have a cost.
 
 Both previews use sampled images from OBS, defaulting to one update per second.
 The OBS preview shows the current live scene; the vertical preview composes the

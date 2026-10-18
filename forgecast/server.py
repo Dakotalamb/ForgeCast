@@ -296,6 +296,9 @@ def queue_outputs(s, command, dest_id=None):
         raise ValueError('The OBS module does not support vertical video yet. Close OBS and Companion, install the matching FDGCast update, then reopen OBS.')
     if any(d.get('picture') == 'vertical_studio' for d in starting) and 'vertical_studio_v1' not in s.native_features:
         raise ValueError('Install the matching FDGCast update and restart OBS to use Vertical Studio layouts.')
+    cropped=any(r.get('crop',{}) not in ({},{'x':0,'y':0,'width':1,'height':1}) for l in vertical_settings(s)['layouts'].values() for r in l.get('regions',[]))
+    if any(d.get('picture')=='vertical_studio' for d in starting) and cropped and 'vertical_crop_v1' not in s.native_features:
+        raise ValueError('Install the matching FDGCast update and restart OBS to use horizontal-scene crops.')
     s.commands.append(cmd)
     ids = [d['id'] for d in s.config.get('destinations', [])] if command.endswith('_all') else [dest_id]
     s.history.command(command, ids)
@@ -806,7 +809,7 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     features = data.get('features', [])
-    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1') if isinstance(features,list) and v in features}
+    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1') if isinstance(features,list) and v in features}
     s.native_outputs = data.get('outputs', [])[:8]
     s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
     if isinstance(data.get('audio'), dict):

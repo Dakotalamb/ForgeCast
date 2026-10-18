@@ -67,6 +67,20 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/vertical/preview',headers=self.headers,json={'sources':['camera']})
         self.assertEqual(r.status,200);self.assertEqual(r.headers['Cache-Control'],'no-store')
         r=await self.client.post('/api/vertical/preview',headers={'Host':'127.0.0.1:17654'},json={});self.assertEqual(r.status,401)
+    async def test_scene_crops_persist_validate_and_require_matching_native(self):
+        await self.s.vertical.discover();value=layout()
+        value['regions'][1]['source']='program'
+        value['regions'][1]['crop']={'x':0.7,'y':0.6,'width':0.25,'height':0.35}
+        await self.s.vertical.save({'scene_id':'scene-one','layout':value})
+        self.assertEqual(self.s.config['vertical_studio']['layouts']['scene-one']['regions'][1]['crop'],value['regions'][1]['crop'])
+        for crop in ({'x':0.9,'width':0.5},{'width':0},{'x':float('nan')},'invalid'):
+            bad=layout();bad['regions'][1]['crop']=crop
+            with self.assertRaises(ValueError):validate_layout(bad)
+        self.s.config['destinations']=[dict(id='one',name='Test',picture='vertical_studio')]
+        self.s.vault.set('stream:one','KEY');self.s.native_seen=time.time();self.s.native_features={'portrait_v1','vertical_studio_v1'}
+        with self.assertRaisesRegex(ValueError,'horizontal-scene crops'):queue_outputs(self.s,'start','one')
+        self.s.native_features.add('vertical_crop_v1');queue_outputs(self.s,'start','one')
+        self.assertEqual(self.s.commands.pop()['action'],'start')
     async def test_studio_requires_new_native_and_assignment_keeps_credentials(self):
         self.s.config['destinations']=[dict(id='one',name='Test',server='rtmp://example.com/live',picture='vertical_studio')]
         self.s.vault.set('stream:one','KEEP');self.s.native_seen=time.time();self.s.native_features={'portrait_v1'}

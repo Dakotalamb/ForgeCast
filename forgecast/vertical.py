@@ -44,8 +44,14 @@ def validate_layout(value):
         x, y = number(row,'x',0,0,719), number(row,'y',0,0,1279)
         width, height = number(row,'width',720,20,720), number(row,'height',1280,20,1280)
         if x+width>720 or y+height>1280: raise ValueError('Keep each layer inside the vertical canvas.')
+        crop = row.get('crop', {})
+        if not isinstance(crop,dict): raise ValueError('Invalid scene crop.')
+        cx,cy=number(crop,'x',0,0,0.995),number(crop,'y',0,0,0.995)
+        cw,ch=number(crop,'width',1,0.005,1),number(crop,'height',1,0.005,1)
+        if cx+cw>1.000001 or cy+ch>1.000001: raise ValueError('Keep the crop inside the horizontal picture.')
         clean.append(dict(name=name,source=source,fit=fit,mirror=mirror,visible=visible,x=x,y=y,width=width,height=height,
-                          zoom=number(row,'zoom',1,1,4),pan_x=number(row,'pan_x',0,-1,1),pan_y=number(row,'pan_y',0,-1,1)))
+                          zoom=number(row,'zoom',1,1,4),pan_x=number(row,'pan_x',0,-1,1),pan_y=number(row,'pan_y',0,-1,1),
+                          crop=dict(x=cx,y=cy,width=cw,height=ch)))
     return dict(preset=preset,background=background,regions=clean)
 
 

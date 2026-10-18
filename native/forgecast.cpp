@@ -1526,7 +1526,7 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;

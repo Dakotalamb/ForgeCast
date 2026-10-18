@@ -38,7 +38,7 @@ struct PortraitData {
             if(r.value("visible").toBool(true)&&!uid.isEmpty()&&uid!="program")wanted.insert(uid);
         }
         for(auto it=children.begin();it!=children.end();){
-            if(!wanted.contains(it->first)){clearChild(it->second);it=children.erase(it);}else ++it;
+            if(!wanted.contains(it->first)||obs_source_removed(it->second)){clearChild(it->second);it=children.erase(it);}else ++it;
         }
         for(const auto &uid:wanted)if(!children.count(uid)){
             const auto bytes=uid.toUtf8();auto *source=obs_get_source_by_uuid(bytes.constData());if(!source)continue;
@@ -58,13 +58,23 @@ struct PortraitData {
             auto *source=uid=="program"?program:found==children.end()?nullptr:found->second;if(!source)continue;
             const int w=r.value("width").toInt(720),h=r.value("height").toInt(1280);if(w<20||h<20)continue;
             const float sw=static_cast<float>(obs_source_get_width(source)),sh=static_cast<float>(obs_source_get_height(source));
-            const auto p=fdgcast::regionLayout(sw,sh,static_cast<float>(w),static_cast<float>(h),r.value("fit").toString()!="fit",static_cast<float>(r.value("zoom").toDouble(1)),static_cast<float>(r.value("pan_x").toDouble()),static_cast<float>(r.value("pan_y").toDouble()));
+            const auto crop=r.value("crop").toObject();
+            const float cx=static_cast<float>(crop.value("x").toDouble()),cy=static_cast<float>(crop.value("y").toDouble());
+            const float cw=sw*static_cast<float>(crop.value("width").toDouble(1)),ch=sh*static_cast<float>(crop.value("height").toDouble(1));
+            const auto p=fdgcast::regionLayout(cw,ch,static_cast<float>(w),static_cast<float>(h),r.value("fit").toString()!="fit",static_cast<float>(r.value("zoom").toDouble(1)),static_cast<float>(r.value("pan_x").toDouble()),static_cast<float>(r.value("pan_y").toDouble()));
             if(p.scale<=0)continue;const bool mirror=r.value("mirror").toBool();
             gs_viewport_push();gs_projection_push();gs_matrix_push();
             gs_set_viewport(r.value("x").toInt(),r.value("y").toInt(),w,h);
+            const int left=static_cast<int>(std::ceil(std::max(0.f,p.x))),top=static_cast<int>(std::ceil(std::max(0.f,p.y)));
+            gs_rect clip{r.value("x").toInt()+left,r.value("y").toInt()+top,
+                std::max(0,static_cast<int>(std::floor(std::min(static_cast<float>(w),p.x+cw*p.scale)))-left),
+                std::max(0,static_cast<int>(std::floor(std::min(static_cast<float>(h),p.y+ch*p.scale)))-top)};
+            gs_set_scissor_rect(&clip);
             gs_ortho(0.f,static_cast<float>(w),0.f,static_cast<float>(h),-100.f,100.f);
-            gs_matrix_identity();gs_matrix_translate3f(p.x+(mirror?sw*p.scale:0.f),p.y,0.f);
-            gs_matrix_scale3f(mirror?-p.scale:p.scale,p.scale,1.f);obs_source_video_render(source);
+            gs_matrix_identity();gs_matrix_translate3f(p.x+(mirror?cw*p.scale:0.f),p.y,0.f);
+            gs_matrix_scale3f(mirror?-p.scale:p.scale,p.scale,1.f);
+            gs_matrix_translate3f(-cx*sw,-cy*sh,0.f);obs_source_video_render(source);
+            gs_set_scissor_rect(nullptr);
             gs_matrix_pop();gs_projection_pop();gs_viewport_pop();
         }
     }
