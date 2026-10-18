@@ -1,4 +1,4 @@
-# FDGCast 1.0.0 RC4
+# FDGCast 1.0.0 RC5
 
 Release candidate with a dedicated Vertical Studio, draw-on-scene camera crops,
 prominent automatic scene following, live-source previews and saved

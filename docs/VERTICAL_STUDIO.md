@@ -121,3 +121,14 @@ active/reconnecting output protection, failed-start blocking, stale-profile bind
 protection, route authorization/capabilities and service-neutral UI controls.
 Windows compilation, packaging and browser checks run in the release workflow.
 Real OBS broadcast and reconnect acceptance remain required before stable 1.0.0.
+
+
+RC5 Windows validation passed:
+- Source: `7145b007fb401a60025c0d6dfbb375d04126585d`.
+- Build: https://github.com/Dakotalamb/ForgeCast/actions/runs/39088300418
+- Installer: `FDGCast-1.0.0-rc.5-win-x64-setup.exe` (22,706,615 bytes).
+- SHA-256: `ef686e6175c14bba9bb116c4861683c72e2312a1fb3f4f2bdb1b4dcbee7eea99`.
+- Native geometry/routing tests, OBS 32.2.2 compilation, Python regression,
+  four browser suites, packaging and installed-module startup/location checks passed.
+- This is a release candidate, not stable 1.0.0. Real broadcasts and GPU/resource
+  benchmarks remain unverified. No stable update feed or Hub deployment changed.
