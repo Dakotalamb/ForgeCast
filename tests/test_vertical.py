@@ -93,3 +93,22 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         self.s.native_outputs=[{'id':'one','active':True}]
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'vertical_assign','id':'one'});self.assertEqual(r.status,400)
         self.s.demo=True
+
+    async def test_main_picture_uses_native_service_and_blocks_live_or_old_modules(self):
+        self.s.demo=False;self.s.native_seen=time.time()
+        async def choose(picture='vertical_studio'):
+            return await self.client.post('/api/action',headers=self.headers,json={'op':'main_picture','picture':picture})
+        r=await choose();self.assertEqual(r.status,400)
+        self.s.native_features={'main_picture_v1'}
+        self.s.main_output={'id':'main','name':'OBS main stream · YouTube','picture':'main','vertical_supported':True}
+        r=await choose();self.assertEqual(r.status,200)
+        command=self.s.commands.pop();self.assertEqual(command['action'],'main_picture');self.assertEqual(command['picture'],'vertical_studio')
+        self.assertNotIn('key',str(command));self.assertNotIn('server',command)
+        self.assertEqual(self.s.public()['main_output']['name'],'OBS main stream · YouTube')
+        for flag in ('active','busy'):
+            self.s.main_output[flag]=True;r=await choose();self.assertEqual(r.status,400);self.s.main_output.pop(flag)
+        self.s.main_output['vertical_supported']=False
+        r=await choose();self.assertEqual(r.status,400)
+        r=await choose('main');self.assertEqual(r.status,200)
+        r=await choose('bogus');self.assertEqual(r.status,400)
+        self.s.native_seen=0;self.assertIsNone(self.s.public()['main_output'])

@@ -30,6 +30,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Portrait test compilation failed' }
           ./build-portrait/Release/portrait-layout-test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Portrait framing tests failed' }
+          ./build-portrait/Release/main-picture-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Main stream routing tests failed' }
       - name: Configure OBS 32.2.2 native build
         shell: pwsh
         run: |
@@ -38,6 +40,7 @@ jobs:
           Copy-Item 'native/forgecast.cpp' (Join-Path $template 'src/plugin-main.cpp') -Force
           Copy-Item 'native/chat-scroll-follow.hpp' (Join-Path $template 'src/chat-scroll-follow.hpp') -Force
           Copy-Item 'native/portrait-layout.hpp' (Join-Path $template 'src/portrait-layout.hpp') -Force
+          Copy-Item 'native/main-picture.hpp' (Join-Path $template 'src/main-picture.hpp') -Force
           Copy-Item 'native/vertical-render.hpp' (Join-Path $template 'src/vertical-render.hpp') -Force
           Copy-Item 'packaging/ci-native-CMakeLists.txt' (Join-Path $template 'CMakeLists.txt') -Force
           $locale = Join-Path $template 'data/locale'
@@ -108,7 +111,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.0-RC4-UI-quality-check
+          name: FDGCast-1.0.0-RC5-UI-quality-check
           path: |
             qa/*.png
             qa-next/*.png
@@ -192,12 +195,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-1.0.0-rc.4-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-1.0.0-rc.5-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-1.0.0-rc.4-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-1.0.0-rc.5-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -210,7 +213,7 @@ jobs:
       - name: Upload installer for private testing
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.0-RC4-OBS-32.2.2-Windows-installer
-          path: release/FDGCast-1.0.0-rc.4-win-x64-setup.exe
+          name: FDGCast-1.0.0-RC5-OBS-32.2.2-Windows-installer
+          path: release/FDGCast-1.0.0-rc.5-win-x64-setup.exe
           if-no-files-found: error
 

@@ -223,6 +223,7 @@ class State:
     def public(self):
         return dict(overlay_access=overlay_access(self), overlay_designs=designs(self), audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
+                    main_output=self.main_output if time.time()-self.native_seen < 5 else None,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
                     stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sound=self.config.get("doctor_sound",False), doctor_sensitivity=self.doctor.sensitivity,
@@ -256,6 +257,8 @@ def combined_events(s):
 OUTPUT_ERRORS = {
     'start_main_obs_stream_first':'Start your main OBS stream first.',
     'main_output_unavailable':'OBS main output is unavailable.',
+    'main_picture_setup_failed':'Main stream picture setup failed. Check the main stream card and OBS encoder settings.',
+    'main_picture_unsupported':'Vertical main stream needs RTMP/RTMPS. Turn off Enhanced Broadcasting / multitrack video in OBS.',
     'requires_main_h264_aac_disable_enhanced_broadcasting':'Use H.264 video and AAC audio on the main stream; disable Enhanced Broadcasting.',
     'service_create_failed':'OBS could not create this destination service.',
     'output_create_failed':'OBS could not create this stream output.',
@@ -594,6 +597,19 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op == 'main_picture':
+            picture=data.get('picture')
+            if picture not in ('main','vertical_studio'): raise ValueError('Choose Horizontal or Vertical Studio.')
+            if time.time()-s.native_seen>5 or 'main_picture_v1' not in s.native_features:
+                raise ValueError('Install the matching FDGCast update and restart OBS to choose the main stream picture.')
+            if not s.main_output: raise ValueError('Waiting for OBS main stream status.')
+            if s.main_output.get('active') or s.main_output.get('busy'):
+                raise ValueError('Stop the main stream before changing its picture.')
+            if picture=='vertical_studio' and not s.main_output.get('vertical_supported'):
+                raise ValueError('Use standard RTMP/RTMPS and turn off Enhanced Broadcasting / multitrack video in OBS first.')
+            if len(s.commands)>=30: raise ValueError('Command queue is full.')
+            s.commands.append(dict(id=uuid.uuid4().hex,action='main_picture',picture=picture,created=time.time()))
+            return web.json_response({'ok':True,'pending':True})
         if op == 'vertical_save': return web.json_response(await s.vertical.save(data))
         if op == 'vertical_reset':
             uid=data.get('scene_id'); value=vertical_settings(s)
@@ -809,7 +825,7 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     features = data.get('features', [])
-    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1') if isinstance(features,list) and v in features}
+    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1','main_picture_v1') if isinstance(features,list) and v in features}
     s.native_outputs = data.get('outputs', [])[:8]
     s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
     if isinstance(data.get('audio'), dict):

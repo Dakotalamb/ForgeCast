@@ -3,6 +3,7 @@
 #include <obs-module.h>
 #include <obs-audio-controls.h>
 #include <obs-frontend-api.h>
+#include <util/config-file.h>
 #include <QApplication>
 #include <QDesktopServices>
 #include <QByteArray>
@@ -150,6 +151,8 @@ struct PortraitVideo {
         if (view) obs_view_destroy(view);
     }
 };
+
+#include "main-picture.hpp"
 
 struct Destination {
     std::shared_ptr<PortraitVideo> portrait;
@@ -939,7 +942,7 @@ public:
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
             QComboBox platform(&dialog), picture(&dialog);
-            picture.addItem("Same as OBS", "main");
+            picture.addItem("Horizontal · OBS scene", "main");
             picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
             picture.addItem("Vertical · show whole picture", "vertical_fit");
             picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
@@ -1085,6 +1088,9 @@ class ForgeDock : public QWidget {
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
     std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
+    MainPictureRoute mainPictureRoute;
+    QString mainPicture = "main";
+    QString mainPictureError;
     QJsonArray results;
     QJsonArray bulkStarts;
     int bulkTicks = 0;
@@ -1099,6 +1105,8 @@ class ForgeDock : public QWidget {
 public:
     ForgeDock() : QWidget(), network(this)
     {
+        QSettings preferences("Forged Destiny Gaming", "ForgeCast");
+        if (preferences.value("main-picture").toString()=="vertical_studio") mainPicture="vertical_studio";
         setObjectName("forgecastDock");
         setStyleSheet("QWidget#forgecastDock { background: #151719; color: #f4f4f4; }"
                       "QLabel { color: #f4f4f4; padding: 10px; }"
@@ -1255,6 +1263,60 @@ public:
         destinations.clear();
     }
 
+    bool mainBusy() const
+    {
+        auto *output=obs_frontend_get_streaming_output();
+        const bool busy=obs_frontend_streaming_active() || (output && obs_output_active(output));
+        if(output) obs_output_release(output);
+        return busy;
+    }
+
+    bool mainCompatible() const
+    {
+        auto *config=obs_frontend_get_profile_config();
+        if(config && (config_get_bool(config,"Stream1","EnableMultitrackVideo") ||
+            config_get_int(config,"Stream1","WHIPSimulcastTotalLayers")>1)) return false;
+        auto *service=obs_frontend_get_streaming_service(); // frontend-owned, borrowed
+        const char *protocol=service ? obs_service_get_protocol(service) : nullptr;
+        return protocol && (strcmp(protocol,"RTMP")==0 || strcmp(protocol,"RTMPS")==0);
+    }
+
+    void prepareMainPicture()
+    {
+        if(mainPicture!="vertical_studio") return;
+        mainPictureRoute.restore();
+        auto *output=obs_frontend_get_streaming_output();
+        auto *video=output ? obs_output_get_video_encoder(output) : nullptr;
+        auto *audio=output ? obs_output_get_audio_encoder(output,0) : nullptr;
+        std::shared_ptr<PortraitVideo> picture;
+        mainPictureError.clear();
+        const auto studioConfig=std::atomic_load(&verticalStudioConfig);
+        if(!studioConfig || !studioConfig->contains("layouts")) {
+            mainPictureError="Open Companion and wait for Vertical Studio layouts to sync before starting the vertical main stream.";
+        } else if(!mainCompatible() || !video || !audio || strcmp(obs_encoder_get_codec(video),"h264") ||
+            strcmp(obs_encoder_get_codec(audio),"aac") || obs_output_get_video_encoder2(output,1)) {
+            mainPictureError="Vertical main stream needs standard RTMP/RTMPS, H.264 and AAC. Turn off Enhanced Broadcasting / multitrack video in OBS.";
+        } else {
+            picture=portraitVideos["vertical_studio"].lock();
+            if(!picture) {
+                picture=std::make_shared<PortraitVideo>();
+                if(!picture->create(video,false,true)) picture.reset();
+            }
+            if(!picture) mainPictureError="Vertical main picture could not be created. Check the OBS log and encoder availability.";
+        }
+        if(output && mainPictureRoute.apply(output,picture)) {
+            if(picture) portraitVideos["vertical_studio"]=picture;
+        } else mainPictureError="Could not select the main stream picture. Stop the stream and retry.";
+        if(output) obs_output_release(output);
+        if(!mainPictureError.isEmpty()) {
+            label->setText(mainPictureError);
+            results.append(QJsonObject{{"destination_id","main"},{"status","main_picture_setup_failed"}});
+        }
+        // Also runs after a synchronous failed start. Active/reconnecting streams
+        // keep the portrait view and encoder until OBS is fully stopped.
+        QTimer::singleShot(0,this,[this] { if(!mainBusy()) mainPictureRoute.restore(); });
+    }
+
     QJsonObject audioSnapshot()
     {
         QJsonArray rows;
@@ -1352,7 +1414,8 @@ public:
         obs_output_t *mainOutput = obs_frontend_get_streaming_output();
         if (!mainOutput)
             return "main_output_unavailable";
-        obs_encoder_t *video = obs_output_get_video_encoder(mainOutput);
+        obs_encoder_t *video = mainPictureRoute.horizontal();
+        if(!video) video = obs_output_get_video_encoder(mainOutput);
         obs_encoder_t *audio = obs_output_get_audio_encoder(mainOutput, 0);
         if (!video || !audio || std::strcmp(obs_encoder_get_codec(video), "h264") != 0 ||
             std::strcmp(obs_encoder_get_codec(audio), "aac") != 0) {
@@ -1418,6 +1481,16 @@ public:
                 else message="Audio fix could not be applied. Check your selected source in Companion.";
                 doctorDock->message(message);
             }
+        } else if (action == "main_picture") {
+            const QString picture=cmd.value("picture").toString();
+            if(picture!="main" && picture!="vertical_studio") result="invalid_picture_format";
+            else if(mainBusy() || !bulkStarts.isEmpty()) result="already_active_or_busy";
+            else if(picture=="vertical_studio" && !mainCompatible()) {result="main_picture_unsupported";mainPictureError="Vertical main stream needs RTMP/RTMPS with Enhanced Broadcasting / multitrack video off.";}
+            else {
+                mainPictureRoute.restore();mainPicture=picture;mainPictureError.clear();
+                QSettings preferences("Forged Destiny Gaming","ForgeCast");preferences.setValue("main-picture",mainPicture);
+                result="main_picture_saved";
+            }
         } else if (action == "start") {
             result = start(cmd.value("destination").toObject());
         } else if (action == "start_all") {
@@ -1451,6 +1524,7 @@ public:
 
     void tick()
     {
+        if(!mainBusy()) mainPictureRoute.restore();
         if (!bulkStarts.isEmpty()) {
             if (obs_frontend_streaming_active()) {
                 const auto selected = bulkStarts; bulkStarts = QJsonArray(); bulkTicks = 0;
@@ -1482,13 +1556,21 @@ public:
         QByteArray token = tokenFile.readAll().trimmed();
         if (token.size() < 32 || token.size() > 128)
             return;
-        QJsonObject mainTelemetry;
+        auto *service=obs_frontend_get_streaming_service();
+        auto *serviceSettings=service ? obs_service_get_settings(service) : nullptr;
+        QString serviceName=serviceSettings ? QString::fromUtf8(obs_data_get_string(serviceSettings,"service")).left(80) : QString();
+        if(serviceSettings) obs_data_release(serviceSettings);
+        if(serviceName.isEmpty()) serviceName="Custom service";
+        QJsonObject mainTelemetry{{"id","main"},{"name","OBS main stream · "+serviceName},
+            {"active",false},{"busy",false},{"picture",mainPicture},
+            {"vertical_supported",mainCompatible()},{"detail",mainPictureError}};
         auto *mainStream = obs_frontend_get_streaming_output();
         if (mainStream) {
-            mainTelemetry = QJsonObject{{"id","main"},{"name","OBS main"},{"active",obs_frontend_streaming_active()},
+            const QJsonObject counters{{"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
                 {"reconnecting",obs_output_reconnecting(mainStream)},
                 {"dropped",obs_output_get_frames_dropped(mainStream)},{"frames",obs_output_get_total_frames(mainStream)},
                 {"bytes",static_cast<double>(obs_output_get_total_bytes(mainStream))}};
+            for(auto it=counters.begin();it!=counters.end();++it) mainTelemetry.insert(it.key(),it.value());
             obs_output_release(mainStream);
         }
         QJsonArray outputs;
@@ -1526,7 +1608,7 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
@@ -1672,6 +1754,7 @@ static void arrangeFDGCastDocks()
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
+    if (event == OBS_FRONTEND_EVENT_STREAMING_STARTING && dock) dock->prepareMainPicture();
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {

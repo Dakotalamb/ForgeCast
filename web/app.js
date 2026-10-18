@@ -24,10 +24,10 @@ for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCa
 bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
 $('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
-const pictureLabels={main:'Same as OBS',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture',vertical_studio:'Vertical Studio · saved scene layouts'};
+const pictureLabels={main:'Horizontal · OBS scene',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture',vertical_studio:'Vertical Studio · saved scene layouts'};
 function pictureChanged(){
  const mode=$('destinationPicture').value;
- $('pictureHelp').textContent=mode==='main'?'Uses your current OBS picture, resolution and bitrate. No extra video encoder.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
+ $('pictureHelp').textContent=mode==='main'?'Uses your horizontal OBS scene. Shares its encoder with other horizontal destinations; when the main stream is vertical, horizontal destinations use a separate shared encoder.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
  if(mode==='vertical_studio')$('pictureHelp').textContent='Uses saved layouts from the Vertical Studio tab. Arrange existing camera/game sources per OBS scene, save layouts there, then use Start All.';
  $('pictureGuide').hidden=mode==='main'||mode==='vertical_studio';$('pictureGuide').className=mode;
 }
@@ -146,6 +146,17 @@ function outputStatus(s,d){
  if(current?.active)return {text:'LIVE',level:'healthy'};
  return {text:'OFFLINE',level:'offline'};
 }
+$('mainStreamSave').onclick=()=>run(async()=>{await action('main_picture',{picture:$('mainStreamPicture').value});$('mainStreamStatus').textContent='Requested · waiting for OBS confirmation…';},$('mainStreamSave'));
+let mainPictureSeen=null;
+function renderMainStream(s){
+ const m=s.main_output,available=Boolean(s.native_connected&&m),busy=Boolean(m?.active||m?.busy);
+ $('mainStreamName').textContent=m?.name||'OBS main stream';
+ if(m&&mainPictureSeen!==m.picture){mainPictureSeen=m.picture;$('mainStreamPicture').value=m.picture||'main';}
+ $('mainStreamPicture').disabled=!available||busy;
+ $('mainStreamSave').disabled=!available||busy;
+ $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
+ $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':m.detail||(busy?'LIVE / CONNECTING · stop before changing picture.':('Applied: '+(m.picture==='vertical_studio'?'Vertical Studio':'Horizontal · OBS scene')+'. '+(!m.vertical_supported?'Vertical needs RTMP/RTMPS with Enhanced Broadcasting / multitrack video off.':'Ready for the next stream.')));
+}
 let lastDest='';
 function renderHistory(s){
  const history=s.stream_history||{}, rows=history.events||[], filter=$('historySession');
@@ -172,7 +183,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC4';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'RELEASE CANDIDATE · 1.0.0 RC5';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -186,6 +197,7 @@ function render(s) {
  $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Platform tokens stay private. Your pairing code is available only in this local connection form.';
  $('health').replaceChildren(...((s.issues.length||s.stream_history?.issues?.length)?[...(s.stream_history?.issues||[]),...s.issues].map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
  $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
+ renderMainStream(s);
  renderSuite(s);
  $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
  const hubStatus=s.hub_connection==='connected'?'Connected':s.hub_connection==='attention'?'Connection needs attention':s.hub_paired?'Checking connection…':'Not paired';

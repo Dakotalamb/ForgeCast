@@ -15,8 +15,31 @@ Browser Sources are created.
    the selected crop. No separate camera selection is needed.
 5. Save scene layout. Saved layouts follow OBS scenes. Unsaved edits only change
    the preview and pause editor following until saved or reverted.
-6. Choose a destination and click Use Vertical Studio. Start it in Destinations
-   or use Start All. Stop a destination before changing its picture format.
+6. Choose **OBS main stream · [your service]** or another destination and click
+   Use Vertical Studio. In Destinations, the main stream has its own picture
+   selector and **Apply main stream picture** button. Wait for **Applied:
+   Vertical Studio** before starting. No duplicate account or stream key needed.
+7. Start OBS streaming normally, or use Start All with checked destinations.
+   The main stream can be vertical while added destinations send horizontal,
+   or the main stream can stay horizontal while other destinations send vertical.
+   Each destination sends one picture. Stop the main stream (including connection,
+   delay and reconnect activity) before changing its picture.
+
+Main stream selection is saved by the native plugin on this PC. It applies to
+whichever service is configured in OBS, rather than hardcoding Twitch. The
+initial vertical main-stream path requires standard RTMP/RTMPS, H.264/AAC and
+Enhanced Broadcasting / multitrack video off. Open Companion first so saved
+layouts sync. If vertical setup fails, video is detached before OBS starts so
+it cannot silently broadcast the horizontal picture instead. Return to Horizontal
+in Destinations to restore normal behavior. Main service, credentials, audio/VOD
+tracks, main canvas and recording settings are not changed.
+
+Horizontal destinations retain the original OBS scene encoder when the main
+stream is vertical. Vertical Studio destinations share the vertical main encoder;
+there is no second Studio encoder for identical layouts. OBS restores the original
+main video binding after the stream stops. A portrait stream still uses rendering
+and encoding resources. Cropping the existing scene avoids another capture device,
+but no GPU reduction or hardware benchmark is claimed.
 
 The optional Advanced picture controls retain source selection, exact pixel
 positions/sizes, zoom, mirroring, visibility and layer ordering. Selecting an
@@ -88,3 +111,13 @@ Build: https://github.com/Dakotalamb/ForgeCast/actions/runs/39086614304
 Source: 1825042e20d2d89777fca95eb8caf6e9705938d5.
 Installer: `FDGCast-1.0.0-rc.4-win-x64-setup.exe`. Size: 22699593 bytes.
 SHA-256: `07c137c6787ece5ffd7de5e993638fa1a462c7b2df3d73a28a388988c5c94b01`.
+
+
+## RC5 validation scope
+
+RC5 adds the main output picture selector and native pre-start video binding.
+Focused tests cover ownership/restoration, simultaneous horizontal encoder access,
+active/reconnecting output protection, failed-start blocking, stale-profile binding
+protection, route authorization/capabilities and service-neutral UI controls.
+Windows compilation, packaging and browser checks run in the release workflow.
+Real OBS broadcast and reconnect acceptance remain required before stable 1.0.0.
