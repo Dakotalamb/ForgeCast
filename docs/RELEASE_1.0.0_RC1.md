@@ -1,6 +1,7 @@
 # FDGCast 1.0.0 release candidates
 
-Current candidate: **1.0.0 RC3**, with a dedicated Vertical Studio tab, sampled
+Current candidate: **1.0.0 RC4**, with draw-on-horizontal camera crops, prominent default-on scene following,
+a dedicated Vertical Studio tab, sampled
 live-source previews, layout presets and saved per-scene native composition.
 See [Vertical Studio setup and validation](VERTICAL_STUDIO.md). The sections below
 describe the earlier RC1/RC2 baseline; RC3 adds the separate scene layout editor.

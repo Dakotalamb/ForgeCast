@@ -68,3 +68,23 @@ Installer: `FDGCast-1.0.0-rc.3-win-x64-setup.exe`.
 Size: 22697350 bytes.
 SHA-256: `480fdf0e69134b16dea521b71342aaeabffaa005574c6fda2cdc10a17e9cfd81`.
 Stable 1.0.0 and the hosted update feed remain unchanged.
+
+## RC4: simpler horizontal-scene crops
+
+Current candidate is 1.0.0 RC4. Camera regions can be drawn, moved and resized on
+the horizontal preview, then arranged vertically. Follow horizontal scene is on
+by default, prominently labeled ON/OFF; choosing a scene cannot silently disable
+it. Source selection and detailed controls are optional, collapsed by default.
+Crop previews use the horizontal snapshot without separate camera requests.
+Native crop capability prevents older modules silently ignoring crop settings.
+
+Seven focused backend checks passed locally. Windows workflow 39086614304 passed
+239 Python tests, native compilation, browser checks including actual crop
+drawing/default follow/hidden advanced controls, packaged startup and installer
+checks. The desktop screenshot was reviewed. Actual creator broadcast playback
+and GPU savings were not measured.
+
+Build: https://github.com/Dakotalamb/ForgeCast/actions/runs/39086614304
+Source: 1825042e20d2d89777fca95eb8caf6e9705938d5.
+Installer: `FDGCast-1.0.0-rc.4-win-x64-setup.exe`. Size: 22699593 bytes.
+SHA-256: `07c137c6787ece5ffd7de5e993638fa1a462c7b2df3d73a28a388988c5c94b01`.
