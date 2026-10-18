@@ -1,4 +1,11 @@
-# FDGCast 1.0.0 RC1
+# FDGCast 1.0.0 release candidates
+
+Current candidate: **1.0.0 RC3**, with a dedicated Vertical Studio tab, sampled
+live-source previews, layout presets and saved per-scene native composition.
+See [Vertical Studio setup and validation](VERTICAL_STUDIO.md). The sections below
+describe the earlier RC1/RC2 baseline; RC3 adds the separate scene layout editor.
+
+## RC1 baseline
 
 Windows x64, OBS Studio 32.2.2. Release candidate for acceptance testing;
 the hosted stable update feed is unchanged.

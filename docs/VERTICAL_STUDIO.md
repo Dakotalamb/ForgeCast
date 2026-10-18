@@ -40,3 +40,20 @@ are reused and kept active only while required by the running Studio view.
 Blurred backgrounds, automatic face tracking, arbitrary rotations/masks and
 separate vertical audio mixing are not included. The original OBS composition
 is not edited. Check actual platform framing and playback before public use.
+
+## RC3 build validation
+
+Six focused backend checks passed locally. The Windows release workflow passed
+238 Python tests, native framing checks and OBS 32.2.2 compilation, the existing
+browser suites and the targeted Vertical Studio editor check, packaged startup
+and installer placement checks. Desktop/mobile screenshots were reviewed.
+The editor check covers source composition, camera zoom/mirroring, saving, scene
+following, unsaved-edit protection, pausing and inactive-tab preview behavior.
+No real creator broadcast or GPU resource measurement was performed.
+
+Build: https://github.com/Dakotalamb/ForgeCast/actions/runs/39085323798
+Source: b9456f69453ceef9c9ea3f0a9212037608714f5d.
+Installer: `FDGCast-1.0.0-rc.3-win-x64-setup.exe`.
+Size: 22697350 bytes.
+SHA-256: `480fdf0e69134b16dea521b71342aaeabffaa005574c6fda2cdc10a17e9cfd81`.
+Stable 1.0.0 and the hosted update feed remain unchanged.
