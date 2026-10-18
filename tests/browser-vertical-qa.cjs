@@ -15,12 +15,12 @@ async function main(){
   await page.goto(url);await page.locator('[data-tab=vertical]').click();await page.waitForFunction(()=>document.querySelector('#vsScene').value==='scene-one');
   await page.locator('[data-vs-preset=camera_top]').click();await page.selectOption('#vsLayers','1');await page.selectOption('#vsSource','camera');
   await page.waitForFunction(()=>{const p=document.querySelector('#vsCanvas').getContext('2d').getImageData(360,180,1,1).data;return p[0]>150&&p[2]<100;});
-  await page.locator('#vsZoom').fill('1.5');await page.locator('#vsZoom').dispatchEvent('change');await page.locator('#vsMirror').check();
+  await page.locator('#vsZoom').evaluate(e=>{e.value='1.5';e.dispatchEvent(new Event('change',{bubbles:true}));});await page.locator('#vsMirror').check();
   await page.locator('#vsSave').click();await page.waitForFunction(()=>document.querySelector('#vsSaved').textContent.startsWith('Saved'));
   assert.equal(layouts['scene-one'].regions[1].source,'camera');assert.equal(layouts['scene-one'].regions[1].zoom,1.5);assert.equal(layouts['scene-one'].regions[1].mirror,true);
   const output=path.resolve(__dirname,'../qa-next');fs.mkdirSync(output,{recursive:true});await page.screenshot({path:path.join(output,'vertical-studio-desktop.png'),fullPage:true});
   current='scene-two';await page.waitForFunction(()=>document.querySelector('#vsScene').value==='scene-two');assert.equal(await page.locator('#vsSource').inputValue(),'program');
-  await page.locator('#vsBackground').fill('#202020');await page.locator('#vsBackground').dispatchEvent('input');current='scene-one';await page.waitForFunction(()=>document.querySelector('#vsSaved').textContent.includes('save or revert'));assert.equal(await page.locator('#vsScene').inputValue(),'scene-two');
+  await page.locator('#vsBackground').evaluate(e=>{e.value='#202020';e.dispatchEvent(new Event('input',{bubbles:true}));});current='scene-one';await page.waitForFunction(()=>document.querySelector('#vsSaved').textContent.includes('save or revert'));assert.equal(await page.locator('#vsScene').inputValue(),'scene-two');
   await page.locator('#vsPause').click();const before=previewCalls;await page.waitForTimeout(1300);assert.ok(previewCalls<=before+1,'Pause stops preview polling');
   await page.locator('[data-tab=live]').click();const hidden=previewCalls;await page.waitForTimeout(1300);assert.ok(previewCalls<=hidden+1,'Inactive tab stops preview polling');
   await page.locator('[data-tab=vertical]').click();await page.setViewportSize({width:390,height:844});assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile overflow');await page.screenshot({path:path.join(output,'vertical-studio-mobile.png'),fullPage:true});assert.deepEqual(errors,[]);
