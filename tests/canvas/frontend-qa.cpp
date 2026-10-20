@@ -69,6 +69,11 @@ static void event(enum obs_frontend_event value,void *)
     if(value==OBS_FRONTEND_EVENT_FINISHED_LOADING)QTimer::singleShot(1000,qApp,verifyCanvas);
     if(value==OBS_FRONTEND_EVENT_EXIT){verticalCanvasClosing=true;verticalCanvas.reset();}
 }
-bool obs_module_load(void){registerPortraitSource();return true;}
+bool obs_module_load(void){
+    registerPortraitSource();
+    QFile marker(qEnvironmentVariable("FDGCAST_CANVAS_QA_REPORT"));
+    if(marker.open(QIODevice::WriteOnly))marker.write("{\"success\":false,\"error\":\"OBS loaded the test module but has not finished frontend initialization\"}");
+    return true;
+}
 void obs_module_post_load(void){obs_frontend_add_event_callback(event,nullptr);}
 void obs_module_unload(void){obs_frontend_remove_event_callback(event,nullptr);verticalCanvas.reset();}

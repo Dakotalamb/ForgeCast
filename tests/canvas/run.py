@@ -9,10 +9,12 @@ import subprocess
 p=argparse.ArgumentParser();p.add_argument('--runtime',type=Path,required=True);p.add_argument('--module',type=Path,required=True);p.add_argument('--out',type=Path,required=True);a=p.parse_args()
 runtime=a.runtime.resolve();out=a.out.resolve();out.mkdir(parents=True,exist_ok=True)
 config=runtime/'config'/'obs-studio';profile=config/'basic'/'profiles'/'FDGCastQA';profile.mkdir(parents=True,exist_ok=True)
-(config/'global.ini').write_text('[General]\nFirstRun=false\nLanguage=en-US\n[Basic]\nProfile=FDGCastQA\nProfileDir=FDGCastQA\nSceneCollection=FDGCastQA\nSceneCollectionFile=FDGCastQA\n',encoding='utf-8')
+(config/'global.ini').write_text('[General]\nLastVersion=537001986\nLanguage=en-US\n',encoding='utf-8')
+(config/'user.ini').write_text('[General]\nFirstRun=true\n[Basic]\nProfile=FDGCastQA\nProfileDir=FDGCastQA\nSceneCollection=FDGCastQA\nSceneCollectionFile=FDGCastQA\n',encoding='utf-8')
 (profile/'basic.ini').write_text('[General]\nName=FDGCastQA\n[Video]\nBaseCX=1920\nBaseCY=1080\nOutputCX=1920\nOutputCY=1080\nFPSType=0\nFPSCommon=30\n[Output]\nMode=Simple\n[SimpleOutput]\nStreamEncoder=x264\nStreamAudioEncoder=aac\nVBitrate=3000\nABitrate=160\n',encoding='utf-8')
 (profile/'service.json').write_text(json.dumps({'type':'rtmp_common','settings':{'service':'Twitch','server':'auto','key':'QA-NOT-A-REAL-KEY'}}),encoding='utf-8')
 (runtime/'portable_mode.txt').touch()
+(runtime/'data'/'obs-plugins'/'fdgcast-canvas-qa').mkdir(parents=True,exist_ok=True)
 module=runtime/'obs-plugins'/'64bit'/'fdgcast-canvas-qa.dll';shutil.copy2(a.module,module)
 try:
     for stage in (1,2):
@@ -27,4 +29,7 @@ try:
         assert code==0,('OBS exit',stage,code)
     print('PASS: real OBS frontend registered one selectable canvas; selection and UUID survived restart; selected-canvas removal blocked; main video unchanged.')
 finally:
+    for folder in ('logs','crashes'):
+        source=config/folder
+        if source.exists():shutil.copytree(source,out/('obs-'+folder),dirs_exist_ok=True)
     module.unlink(missing_ok=True)
