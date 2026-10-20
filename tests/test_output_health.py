@@ -25,6 +25,7 @@ class OutputHealthTests(unittest.TestCase):
         self.assertEqual(m.sample([row(bytes=0)],5)[0]['transmission_state'],'starting')
         self.assertEqual(m.sample([row(bytes=5000)],20)[0]['transmission_state'],'starting')
         self.assertEqual(m.sample([row(active=False)],21)[0]['transmission_state'],'offline')
+        self.assertEqual(m.sample([row(active=True,busy=True,intentional_stop=True)],22)[0]['transmission_state'],'stopping')
     def test_outputs_are_independent_and_credentials_are_not_forwarded(self):
         m=OutputMonitor();m.sample([row(),row(id='second')],0)
         value=m.sample([row(bytes=999,key='SECRET',server='PRIVATE'),row(id='second')],1)

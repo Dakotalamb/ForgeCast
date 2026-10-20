@@ -166,6 +166,7 @@ function renderMainStream(s){
  if(m&&mainPictureSeen!==m.picture){mainPictureSeen=m.picture;$('mainStreamPicture').value=m.picture||'main';}
  $('mainStreamPicture').disabled=!available||busy;
  $('mainStreamSave').disabled=!available||busy;
+ $('mainStreamPicture').closest('label').hidden=!m?.vertical_supported;$('mainStreamSave').hidden=!m?.vertical_supported;
  $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
  $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':(m.detail||((transportNames[m.transmission_state]||'CHECKING')+' · '+outputEvidence(m)+'. '+(busy?'Stop before changing output settings. ':'')+'OBS controls the main picture; main-stream vertical routing remains disabled.'));
  $('mainAddVertical').disabled=s.demo||busy||!available;

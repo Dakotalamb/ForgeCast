@@ -37,6 +37,7 @@ class OutputMonitor:
                 if sent > 0: progress = now
             if row.get('error') and not row.get('active'): status = 'error'
             elif row.get('reconnecting'): status = 'reconnecting'
+            elif row.get('intentional_stop') and row.get('busy'): status = 'stopping'
             elif not row.get('active'): status = 'stopping' if row.get('busy') else 'offline'
             elif progress is not None and now-progress < 5: status = 'sending'
             elif now-(progress if progress is not None else since) >= 5: status = 'stalled'

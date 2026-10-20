@@ -1297,8 +1297,8 @@ public:
             return "invalid_destination";
         auto *mainService=obs_frontend_get_streaming_service();
         if(mainService) {
-            const QString mainKey=QString::fromUtf8(obs_service_get_key(mainService));
-            const QUrl mainUrl(QString::fromUtf8(obs_service_get_url(mainService)));
+            const QString mainKey=QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_STREAM_KEY));
+            const QUrl mainUrl(QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_SERVER_URL)));
             if(!mainKey.isEmpty() && mainKey==obj.value("key").toString() &&
                 mainUrl.host().compare(url.host(),Qt::CaseInsensitive)==0)
                 return "duplicate_ingest";
