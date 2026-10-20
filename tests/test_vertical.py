@@ -76,13 +76,13 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         for crop in ({'x':0.9,'width':0.5},{'width':0},{'x':float('nan')},'invalid'):
             bad=layout();bad['regions'][1]['crop']=crop
             with self.assertRaises(ValueError):validate_layout(bad)
-        self.s.config['destinations']=[dict(id='one',name='Test',picture='vertical_studio')]
+        self.s.config['destinations']=[dict(id='one',name='Test',platform='youtube',picture='vertical_studio')]
         self.s.vault.set('stream:one','KEY');self.s.native_seen=time.time();self.s.native_features={'portrait_v1','vertical_studio_v1'}
         with self.assertRaisesRegex(ValueError,'horizontal-scene crops'):queue_outputs(self.s,'start','one')
         self.s.native_features.add('vertical_crop_v1');queue_outputs(self.s,'start','one')
         self.assertEqual(self.s.commands.pop()['action'],'start')
     async def test_studio_requires_new_native_and_assignment_keeps_credentials(self):
-        self.s.config['destinations']=[dict(id='one',name='Test',server='rtmp://example.com/live',picture='vertical_studio')]
+        self.s.config['destinations']=[dict(id='one',name='Test',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio')]
         self.s.vault.set('stream:one','KEEP');self.s.native_seen=time.time();self.s.native_features={'portrait_v1'}
         with self.assertRaisesRegex(ValueError,'Vertical Studio'):queue_outputs(self.s,'start','one')
         self.s.native_features.add('vertical_studio_v1');queue_outputs(self.s,'start','one')
@@ -115,10 +115,10 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_additional_vertical_keeps_original_and_never_copies_key(self):
         self.s.demo=False
-        original=dict(id='wide',name='Wide',server='rtmp://example.com/live',picture='main',platform='custom')
+        original=dict(id='wide',name='Wide',server='rtmp://example.com/live',picture='main',platform='youtube')
         self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:wide','ORIGINAL')
         async def save(**extra):
-            return await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='phone',name='Phone',platform='custom',server='rtmp://example.com/live',picture='vertical_studio',paired_with='wide',**extra))
+            return await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='phone',name='Phone',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio',paired_with='wide',**extra))
         r=await save();self.assertEqual(r.status,400)
         r=await save(key='ORIGINAL');self.assertEqual(r.status,400)
         self.assertEqual(self.s.config['destinations'],[original])
@@ -131,8 +131,31 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_add_obs_picture_alongside_existing_vertical_preserves_it(self):
         self.s.demo=False
-        original=dict(id='phone',name='Phone',platform='custom',server='rtmp://example.com/live',picture='vertical_studio')
+        original=dict(id='phone',name='Phone',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio')
         self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:phone','PHONE')
-        r=await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='wide',name='Wide',platform='custom',server='rtmp://example.com/live',picture='main',paired_with='phone',key='WIDE'))
+        r=await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='wide',name='Wide',platform='youtube',server='rtmp://example.com/live',picture='main',paired_with='phone',key='WIDE'))
         self.assertEqual(r.status,200,await r.text());self.assertEqual(self.s.config['destinations'][0],original)
         self.assertEqual(self.s.vault.get('stream:phone'),'PHONE');self.assertEqual(self.s.config['destinations'][1]['picture'],'main')
+
+    async def test_platform_vertical_choices_and_legacy_start_are_guarded(self):
+        from forgecast.platforms import CATALOG
+        from forgecast.server import resolve_destination
+        self.assertEqual({p for p,r in CATALOG.items() if r['vertical_output']}, {'youtube','tiktok','instagram'})
+        self.s.demo=False;self.s.native_seen=time.time()
+        self.s.native_features={'portrait_v1','vertical_studio_v1','vertical_crop_v1'}
+        for platform in ('kick','twitch','facebook','rumble','custom'):
+            with self.subTest(platform=platform):
+                with self.assertRaisesRegex(ValueError,'OBS picture'):
+                    await resolve_destination(self.s,dict(platform=platform,server='rtmp://example.com/live',picture='vertical_studio'))
+                legacy=dict(id='legacy',name='Legacy',platform=platform,server='rtmp://example.com/live',picture='vertical_studio')
+                self.s.config['destinations']=[legacy];self.s.vault.set('stream:legacy','KEEP')
+                for command in ('start','start_all'):
+                    with self.assertRaises(ValueError):queue_outputs(self.s,command,'legacy')
+                self.assertEqual(len(self.s.commands),0)
+                response=await self.client.post('/api/action',headers=self.headers,json={'op':'vertical_assign','id':'legacy'})
+                self.assertEqual(response.status,400)
+                self.assertEqual(self.s.vault.get('stream:legacy'),'KEEP')
+                # An unsupported saved picture can always be stopped or repaired.
+                queue_outputs(self.s,'stop','legacy');self.s.commands.clear()
+                fixed=await resolve_destination(self.s,{**legacy,'picture':'main'})
+                self.assertEqual(fixed['picture'],'main')

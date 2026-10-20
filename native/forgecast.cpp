@@ -877,7 +877,11 @@ public:
             picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
             picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
             const auto catalog=lastPayload.value("destination_platforms").toArray();
-            for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
+            for(const auto &entry:catalog){
+                const auto row=entry.toObject();const auto id=row.value("id").toString();
+                platform.addItem(id=="youtube"?"YouTube Horizontal":row.value("name").toString(),id);
+                if(id=="youtube")platform.addItem("YouTube Vertical","youtube_vertical");
+            }
             if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
             QCheckBox advanced("Use a custom server address", &dialog);
             QLabel help(&dialog);help.setWordWrap(true);
@@ -891,7 +895,8 @@ public:
             form.addRow("Server address", &server);
             form.addRow(&help);
             auto updatePlatform = [&] {
-                const QString selected=platform.currentData().toString();
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
                 QJsonObject metadata;for(const auto &entry:catalog)if(entry.toObject().value("id").toString()==selected)metadata=entry.toObject();
                 const bool custom=metadata.isEmpty()||metadata.value("requires_server").toBool();
                 server.setVisible(custom||advanced.isChecked());
@@ -899,9 +904,21 @@ public:
                 advanced.setVisible(!custom);
                 name.setPlaceholderText(platform.currentText());
                 help.setText(metadata.value("help").toString("Paste the server address and key from your platform."));
+                if(selected=="youtube")help.setText(preset=="youtube_vertical"?
+                    "Set YouTube's vertical preview to Encoder. Paste its separate right-hand stream key here. Keep the horizontal output on its own key.":
+                    "Paste YouTube's horizontal stream key. Uses the actual OBS picture; configure OBS for landscape. Add YouTube Vertical separately for both formats.");
                 dialog.adjustSize();
             };
-            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
+            auto updatePicture = [&] {
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
+                bool allowed=false;for(const auto &entry:catalog){const auto row=entry.toObject();if(row.value("id").toString()==selected)allowed=row.value("vertical_output").toBool();}
+                picture.clear();picture.addItem("OBS picture · actual OBS resolution","main");
+                if(allowed){picture.addItem("Vertical Studio · saved scene layouts","vertical_studio");picture.addItem("Vertical · fill screen (crop sides)","vertical_fill");picture.addItem("Vertical · show whole picture","vertical_fit");}
+                if(preset=="youtube_vertical"||selected=="tiktok"||selected=="instagram")picture.setCurrentIndex(picture.findData("vertical_studio"));
+            };
+            updatePicture();
+            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();key.clear();updatePicture();updatePlatform(); });
             connect(&advanced, &QCheckBox::toggled, &dialog, [&](bool checked) { if(!checked)server.clear();updatePlatform(); });
             updatePlatform();
             QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -909,7 +926,7 @@ public:
             connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
-                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
+                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()=="youtube_vertical"?QString("youtube"):platform.currentData().toString()}, {"name", name.text().isEmpty()?platform.currentText():name.text()},
                                  {"server", server.text()}, {"key", key.text()}, {"picture", picture.currentData().toString()}});
             key.clear();
         });
@@ -1288,6 +1305,9 @@ public:
         const auto picture = obj.value("picture").toString("main");
         if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit" && picture != "vertical_studio")
             return "invalid_picture_format";
+        const auto platform = obj.value("platform").toString();
+        if(picture!="main" && platform!="youtube" && platform!="tiktok" && platform!="instagram")
+            return "vertical_platform_unsupported";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
         if (id.isEmpty() || id.size() > 40 || url.host().isEmpty() ||

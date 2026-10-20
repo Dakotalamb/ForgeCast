@@ -33,7 +33,7 @@ from .meta_chat import MetaChat
 from .vertical import VerticalStudio, settings as vertical_settings, catalog as vertical_catalog, preview as vertical_preview
 from .entitlements import accept_entitlements, overlay_access
 from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
-from .platforms import PLATFORMS, CATALOG
+from .platforms import PLATFORMS, CATALOG, require_picture_support
 from . import __version__
 
 PORT = 17654
@@ -271,6 +271,7 @@ OUTPUT_ERRORS = {
     'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
     'invalid_destination':'This destination has invalid settings.',
     'destination_limit':'The maximum number of destinations has been reached.',
+    'vertical_platform_unsupported':'This platform is not enabled for direct vertical output. Twitch dual format needs Enhanced Broadcasting and an Additional Canvas; use OBS picture here.',
     'vertical_setup_failed':'Vertical video could not be created. Stop this destination, check OBS encoder resources, then retry. The main stream is unchanged.',
     'invalid_picture_format':'Choose Same as OBS or a supported vertical picture format, then save the destination again.',
 }
@@ -299,6 +300,7 @@ def queue_outputs(s, command, dest_id=None):
         cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
     if len(s.commands) >= 30: raise ValueError('Command queue is full.')
     starting = cmd.get('destinations', []) if command == 'start_all' else [cmd['destination']] if command == 'start' else []
+    for destination in starting: require_picture_support(destination)
     if any(d.get('picture', 'main') != 'main' for d in starting) and 'portrait_v1' not in s.native_features:
         raise ValueError('The OBS module does not support vertical video yet. Close OBS and Companion, install the matching FDGCast update, then reopen OBS.')
     if any(d.get('picture') == 'vertical_studio' for d in starting) and 'vertical_studio_v1' not in s.native_features:
@@ -586,6 +588,7 @@ async def resolve_destination(s, data):
                                  'name':data.get('name') or CATALOG[platform]['name'],
                                  'server':server})
     dest['platform'] = platform
+    require_picture_support(dest)
     return dest
 
 
@@ -624,6 +627,7 @@ async def action(request):
             uid=data.get('id');dest=next((d for d in s.config.get('destinations',[]) if d['id']==uid),None)
             if not dest: raise ValueError('Add a destination first.')
             if any(o.get('id')==uid and (o.get('active') or o.get('busy')) for o in s.native_outputs): raise ValueError('Stop this destination before changing its picture format.')
+            require_picture_support({**dest, 'picture':'vertical_studio'})
             dest['picture']='vertical_studio';s.save();return web.json_response({'ok':True})
         if op in STUDIO_ACTIONS:
             return web.json_response(await studio_action(s,op,data))

@@ -14,7 +14,19 @@ PLATFORMS = [
     dict(id='custom', name='Other / Custom RTMP', help='Paste the RTMP or RTMPS server URL and stream key from your streaming service. Combined chat is separate.'),
 ]
 for row in PLATFORMS:
+    row['vertical_output'] = row['id'] in ('youtube', 'tiktok', 'instagram')
     row.setdefault('server', '')
     row.setdefault('requires_server', not bool(row['server']))
 CATALOG = {row['id']: row for row in PLATFORMS}
 
+
+
+def require_picture_support(destination):
+    """Only advertise verified direct portrait destinations; Twitch needs multitrack."""
+    if destination.get('picture', 'main') == 'main':
+        return
+    platform = destination.get('platform', 'custom')
+    if not CATALOG.get(platform, {}).get('vertical_output', False):
+        if platform == 'twitch':
+            raise ValueError('Twitch dual format requires OBS Enhanced Broadcasting and an Additional Canvas. FDGCast canvas integration is not available yet. Use OBS picture for this destination.')
+        raise ValueError('Vertical output is not enabled for this platform in FDGCast. Choose OBS picture; keep OBS configured for landscape for this destination.')

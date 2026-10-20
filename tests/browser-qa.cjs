@@ -40,6 +40,11 @@ async function main(){
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
   assert.equal(await page.locator('#destinationPicture').inputValue(),'main');
   assert.equal(await page.locator('#pictureGuide').isVisible(),false);
+  await page.selectOption('#destinationPlatform','kick');
+  assert.equal(await page.locator('#destinationPicture option[value=vertical_fill]').isDisabled(),true);
+  await page.selectOption('#destinationPlatform','youtube_vertical');
+  assert.equal(await page.locator('#destinationPicture').inputValue(),'vertical_studio');
+  assert.match(await page.locator('#destinationHelp').textContent(),/separate stream key/);
   await page.selectOption('#destinationPicture','vertical_fill');
   assert.match(await page.locator('#pictureHelp').textContent(),/sides.*cropped/);
   assert.equal(await page.locator('#pictureGuide').isVisible(),true);
@@ -123,4 +128,5 @@ async function main(){
  }
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
+
 
