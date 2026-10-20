@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "version": "1.0.1",
+  "version": "1.0.2",
   "platform": "windows-x64",
-  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.1/FDGCast-1.0.1-win-x64-setup.exe",
-  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.1",
-  "notes": "Emergency recovery update: removes the main-output video override and clears the saved main-picture setting. OBS controls the main stream again. Vertical Studio remains available on added destinations. See release notes."
+  "notes": "Twitch Additional Canvas support, clearer YouTube horizontal/vertical presets, and stream output recovery and health fixes. Close OBS and Companion before installing. Twitch dual format needs at least four video tracks and encoder headroom.",
+  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.2/FDGCast-1.0.2-win-x64-setup.exe",
+  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.2"
 }

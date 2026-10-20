@@ -76,13 +76,13 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         for crop in ({'x':0.9,'width':0.5},{'width':0},{'x':float('nan')},'invalid'):
             bad=layout();bad['regions'][1]['crop']=crop
             with self.assertRaises(ValueError):validate_layout(bad)
-        self.s.config['destinations']=[dict(id='one',name='Test',picture='vertical_studio')]
+        self.s.config['destinations']=[dict(id='one',name='Test',platform='youtube',picture='vertical_studio')]
         self.s.vault.set('stream:one','KEY');self.s.native_seen=time.time();self.s.native_features={'portrait_v1','vertical_studio_v1'}
         with self.assertRaisesRegex(ValueError,'horizontal-scene crops'):queue_outputs(self.s,'start','one')
         self.s.native_features.add('vertical_crop_v1');queue_outputs(self.s,'start','one')
         self.assertEqual(self.s.commands.pop()['action'],'start')
     async def test_studio_requires_new_native_and_assignment_keeps_credentials(self):
-        self.s.config['destinations']=[dict(id='one',name='Test',server='rtmp://example.com/live',picture='vertical_studio')]
+        self.s.config['destinations']=[dict(id='one',name='Test',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio')]
         self.s.vault.set('stream:one','KEEP');self.s.native_seen=time.time();self.s.native_features={'portrait_v1'}
         with self.assertRaisesRegex(ValueError,'Vertical Studio'):queue_outputs(self.s,'start','one')
         self.s.native_features.add('vertical_studio_v1');queue_outputs(self.s,'start','one')
@@ -112,3 +112,79 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         r=await choose('main');self.assertEqual(r.status,200)
         r=await choose('bogus');self.assertEqual(r.status,400)
         self.s.native_seen=0;self.assertIsNone(self.s.public()['main_output'])
+
+    async def test_additional_vertical_keeps_original_and_never_copies_key(self):
+        self.s.demo=False
+        original=dict(id='wide',name='Wide',server='rtmp://example.com/live',picture='main',platform='youtube')
+        self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:wide','ORIGINAL')
+        async def save(**extra):
+            return await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='phone',name='Phone',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio',paired_with='wide',**extra))
+        r=await save();self.assertEqual(r.status,400)
+        r=await save(key='ORIGINAL');self.assertEqual(r.status,400)
+        self.assertEqual(self.s.config['destinations'],[original])
+        r=await save(key='SEPARATE');self.assertEqual(r.status,200)
+        self.assertEqual(self.s.config['destinations'][0],original)
+        self.assertEqual(self.s.config['destinations'][1]['paired_with'],'wide')
+        self.assertEqual(self.s.config['destinations'][1]['picture'],'vertical_studio')
+        self.assertEqual(self.s.vault.get('stream:wide'),'ORIGINAL')
+        self.assertEqual(self.s.vault.get('stream:phone'),'SEPARATE')
+
+    async def test_add_obs_picture_alongside_existing_vertical_preserves_it(self):
+        self.s.demo=False
+        original=dict(id='phone',name='Phone',platform='youtube',server='rtmp://example.com/live',picture='vertical_studio')
+        self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:phone','PHONE')
+        r=await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='wide',name='Wide',platform='youtube',server='rtmp://example.com/live',picture='main',paired_with='phone',key='WIDE'))
+        self.assertEqual(r.status,200,await r.text());self.assertEqual(self.s.config['destinations'][0],original)
+        self.assertEqual(self.s.vault.get('stream:phone'),'PHONE');self.assertEqual(self.s.config['destinations'][1]['picture'],'main')
+
+    async def test_platform_vertical_choices_and_legacy_start_are_guarded(self):
+        from forgecast.platforms import CATALOG
+        from forgecast.server import resolve_destination
+        self.assertEqual({p for p,r in CATALOG.items() if r['vertical_output']}, {'youtube','tiktok','instagram','vimeo'})
+        self.s.demo=False;self.s.native_seen=time.time()
+        self.s.native_features={'portrait_v1','vertical_studio_v1','vertical_crop_v1'}
+        for platform in ('kick','twitch','facebook','rumble','custom'):
+            with self.subTest(platform=platform):
+                with self.assertRaisesRegex(ValueError,'OBS picture'):
+                    await resolve_destination(self.s,dict(platform=platform,server='rtmp://example.com/live',picture='vertical_studio'))
+                legacy=dict(id='legacy',name='Legacy',platform=platform,server='rtmp://example.com/live',picture='vertical_studio')
+                self.s.config['destinations']=[legacy];self.s.vault.set('stream:legacy','KEEP')
+                for command in ('start','start_all'):
+                    with self.assertRaises(ValueError):queue_outputs(self.s,command,'legacy')
+                self.assertEqual(len(self.s.commands),0)
+                response=await self.client.post('/api/action',headers=self.headers,json={'op':'vertical_assign','id':'legacy'})
+                self.assertEqual(response.status,400)
+                self.assertEqual(self.s.vault.get('stream:legacy'),'KEEP')
+                # An unsupported saved picture can always be stopped or repaired.
+                queue_outputs(self.s,'stop','legacy');self.s.commands.clear()
+                fixed=await resolve_destination(self.s,{**legacy,'picture':'main'})
+                self.assertEqual(fixed['picture'],'main')
+
+    async def test_canvas_requires_matching_native_and_only_queues_setup(self):
+        self.s.demo=False
+        async def setup(value=True):
+            return await self.client.post('/api/action',headers=self.headers,json={'op':'vertical_canvas','enabled':value})
+        self.assertEqual((await setup()).status,400)
+        self.s.native_seen=time.time();self.assertEqual((await setup()).status,400)
+        self.s.native_features={'vertical_canvas_v1'}
+        for value in (None,1,'true'):
+            self.assertEqual((await setup(value)).status,400)
+        response=await setup();self.assertEqual(response.status,200,await response.text())
+        command=self.s.commands.pop();self.assertEqual(command['action'],'vertical_canvas');self.assertIs(command['enabled'],True)
+        self.assertNotIn('key',command);self.assertNotIn('server',command)
+        self.s.obs.request.assert_not_awaited()
+        for snapshot in ({'busy':True},{'selected':True}):
+            self.s.native_canvas=snapshot;self.assertEqual((await setup(False)).status,400)
+        self.s.native_canvas={};self.s.main_output={'busy':True}
+        self.assertEqual((await setup()).status,400);self.assertEqual(len(self.s.commands),0)
+        self.s.main_output=None;self.s.demo=True;self.assertEqual((await setup()).status,400)
+
+    async def test_canvas_telemetry_is_bounded_and_expires(self):
+        headers={**self.headers,'Authorization':'Bearer '+self.s.native_key}
+        response=await self.client.post('/native/poll',headers=headers,json={
+            'features':['vertical_canvas_v1'], 'vertical_canvas':{'enabled':True,'registered':True,'selected':1,'busy':'false',
+                'enhanced':True,'twitch_main':True,'key':'PRIVATE','error':'arbitrary PRIVATE'}})
+        self.assertEqual(response.status,200)
+        canvas=self.s.public()['vertical_canvas'];self.assertTrue(canvas['available']);self.assertTrue(canvas['registered'])
+        self.assertFalse(canvas['selected']);self.assertFalse(canvas['busy']);self.assertNotIn('PRIVATE',str(canvas))
+        self.s.native_seen=0;self.assertEqual(self.s.public()['vertical_canvas'],{})

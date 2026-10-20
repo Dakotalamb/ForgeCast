@@ -80,84 +80,17 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 // A video-only wrapper reads the current program source each frame, including
 // OBS transitions. Audio continues through the existing main AAC encoder.
-static const char *portraitName(void *) { return "FDGCast portrait picture"; }
-static void *portraitCreate(obs_data_t *settings, obs_source_t *source)
-{
-    return new PortraitData(obs_data_get_bool(settings,"fill"),obs_data_get_bool(settings,"studio"),source);
-}
-static void portraitRender(void *data, gs_effect_t *)
-{
-    auto *program = obs_get_output_source(0);
-    if (!program) return;
-    auto *picture=static_cast<PortraitData *>(data);
-    if(picture->studio){picture->render(program);obs_source_release(program);return;}
-    const auto layout = fdgcast::portraitLayout(static_cast<float>(obs_source_get_width(program)),
-                                               static_cast<float>(obs_source_get_height(program)),
-                                               picture->fill);
-    if (layout.scale > 0) {
-        gs_matrix_push();
-        gs_matrix_translate3f(layout.x, layout.y, 0.f);
-        gs_matrix_scale3f(layout.scale, layout.scale, 1.f);
-        obs_source_video_render(program);
-        gs_matrix_pop();
-    }
-    obs_source_release(program);
-}
-
-struct PortraitVideo {
-    obs_view_t *view = nullptr;
-    obs_encoder_t *encoder = nullptr;
-    bool added = false;
-    bool create(obs_encoder_t *main, bool fill, bool studio=false)
-    {
-        obs_video_info info{};
-        if (!obs_get_video_info(&info)) return false;
-        info.base_width = info.output_width = 720;
-        info.base_height = info.output_height = 1280;
-        info.output_format = VIDEO_FORMAT_NV12;
-        info.colorspace = VIDEO_CS_709;
-        info.range = VIDEO_RANGE_PARTIAL;
-        view = obs_view_create();
-        if (!view) return false;
-        auto *settings = obs_data_create();
-        obs_data_set_bool(settings, "fill", fill);
-        obs_data_set_bool(settings, "studio", studio);
-        auto *source = obs_source_create_private("fdgcast_portrait", "FDGCast portrait", settings);
-        obs_data_release(settings);
-        if (!source) return false;
-        obs_view_set_source(view, 0, source);
-        obs_source_release(source);
-        auto *video = obs_view_add2(view, &info);
-        if (!video) return false;
-        added = true;
-        auto *mainSettings = obs_encoder_get_settings(main);
-        settings = obs_data_create();
-        obs_data_apply(settings, mainSettings);
-        obs_data_release(mainSettings);
-        obs_data_set_string(settings, "rate_control", "CBR");
-        obs_data_set_int(settings, "bitrate", 4500);
-        obs_data_set_int(settings, "keyint_sec", 2);
-        encoder = obs_video_encoder_create(obs_encoder_get_id(main),
-            fill ? "FDGCast portrait fill" : "FDGCast portrait fit", settings, nullptr);
-        obs_data_release(settings);
-        if (!encoder) return false;
-        obs_encoder_set_video(encoder, video);
-        return true;
-    }
-    ~PortraitVideo()
-    {
-        if (encoder) obs_encoder_release(encoder);
-        if (added) obs_view_remove(view);
-        if (view) obs_view_destroy(view);
-    }
-};
-
+#include "portrait-video.hpp"
+#include "vertical-canvas-frontend.hpp"
 
 struct Destination {
     std::shared_ptr<PortraitVideo> portrait;
+    std::shared_ptr<RtmpVideo> compatibleVideo;
+    std::shared_ptr<RtmpAudio> compatibleAudio;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
+    QString picture;
     bool starting = false;
     bool stopping = false;
     int startupTicks = 0;
@@ -941,13 +874,17 @@ public:
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
             QComboBox platform(&dialog), picture(&dialog);
-            picture.addItem("Horizontal · OBS scene", "main");
+            picture.addItem("OBS picture · actual OBS resolution", "main");
             picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
             picture.addItem("Vertical · show whole picture", "vertical_fit");
             picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
             picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
             const auto catalog=lastPayload.value("destination_platforms").toArray();
-            for(const auto &entry:catalog){const auto row=entry.toObject();platform.addItem(row.value("name").toString(),row.value("id").toString());}
+            for(const auto &entry:catalog){
+                const auto row=entry.toObject();const auto id=row.value("id").toString();
+                platform.addItem(id=="youtube"?"YouTube Horizontal":row.value("name").toString(),id);
+                if(id=="youtube")platform.addItem("YouTube Vertical","youtube_vertical");
+            }
             if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
             QCheckBox advanced("Use a custom server address", &dialog);
             QLabel help(&dialog);help.setWordWrap(true);
@@ -961,7 +898,8 @@ public:
             form.addRow("Server address", &server);
             form.addRow(&help);
             auto updatePlatform = [&] {
-                const QString selected=platform.currentData().toString();
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
                 QJsonObject metadata;for(const auto &entry:catalog)if(entry.toObject().value("id").toString()==selected)metadata=entry.toObject();
                 const bool custom=metadata.isEmpty()||metadata.value("requires_server").toBool();
                 server.setVisible(custom||advanced.isChecked());
@@ -969,9 +907,21 @@ public:
                 advanced.setVisible(!custom);
                 name.setPlaceholderText(platform.currentText());
                 help.setText(metadata.value("help").toString("Paste the server address and key from your platform."));
+                if(selected=="youtube")help.setText(preset=="youtube_vertical"?
+                    "Set YouTube's vertical preview to Encoder. Paste its separate right-hand stream key here. Keep the horizontal output on its own key.":
+                    "Paste YouTube's horizontal stream key. Uses the actual OBS picture; configure OBS for landscape. Add YouTube Vertical separately for both formats.");
                 dialog.adjustSize();
             };
-            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
+            auto updatePicture = [&] {
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
+                bool allowed=false;for(const auto &entry:catalog){const auto row=entry.toObject();if(row.value("id").toString()==selected)allowed=row.value("vertical_output").toBool();}
+                picture.clear();picture.addItem("OBS picture · actual OBS resolution","main");
+                if(allowed){picture.addItem("Vertical Studio · saved scene layouts","vertical_studio");picture.addItem("Vertical · fill screen (crop sides)","vertical_fill");picture.addItem("Vertical · show whole picture","vertical_fit");}
+                if(preset=="youtube_vertical"||selected=="tiktok"||selected=="instagram")picture.setCurrentIndex(picture.findData("vertical_studio"));
+            };
+            updatePicture();
+            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();key.clear();updatePicture();updatePlatform(); });
             connect(&advanced, &QCheckBox::toggled, &dialog, [&](bool checked) { if(!checked)server.clear();updatePlatform(); });
             updatePlatform();
             QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -979,7 +929,7 @@ public:
             connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
-                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
+                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()=="youtube_vertical"?QString("youtube"):platform.currentData().toString()}, {"name", name.text().isEmpty()?platform.currentText():name.text()},
                                  {"server", server.text()}, {"key", key.text()}, {"picture", picture.currentData().toString()}});
             key.clear();
         });
@@ -1044,8 +994,12 @@ public:
                 for (const auto &output : outputs) {
                     const auto row = output.toObject();
                     if (row.value("id") == dest.value("id")) {
-                        state = row.value("active").toBool() ? "LIVE" :
-                                row.value("busy").toBool() ? "CONNECTING / STOPPING" : "OFFLINE";
+                        const QString transport=row.value("transmission_state").toString();
+                        state=transport=="sending"?"SENDING":transport=="stalled"?"NO DATA":
+                              transport=="starting"?"WAITING FOR DATA":row.value("busy").toBool()?"CONNECTING / STOPPING":"OFFLINE";
+                        const int width=row.value("width").toInt(),height=row.value("height").toInt();
+                        if(width>0 && height>0) state+=" · "+QString::number(width)+" × "+QString::number(height);
+                        if(row.value("bitrate_kbps").isDouble()) state+=" · "+QString::number(row.value("bitrate_kbps").toInt())+" kbps";
                         if (!row.value("error").toString().isEmpty()) error = row.value("error").toString();
                         if (row.value("reconnecting").toBool()) state = "RECONNECTING";
                     }
@@ -1057,8 +1011,8 @@ public:
                 item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
                 item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
                 item->setData(Qt::UserRole, dest.value("id").toString());
-                if (state == "LIVE") item->setForeground(QColor("#80d6a0"));
-                else if (state == "ERROR") item->setForeground(QColor("#ff6b6b"));
+                if (state.startsWith("SENDING")) item->setForeground(QColor("#80d6a0"));
+                else if (state == "ERROR" || state.startsWith("NO DATA")) item->setForeground(QColor("#ff6b6b"));
                 else if (state != "OFFLINE") item->setForeground(QColor("#ffd166"));
                 else item->setForeground(QColor("#a8afb8"));
                 if (item->data(Qt::UserRole).toString() == selected) list->setCurrentItem(item);
@@ -1087,6 +1041,8 @@ class ForgeDock : public QWidget {
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
     std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
+    std::weak_ptr<RtmpVideo> rtmpMainVideo;
+    std::map<size_t,std::weak_ptr<RtmpAudio>> rtmpAudio;
     QString mainPicture = "main";
     QString mainPictureError;
     QJsonArray results;
@@ -1354,6 +1310,9 @@ public:
         const auto picture = obj.value("picture").toString("main");
         if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit" && picture != "vertical_studio")
             return "invalid_picture_format";
+        const auto platform = obj.value("platform").toString();
+        if(picture!="main" && platform!="youtube" && platform!="tiktok" && platform!="instagram" && platform!="vimeo")
+            return "vertical_platform_unsupported";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
         if (id.isEmpty() || id.size() > 40 || url.host().isEmpty() ||
@@ -1361,6 +1320,14 @@ public:
             !url.userInfo().isEmpty() || !url.query().isEmpty() || !url.fragment().isEmpty() ||
             obj.value("key").toString().isEmpty())
             return "invalid_destination";
+        auto *mainService=obs_frontend_get_streaming_service();
+        if(mainService) {
+            const QString mainKey=QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_STREAM_KEY));
+            const QUrl mainUrl(QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_SERVER_URL)));
+            if(!mainKey.isEmpty() && mainKey==obj.value("key").toString() &&
+                mainUrl.host().compare(url.host(),Qt::CaseInsensitive)==0)
+                return "duplicate_ingest";
+        }
         auto old = destinations.find(id);
         if (old != destinations.end()) {
             if (obs_output_active(old->second->output) || old->second->starting || old->second->stopping)
@@ -1376,17 +1343,32 @@ public:
             return "main_output_unavailable";
         obs_encoder_t *video = obs_output_get_video_encoder(mainOutput);
         obs_encoder_t *audio = obs_output_get_audio_encoder(mainOutput, 0);
-        if (!video || !audio || std::strcmp(obs_encoder_get_codec(video), "h264") != 0 ||
-            std::strcmp(obs_encoder_get_codec(audio), "aac") != 0) {
+        if (!video || !audio) {
             obs_output_release(mainOutput);
-            return "requires_main_h264_aac_disable_enhanced_broadcasting";
+            return "main_encoders_unavailable";
         }
         auto d = std::make_unique<Destination>();
+        if(std::strcmp(obs_encoder_get_codec(audio),"aac")!=0){
+            const auto track=obs_encoder_get_mixer_index(audio);
+            d->compatibleAudio=rtmpAudio[track].lock();
+            if(!d->compatibleAudio){d->compatibleAudio=std::make_shared<RtmpAudio>();
+                if(!d->compatibleAudio->create(audio)){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpAudio[track]=d->compatibleAudio;}
+            audio=d->compatibleAudio->encoder;
+        }
+        if(picture=="main" && std::strcmp(obs_encoder_get_codec(video),"h264")!=0){
+            d->compatibleVideo=rtmpMainVideo.lock();
+            if(!d->compatibleVideo){d->compatibleVideo=std::make_shared<RtmpVideo>();
+                d->compatibleVideo->encoder=createRtmpVideo(video,"FDGCast shared landscape H.264",obs_get_video(),6000);
+                if(!d->compatibleVideo->encoder){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpMainVideo=d->compatibleVideo;}
+            video=d->compatibleVideo->encoder;
+        }
         if (picture != "main") {
             d->portrait = portraitVideos[picture].lock();
             if (!d->portrait) {
                 d->portrait = std::make_shared<PortraitVideo>();
-                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio")) {
+                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio",verticalCanvas?verticalCanvas->canvas:nullptr)) {
                     obs_output_release(mainOutput);
                     return "vertical_setup_failed";
                 }
@@ -1395,6 +1377,7 @@ public:
             video = d->portrait->encoder;
         }
         d->name = obj.value("name").toString();
+        d->picture = picture;
         obs_data_t *settings = obs_data_create();
         QByteArray server = obj.value("server").toString().toUtf8();
         QByteArray key = obj.value("key").toString().toUtf8();
@@ -1440,6 +1423,9 @@ public:
                 else message="Audio fix could not be applied. Check your selected source in Companion.";
                 doctorDock->message(message);
             }
+        } else if (action == "vertical_canvas") {
+            result=setVerticalCanvas(cmd.value("enabled").toBool());
+            if(result!="vertical_canvas_ready"&&result!="vertical_canvas_disabled")verticalCanvasError=result;
         } else if (action == "main_picture") {
             const QString picture=cmd.value("picture").toString();
             if(picture!="main" && picture!="vertical_studio") result="invalid_picture_format";
@@ -1524,7 +1510,11 @@ public:
             {"vertical_supported",mainCompatible()},{"detail",mainPictureError}};
         auto *mainStream = obs_frontend_get_streaming_output();
         if (mainStream) {
-            const QJsonObject counters{{"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
+            auto *mainVideo=obs_output_get_video_encoder(mainStream);
+            obs_video_info currentInfo{};obs_get_video_info(&currentInfo);
+            const QJsonObject counters{{"fps_num",static_cast<int>(currentInfo.fps_num)},{"fps_den",static_cast<int>(currentInfo.fps_den)},{"width",mainVideo?static_cast<int>(obs_encoder_get_width(mainVideo)):0},
+                {"height",mainVideo?static_cast<int>(obs_encoder_get_height(mainVideo)):0},
+                {"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
                 {"reconnecting",obs_output_reconnecting(mainStream)},
                 {"dropped",obs_output_get_frames_dropped(mainStream)},{"frames",obs_output_get_total_frames(mainStream)},
                 {"bytes",static_cast<double>(obs_output_get_total_bytes(mainStream))}};
@@ -1546,6 +1536,10 @@ public:
                 obs_output_set_video_encoder(d.output, nullptr);
                 d.portrait.reset();
             }
+            if(!active && !d.starting && !d.stopping){
+                if(d.compatibleVideo){obs_output_set_video_encoder(d.output,nullptr);d.compatibleVideo.reset();}
+                if(d.compatibleAudio){obs_output_set_audio_encoder(d.output,nullptr,0);d.compatibleAudio.reset();}
+            }
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
@@ -1554,7 +1548,12 @@ public:
                 d.error = "Destination did not start within 30 seconds.";
                 results.append(QJsonObject{{"destination_id", entry.first}, {"status", "start_timeout_stopped"}});
             }
-            outputs.append(QJsonObject{{"id", entry.first}, {"name", d.name}, {"active", active},
+            auto *outputVideo=obs_output_get_video_encoder(d.output);
+            obs_video_info outputInfo{};obs_get_video_info(&outputInfo);
+            outputs.append(QJsonObject{{"fps_num",static_cast<int>(outputInfo.fps_num)},{"fps_den",static_cast<int>(outputInfo.fps_den)},{"picture",d.picture},
+                {"width",outputVideo?static_cast<int>(obs_encoder_get_width(outputVideo)):0},
+                {"height",outputVideo?static_cast<int>(obs_encoder_get_height(outputVideo)):0},
+                {"id", entry.first}, {"name", d.name}, {"active", active},
                 {"intentional_stop", intentionalStop}, {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
                 {"dropped", obs_output_get_frames_dropped(d.output)},
                 {"frames", obs_output_get_total_frames(d.output)},
@@ -1566,7 +1565,7 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1","vertical_canvas_v1"}}, {"outputs", outputs}, {"vertical_canvas",verticalCanvasTelemetry()}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
@@ -1712,8 +1711,14 @@ static void arrangeFDGCastDocks()
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
+    if(event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING){verticalCanvasLoading=true;verticalCanvas.reset();}
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING||event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)verticalCanvasLoading=false;
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
+       event==OBS_FRONTEND_EVENT_PROFILE_CHANGED || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_RENAMED || event==OBS_FRONTEND_EVENT_STREAMING_STOPPED)
+        QTimer::singleShot(0, qApp, []{restoreVerticalCanvas();});
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();
+    if(event==OBS_FRONTEND_EVENT_EXIT){verticalCanvasClosing=true;verticalCanvas.reset();}
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {
         obs_frontend_remove_dock("fdgcast-hub");if(hubDock)delete hubDock.data();hubDock.clear();
         obs_frontend_remove_dock("forgecast-chat");
@@ -1736,22 +1741,7 @@ static void frontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
-    obs_source_info portrait{};
-    portrait.id = "fdgcast_portrait";
-    portrait.type = OBS_SOURCE_TYPE_INPUT;
-    portrait.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
-    portrait.get_name = portraitName;
-    portrait.create = portraitCreate;
-    portrait.destroy = [](void *data) { delete static_cast<PortraitData *>(data); };
-    portrait.video_tick = [](void *data,float) {static_cast<PortraitData *>(data)->tick();};
-    portrait.enum_active_sources = [](void *data,obs_source_enum_proc_t callback,void *param) {
-        auto *p=static_cast<PortraitData *>(data);std::lock_guard<std::recursive_mutex> lock(p->mutex);
-        for(const auto &entry:p->children)callback(p->self,entry.second,param);
-    };
-    portrait.get_width = [](void *) -> uint32_t { return 720; };
-    portrait.get_height = [](void *) -> uint32_t { return 1280; };
-    portrait.video_render = portraitRender;
-    obs_register_source(&portrait);
+    registerPortraitSource();
     return true;
 }
 
@@ -1812,12 +1802,20 @@ void obs_module_post_load(void)
     obs_frontend_add_tools_menu_item("FDGCast: Arrange docks", [](void *) {
         arrangeFDGCastDocks();
     }, nullptr);
+    obs_frontend_add_tools_menu_item("FDGCast: Enable Twitch vertical canvas", [](void *) {
+        const auto result=setVerticalCanvas(true);
+        QMessageBox::information(static_cast<QWidget *>(obs_frontend_get_main_window()),"FDGCast Twitch vertical",
+            result=="vertical_canvas_ready"?"Canvas ready. In OBS Settings → Stream enable Enhanced Broadcasting and select FDGCast Vertical Studio under Additional Canvas. Start Streaming sends both formats. No second Twitch destination/key is needed.":
+            "Stop streaming, recording and other video outputs, then try again. The main stream was not changed.");
+    },nullptr);
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }
 
 void obs_module_unload(void)
 {
     obs_frontend_remove_event_callback(frontendEvent, nullptr);
+    verticalCanvas.reset();
     // OBS normally emits EXIT first. Do not access frontend UI after Qt shutdown.
 }
+
 
