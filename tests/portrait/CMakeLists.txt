@@ -1,0 +1,18 @@
+cmake_minimum_required(VERSION 3.24)
+project(PortraitLayoutTest LANGUAGES CXX)
+set(CMAKE_CXX_STANDARD 17)
+add_executable(portrait-layout-test portrait-layout-test.cpp)
+add_executable(main-picture-test main-picture-test.cpp)
+# Assertions remain active in the Release CI configuration.
+if(MSVC)
+  target_compile_options(main-picture-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(main-picture-test PRIVATE -UNDEBUG)
+endif()
+
+add_executable(render-guard-test render-guard-test.cpp)
+if(MSVC)
+  target_compile_options(render-guard-test PRIVATE /UNDEBUG)
+else()
+  target_compile_options(render-guard-test PRIVATE -UNDEBUG)
+endif()

@@ -1,2 +1,2 @@
-__version__ = '0.8.0-preview'
+__version__ = '1.0.2'
 

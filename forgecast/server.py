@@ -22,11 +22,18 @@ from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
 from .audio import AudioGuard, validate_settings, notify_windows, play_warning_sound
 from .history import StreamHistory
+from .output_health import OutputMonitor
 from .sound import read_pcm, MAX_BYTES
 from .updates import Updates
 from .suite import EVENT_KINDS, DEFAULT_EVENTS, connection_help, normalize_events, session_summaries, audience_counts
 from .help import ARTICLES, LINKS
 from .operations import SUITE_ACTIONS, suite_action, chat_capabilities, refresh_origin_avatars, overlay_page, overlay_script, overlay_style, overlay_feed, overlay_link
+from .extra_chat import connect_extra, restore_extra
+from .meta_chat import MetaChat
+from .vertical import VerticalStudio, settings as vertical_settings, catalog as vertical_catalog, preview as vertical_preview
+from .entitlements import accept_entitlements, overlay_access
+from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
+from .platforms import PLATFORMS, CATALOG, require_picture_support
 from . import __version__
 
 PORT = 17654
@@ -46,12 +53,22 @@ class State:
         self.browser_key = secrets.token_urlsafe(32)
         self.native_key = secrets.token_urlsafe(32)
         self.chat, self.doctor = ChatStore(), Doctor(self.config.get("doctor_sensitivity", "balanced"))
-        self.statuses = {'twitch':'not connected', 'youtube':'not connected', 'kick':'not connected'}
+        self.statuses = {
+            'twitch':'not connected',
+            'youtube':'not connected',
+            'kick':'not connected',
+            'facebook':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'instagram':'Not checked. Connect in Hub, then sync linked accounts (receive-only).',
+            'rumble':'Not connected. Add your private API URL in Connections (receive-only).',
+            'tiktok':'Not connected. Add your LIVE username in Connections (experimental, receive-only).',
+        }
         self.adapters = {}
         self.events = deque(maxlen=100)
         self.commands = deque(maxlen=30)
         self.native_seen = 0
+        self.native_features = set()
         self.native_outputs = []
+        self.native_canvas = {}
         self.output_errors = {}
         self.stats = {}
         self.stats_seen = 0
@@ -62,6 +79,8 @@ class State:
         self.audio_test = AudioTest(self)
         self.feedback_preview = None
         self.hub_events = []
+        self.meta_chat = MetaChat(self)
+        self.vertical = VerticalStudio(self)
         self.kick_after = 0
         self.lock = asyncio.Lock()
         self.status_details = {}
@@ -81,6 +100,7 @@ class State:
         self.audio_notice_queue = asyncio.Queue(maxsize=20)
         self.history = StreamHistory(self.directory, demo, self.doctor.sensitivity)
         self.main_output = None
+        self.output_monitor = OutputMonitor()
         self.doctor_notice_queue = asyncio.Queue(maxsize=20)
         self.audio_history_cursor = self.audio.history[-1] if self.audio.history else None
         self.updates = Updates(self)
@@ -204,14 +224,16 @@ class State:
                         'Output names are user-provided; review before sharing.'])
 
     def public(self):
-        return dict(audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
+        return dict(overlay_access=overlay_access(self), overlay_designs=designs(self), audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
+                    vertical_canvas={**self.native_canvas, 'available':'vertical_canvas_v1' in self.native_features} if time.time()-self.native_seen < 5 else {},
+                    main_output=self.main_output if time.time()-self.native_seen < 5 else None,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
                     stream_history=self.history.public(), doctor_notifications=self.config.get("doctor_notifications", True), doctor_sound=self.config.get("doctor_sound",False), doctor_sensitivity=self.doctor.sensitivity,
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
-                    destinations=self.config.get('destinations', []), statuses=self.statuses,
+                    destination_platforms=PLATFORMS, destinations=self.config.get('destinations', []), statuses=self.statuses,
                     status_details=self.status_details, combined_events=combined_events(self),
                     messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
                     version=__version__, hub_events=self.coordination()['events'], coordination=self.coordination(),
@@ -239,6 +261,10 @@ def combined_events(s):
 OUTPUT_ERRORS = {
     'start_main_obs_stream_first':'Start your main OBS stream first.',
     'main_output_unavailable':'OBS main output is unavailable.',
+    'duplicate_ingest':'This broadcast connection is already used by OBS. Another format needs a separate broadcast connection/key.',
+    'main_picture_temporarily_disabled':'Main stream routing is temporarily disabled in 1.0.1. OBS controls the main picture. Use an added destination for Vertical Studio.',
+    'main_picture_setup_failed':'Main stream picture setup failed. Check the main stream card and OBS encoder settings.',
+    'main_picture_unsupported':'Vertical main stream needs RTMP/RTMPS. Turn off Enhanced Broadcasting / multitrack video in OBS.',
     'requires_main_h264_aac_disable_enhanced_broadcasting':'Use H.264 video and AAC audio on the main stream; disable Enhanced Broadcasting.',
     'service_create_failed':'OBS could not create this destination service.',
     'output_create_failed':'OBS could not create this stream output.',
@@ -247,6 +273,14 @@ OUTPUT_ERRORS = {
     'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
     'invalid_destination':'This destination has invalid settings.',
     'destination_limit':'The maximum number of destinations has been reached.',
+    'main_encoders_unavailable':'OBS has not exposed its main video/audio encoders yet. Check that the main output is sending data, then retry.',
+    'rtmp_compatible_encoder_failed':'FDGCast could not create compatible H.264/AAC encoding for this destination. Check available encoder resources in OBS.',
+    'vertical_canvas_busy':'Stop streaming, recording and other video outputs before changing the Twitch canvas.',
+    'vertical_canvas_selected':'Set Additional Canvas to None in OBS Settings → Stream before disabling it.',
+    'vertical_canvas_setup_failed':'OBS could not prepare the FDGCast canvas. Stop video outputs and retry; check the OBS log if it persists.',
+    'vertical_platform_unsupported':'This platform is not enabled for direct vertical output. Twitch dual format needs Enhanced Broadcasting and an Additional Canvas; use OBS picture here.',
+    'vertical_setup_failed':'Vertical video could not be created. Stop this destination, check OBS encoder resources, then retry. The main stream is unchanged.',
+    'invalid_picture_format':'Choose Same as OBS or a supported vertical picture format, then save the destination again.',
 }
 
 
@@ -272,6 +306,15 @@ def queue_outputs(s, command, dest_id=None):
         if not dest: raise ValueError('Destination not found.')
         cmd['destination'] = dict(dest, key=s.vault.get('stream:'+dest['id']))
     if len(s.commands) >= 30: raise ValueError('Command queue is full.')
+    starting = cmd.get('destinations', []) if command == 'start_all' else [cmd['destination']] if command == 'start' else []
+    for destination in starting: require_picture_support(destination)
+    if any(d.get('picture', 'main') != 'main' for d in starting) and 'portrait_v1' not in s.native_features:
+        raise ValueError('The OBS module does not support vertical video yet. Close OBS and Companion, install the matching FDGCast update, then reopen OBS.')
+    if any(d.get('picture') == 'vertical_studio' for d in starting) and 'vertical_studio_v1' not in s.native_features:
+        raise ValueError('Install the matching FDGCast update and restart OBS to use Vertical Studio layouts.')
+    cropped=any(r.get('crop',{}) not in ({},{'x':0,'y':0,'width':1,'height':1}) for l in vertical_settings(s)['layouts'].values() for r in l.get('regions',[]))
+    if any(d.get('picture')=='vertical_studio' for d in starting) and cropped and 'vertical_crop_v1' not in s.native_features:
+        raise ValueError('Install the matching FDGCast update and restart OBS to use horizontal-scene crops.')
     s.commands.append(cmd)
     ids = [d['id'] for d in s.config.get('destinations', [])] if command.endswith('_all') else [dest_id]
     s.history.command(command, ids)
@@ -332,6 +375,10 @@ def preflight(s):
         if output.get('reconnecting'): result='Reconnecting — check Stream Doctor.'
         if s.output_errors.get(dest['id']): result=s.output_errors[dest['id']]
         checks.append({'label':dest['name'],'result':result})
+        if dest.get('picture', 'main') != 'main':
+            checks.append({'label':dest['name']+' picture', 'result':
+                'Vertical 720 × 1280 at 4500 kbps; '+('saved per-scene Vertical Studio layout.' if dest['picture']=='vertical_studio' else 'sides are cropped.' if dest['picture']=='vertical_fill' else 'whole picture with black space.')+
+                ' Uses an additional video encoder; check framing and viewer playback on the platform.', 'help_tab':'outputs'})
     for platform, status in s.statuses.items():
         checks.append({'label':platform.title()+' chat','result':status})
     if not s.config.get('destinations'): checks.append({'label':'Multistream destinations','result':'None saved — add destinations before Start All.'})
@@ -488,17 +535,21 @@ async def secure(request, handler):
     response.headers.update({'Cache-Control':'no-store', 'X-Content-Type-Options':'nosniff',
                              'Referrer-Policy':'no-referrer',
                              'Content-Security-Policy':"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; frame-ancestors 'none'"})
+    if request.path == '/overlay/studio':
+        response.headers['Content-Security-Policy'] = response.headers['Content-Security-Policy'].replace("frame-ancestors 'none'","frame-ancestors 'self'")
+    if request.path == '/':
+        response.headers['Content-Security-Policy']=response.headers['Content-Security-Policy'].replace("img-src 'self'", "img-src 'self' data:")
     return response
 
 
 async def page(request):
     return web.FileResponse(WEB/({'/':'index.html', '/app.js':'app.js', '/style.css':'style.css',
-                                  '/favicon.png':'favicon.png'}[request.path]))
+                                  '/studio-editor.js':'studio-editor.js', '/vertical-studio.js':'vertical-studio.js', '/favicon.png':'favicon.png'}[request.path]))
 
 
 async def platform_icon(request):
     platform = request.match_info['platform']
-    if platform not in ('twitch', 'youtube', 'kick'): raise web.HTTPNotFound()
+    if platform not in ('twitch', 'youtube', 'kick', 'rumble', 'tiktok', 'facebook', 'instagram'): raise web.HTTPNotFound()
     return web.FileResponse(WEB/'icons'/(platform+'.svg'))
 
 
@@ -522,12 +573,13 @@ async def obs_connection(request):
 
 async def resolve_destination(s, data):
     platform = data.get('platform', 'custom')
-    if platform not in ('twitch', 'youtube', 'kick', 'custom'):
+    if platform not in CATALOG:
         raise ValueError('Choose a supported platform or Other / Custom.')
     server = str(data.get('server') or '').strip()
-    if not server and platform in ('twitch', 'youtube'):
-        server = {'twitch':'rtmp://live.twitch.tv/app',
-                  'youtube':'rtmps://a.rtmps.youtube.com:443/live2'}[platform]
+    if not server:
+        server = CATALOG[platform]['server']
+    if not server and CATALOG[platform]['requires_server']:
+        raise ValueError('Paste the server URL from '+CATALOG[platform]['name']+' in the Server address field.')
     if not server and platform == 'kick':
         token = s.vault.get('kick_token')
         if token:
@@ -540,8 +592,10 @@ async def resolve_destination(s, data):
         if not server:
             raise ValueError('Kick server unavailable. Enable the custom server option and paste the address from your Kick dashboard (Advanced settings in Companion).')
     dest = validate_destination({**data, 'id':data.get('id') or uuid.uuid4().hex[:12],
-                                 'name':data.get('name') or {'twitch':'Twitch','youtube':'YouTube','kick':'Kick','custom':'Custom destination'}[platform],
+                                 'name':data.get('name') or CATALOG[platform]['name'],
                                  'server':server})
+    dest['platform'] = platform
+    require_picture_support(dest)
     return dest
 
 
@@ -557,6 +611,44 @@ async def action(request):
         s.updates.later()
         return web.json_response({'ok':True})
     async with s.lock:
+        if op == 'main_picture':
+            picture=data.get('picture')
+            if picture not in ('main','vertical_studio'): raise ValueError('Choose Horizontal or Vertical Studio.')
+            if time.time()-s.native_seen>5 or 'main_picture_v1' not in s.native_features:
+                raise ValueError('Install the matching FDGCast update and restart OBS to choose the main stream picture.')
+            if not s.main_output: raise ValueError('Waiting for OBS main stream status.')
+            if s.main_output.get('active') or s.main_output.get('busy'):
+                raise ValueError('Stop the main stream before changing its picture.')
+            if picture=='vertical_studio' and not s.main_output.get('vertical_supported'):
+                raise ValueError('Vertical routing for the main stream is temporarily disabled. OBS controls its picture; use an added destination for Vertical Studio.')
+            if len(s.commands)>=30: raise ValueError('Command queue is full.')
+            s.commands.append(dict(id=uuid.uuid4().hex,action='main_picture',picture=picture,created=time.time()))
+            return web.json_response({'ok':True,'pending':True})
+        if op == 'vertical_canvas':
+            if not isinstance(data.get('enabled'),bool): raise ValueError('Choose whether to enable the Twitch canvas.')
+            if time.time()-s.native_seen>5 or 'vertical_canvas_v1' not in s.native_features:
+                raise ValueError('Install the matching FDGCast OBS module and connect Companion to set up the Twitch canvas.')
+            if s.native_canvas.get('busy') or s.main_output and (s.main_output.get('active') or s.main_output.get('busy')):
+                raise ValueError('Stop streaming, recording and other video outputs before changing the Twitch canvas.')
+            if not data['enabled'] and s.native_canvas.get('selected'):
+                raise ValueError('In OBS Settings → Stream, set Additional Canvas to None before disabling it.')
+            if len(s.commands)>=30: raise ValueError('Command queue is full.')
+            s.commands.append(dict(id=uuid.uuid4().hex,action='vertical_canvas',enabled=data['enabled'],created=time.time()))
+            return web.json_response({'ok':True,'pending':True})
+        if op == 'vertical_save': return web.json_response(await s.vertical.save(data))
+        if op == 'vertical_reset':
+            uid=data.get('scene_id'); value=vertical_settings(s)
+            if not isinstance(uid,str): raise ValueError('Choose a scene.')
+            value['layouts'].pop(uid,None);s.config['vertical_studio']=value;s.save()
+            return web.json_response({'ok':True,'settings':value})
+        if op == 'vertical_assign':
+            uid=data.get('id');dest=next((d for d in s.config.get('destinations',[]) if d['id']==uid),None)
+            if not dest: raise ValueError('Add a destination first.')
+            if any(o.get('id')==uid and (o.get('active') or o.get('busy')) for o in s.native_outputs): raise ValueError('Stop this destination before changing its picture format.')
+            require_picture_support({**dest, 'picture':'vertical_studio'})
+            dest['picture']='vertical_studio';s.save();return web.json_response({'ok':True})
+        if op in STUDIO_ACTIONS:
+            return web.json_response(await studio_action(s,op,data))
         if op in PRODUCTIVITY_ACTIONS:
             return web.json_response(await productivity_action(s, op, data))
         if op in SUITE_ACTIONS:
@@ -629,11 +721,23 @@ async def action(request):
                 raise ValueError('Stop secondary outputs before editing destinations.')
             dest = await resolve_destination(s, data)
             previous = next((d for d in s.config.get('destinations', []) if d['id'] == dest['id']), {})
+            pair = data.get('paired_with') or previous.get('paired_with')
+            if pair:
+                parent = next((d for d in s.config.get('destinations',[]) if d['id']==pair),None)
+                if pair != 'main' and not parent: raise ValueError('The original destination is missing.')
+                parent_is_obs = not parent or parent.get('picture','main')=='main'
+                if parent_is_obs == (dest['picture']=='main'): raise ValueError('Choose the other picture format for the additional output; the original stays unchanged.')
+                if not previous and not data.get('key'): raise ValueError('Paste a separate broadcast key. The original key is never copied.')
+                if pair==dest['id']: raise ValueError('A destination cannot be paired with itself.')
+                dest['paired_with']=pair
             dest['enabled'] = previous.get('enabled', True)
             key = data.get('key') or s.vault.get('stream:'+dest['id'])
             if not key or len(key) > 4096:
                 raise ValueError('A valid stream key is required.')
             items = [x for x in s.config.get('destinations', []) if x['id'] != dest['id']]
+            for other in items:
+                if other['server'].rstrip('/')==dest['server'].rstrip('/') and s.vault.get('stream:'+other['id'])==key:
+                    raise ValueError('That broadcast connection is already used. Another format needs its own broadcast connection and key.')
             if len(items) >= 8:
                 raise ValueError('Alpha supports at most eight destinations.')
             s.vault.set('stream:'+dest['id'], key)
@@ -644,12 +748,16 @@ async def action(request):
                 raise ValueError('Stop all secondary outputs first.')
             s.config['destinations'] = [x for x in s.config.get('destinations', []) if x['id'] != data['id']]
             s.vault.delete('stream:'+data['id'])
+            for child in s.config['destinations']:
+                if child.get('paired_with')==data['id']: child.pop('paired_with',None)
             s.save()
         elif op == 'native_command':
             if not data.get('confirmed'): raise ValueError('Explicit confirmation required.')
             queue_outputs(s, data.get('command'), data.get('id'))
         elif op == 'destination_enabled':
             set_destination_enabled(s, data)
+        elif op == 'extra_chat_connect':
+            await connect_extra(s, data)
         elif op == 'chat_connect':
             platform = data['platform']
             s.paused_platforms.discard(platform)
@@ -684,9 +792,13 @@ async def action(request):
             if adapter:
                 adapter.task.cancel()
                 await asyncio.gather(adapter.task, return_exceptions=True)
+            if platform in ('facebook', 'instagram'):
+                s.meta_chat.clear(platform)
+                s.meta_chat.readers.pop(platform, None)
             s.status(platform, 'disconnected')
             if data.get('forget'):
                 s.vault.delete(platform+'_token')
+                if platform == 'rumble': s.vault.delete('rumble_api_url')
                 s.config.pop(platform, None)
                 s.save()
         elif op == 'chat_send':
@@ -700,10 +812,12 @@ async def action(request):
             if not token:
                 raise ValueError('A dedicated FDGCast Hub integration token is required.')
             if s.config.get('hub_url') != url or s.vault.get('hub_token') != token:
+                s.overlay_access_granted=False;s.overlay_access_until=0
                 s.kick_after = 0
                 s.kick_verified = False
             s.config['hub_url'] = url
             s.vault.set('hub_token', token)
+            s.meta_chat.reset()
             s.hub_connection = 'checking'
             s.save()
             try:
@@ -715,6 +829,7 @@ async def action(request):
             url = s.config.get('hub_url')
             if not url or not s.vault.get('hub_token'):
                 raise ValueError('Save your Hub URL and pairing token first.')
+            s.meta_chat.unauthorized = False
             s.paused_platforms.clear()
             s.config['paused_platforms'] = []
             await sync_hub_accounts(s, retry_events=True)
@@ -749,8 +864,18 @@ async def native(request):
     s = request.app['state']
     data = await request.json()
     s.native_seen = time.time()
-    s.native_outputs = data.get('outputs', [])[:8]
-    s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
+    features = data.get('features', [])
+    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1','main_picture_v1','vertical_canvas_v1') if isinstance(features,list) and v in features}
+    canvas = data.get('vertical_canvas')
+    s.native_canvas = {k:canvas.get(k) is True for k in ('enabled','registered','selected','enhanced','twitch_main','busy')} if isinstance(canvas,dict) else {}
+    if isinstance(canvas,dict) and canvas.get('error') in OUTPUT_ERRORS:
+        s.native_canvas['error'] = OUTPUT_ERRORS[canvas['error']]
+    raw_outputs = data.get('outputs', [])
+    raw_outputs = raw_outputs[:8] if isinstance(raw_outputs,list) else []
+    main = data.get('main_output')
+    monitored = s.output_monitor.sample(([dict(main,id='main')] if isinstance(main,dict) else [])+raw_outputs)
+    s.main_output = next((r for r in monitored if r['id']=='main'),None)
+    s.native_outputs = [r for r in monitored if r['id']!='main']
     if isinstance(data.get('audio'), dict):
         s.audio_snapshot = data['audio']
         s.audio_snapshot['sources'] = s.audio_snapshot.get('sources', [])[:128]
@@ -779,7 +904,8 @@ async def native(request):
     # OBS owns the operator view. Send only bounded, non-credential telemetry to
     # its native chat and Stream Doctor docks over the authenticated loopback bridge.
     return web.json_response({
-        'updates': s.updates.public(),
+        'vertical_studio':vertical_settings(s),
+        'destination_platforms': PLATFORMS, 'updates': s.updates.public(),
         'commands': commands, 'version':__version__, 'coordination':s.coordination(), 'output_presets':s.config.get('output_presets',{}), 'summaries':session_summaries(s), 'capabilities':chat_capabilities(s),
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') in {'chat','superchat','supersticker','membership'} or (s.config.get('merge_events') and m.get('kind') in set(s.config.get('event_kinds', DEFAULT_EVENTS)))][-200:],
         'events': combined_events(s),
@@ -941,9 +1067,11 @@ async def sync_hub_accounts(s, retry_events=False):
         result = await api(s.session, 'GET', s.config['hub_url']+'/api/forgecast/v1/connections',
                            headers={'Authorization':'Bearer '+s.vault.get('hub_token')})
         s.hub_connection = 'connected'
+        accept_entitlements(s,result)
+        s.meta_chat.discover(result.get('chat_connections', []))
         for conn in result.get('connections', []):
             platform, token = conn.get('platform'), conn.get('access_token')
-            if platform not in s.statuses or platform in s.paused_platforms: continue
+            if platform not in ('twitch', 'youtube', 'kick') or platform in s.paused_platforms: continue
             if not token:
                 old = s.adapters.pop(platform, None)
                 if old:
@@ -1093,7 +1221,8 @@ async def poll_hub(s):
         url, token = s.config.get('hub_url'), s.vault.get('hub_token')
         if url and token:
             now = time.monotonic()
-            if now >= next_accounts:
+            if now >= next_accounts or s.meta_chat.rediscover:
+                s.meta_chat.rediscover = False
                 try:
                     async with s.lock: await sync_hub_accounts(s)
                     await refresh_origin_avatars(s)
@@ -1184,8 +1313,10 @@ async def lifecycle(app):
                 bridge.chmod(0o600)
         else:
             seed_demo(s)
+        if not s.demo: await restore_extra(s)
         task = asyncio.create_task(poll(s)) if not s.demo else None
         hub_task = asyncio.create_task(poll_hub(s)) if not s.demo else None
+        meta_task = asyncio.create_task(s.meta_chat.run()) if not s.demo else None
         audio_task = asyncio.create_task(poll_audio(s)) if not s.demo else None
         notify_task = asyncio.create_task(audio_notifications(s)) if not s.demo else None
         history_task = asyncio.create_task(poll_history(s)) if not s.demo else None
@@ -1205,7 +1336,7 @@ async def lifecycle(app):
         if hub_task:
             hub_task.cancel()
             await asyncio.gather(hub_task, return_exceptions=True)
-        for background in (audio_task, notify_task, history_task, doctor_notify_task, update_task):
+        for background in (meta_task, audio_task, notify_task, history_task, doctor_notify_task, update_task):
             if background:
                 background.cancel()
                 await asyncio.gather(background, return_exceptions=True)
@@ -1221,16 +1352,22 @@ def create_app(state):
     app['state'] = state
     app['web_path'] = WEB
     app.cleanup_ctx.append(lifecycle)
-    for path in ('/', '/app.js', '/style.css', '/favicon.png'):
+    for path in ('/', '/app.js', '/studio-editor.js', '/vertical-studio.js', '/style.css', '/favicon.png'):
         app.router.add_get(path, page)
     app.router.add_get('/icons/{platform}.svg', platform_icon)
     app.router.add_get('/media/{key}', media)
+    app.router.add_get('/overlay/studio', studio_asset)
+    app.router.add_get('/studio-player.js', studio_asset)
+    app.router.add_get('/studio-player.css', studio_asset)
+    app.router.add_get('/overlay/design-feed/{id}', studio_feed)
     app.router.add_get('/overlay', overlay_page)
     app.router.add_get('/overlay.js', overlay_script)
     app.router.add_get('/overlay.css', overlay_style)
     app.router.add_get('/overlay/feed', overlay_feed)
     app.router.add_get('/api/overlay-link', overlay_link)
     app.router.add_get('/api/state', get_state)
+    app.router.add_get('/api/vertical', vertical_catalog)
+    app.router.add_post('/api/vertical/preview', vertical_preview)
     app.router.add_get('/api/pairing', pairing)
     app.router.add_get('/api/obs-connection', obs_connection)
     app.router.add_post('/api/action', action)
@@ -1277,4 +1414,5 @@ def main(on_ready=None):
 
 if __name__ == '__main__':
     main()
+
 

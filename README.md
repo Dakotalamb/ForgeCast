@@ -1,3 +1,57 @@
+# FDGCast 1.0.2 — horizontal and vertical output update
+
+[Download Windows installer](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.2).
+
+Twitch dual format now uses OBS Additional Canvas. YouTube has separate Horizontal and Vertical presets, and output health shows actual sending progress. OBS keeps control of its main encoder.
+
+Close OBS and Companion before installing. Twitch requires Enhanced Broadcasting, the FDGCast Additional Canvas, at least four video tracks, and encoder headroom. See [setup instructions](docs/VERTICAL-PLATFORM-SETUP.md) and [release notes](docs/RELEASE_1.0.2.md).
+
+The notes below describe earlier releases.
+
+# Output recovery review: 1.0.2-rc.1
+
+Review candidate only; stable 1.0.1 and the Hub feed are unchanged. See
+[output recovery changes and test scope](docs/OUTPUT_RECOVERY_REVIEW.md).
+
+# FDGCast 1.0.1 — emergency recovery update
+
+[Download the recovery release](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.1).
+
+1.0.1 removes the 1.0.0 main-output video override and clears its saved preference.
+OBS controls its own main encoder again. Main-output Vertical Studio routing is
+temporarily disabled; vertical layouts remain available on added destinations.
+Close OBS and Companion before installing. See [hotfix notes](docs/RELEASE_1.0.1.md).
+
+Earlier 1.0.0 feature notes follow; main-output vertical routing described there
+is disabled by 1.0.1.
+
+# FDGCast 1.0.0
+
+[Download Windows installer and release notes](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.0).
+
+Windows release with a dedicated Vertical Studio, draw-on-scene camera crops,
+prominent automatic scene following, live-source previews and saved
+per-scene layouts, portrait crop/fit per destination, seven chat readers,
+saved Overlay Studio designs with paid live access, and clearer setup guidance.
+Includes picture selection for the service configured as OBS main stream.
+See [1.0.0 release notes and known limitations](docs/RELEASE_1.0.0.md).
+Live platform, reconnect and resource acceptance remain follow-up work; Meta
+requires separate Hub deployment/configuration and TikTok is experimental.
+
+See [Vertical Studio setup](docs/VERTICAL_STUDIO.md),
+[0.9.0 release notes](docs/RELEASE_0.9.0.md),
+[1.0.0 release checklist](docs/RELEASE_1.0.0_CHECKLIST.md),
+[overlay setup and paid-access handoff](docs/OVERLAY_STUDIO.md), and
+[platform coverage](docs/MORE_PLATFORMS.md).
+
+Close OBS and Companion before upgrading. The installer preserves settings,
+credentials and dock identity. Live overlays require the Hub's verified
+`fdgcast_overlays` entitlement. Until that server update is deployed, the designer
+and sample previews work but live overlay feeds remain locked. Official FDG and
+other complimentary access must be resolved by the Hub's shared entitlement service.
+
+Earlier release notes below are historical.
+
 # FDGCast 0.8.0 Preview
 
 YouTube streaming chat and quota-aware recovery, clearer Kick delivery diagnosis, guided audio testing, reviewed feedback, and preference backup/restore.
@@ -158,8 +212,9 @@ See `docs/NATIVE_BUILD.md`. Install only into an isolated OBS test copy first.
 Requires OBS 30+ APIs, compatible Qt6, and a matching 64-bit OBS SDK.
 
 The main stream must be active with H.264/AAC. Disable Enhanced Broadcasting for
-the test. Additional destinations reuse these encoders and the same scene/output
-format; no separate bitrate or vertical composition. Each destination uses its
+the test. Same as OBS destinations reuse these encoders. Vertical fill/fit destinations
+use a separate 720 × 1280 H.264 encoder at 4500 kbps while sharing main audio.
+Vertical framing follows the main program; it is not a separate scene editor. Each destination uses its
 own upload bandwidth. Start one at a time and verify arrival on each platform.
 
 Stopping the main OBS stream also stops all FDGCast secondary streams. Closing
@@ -237,4 +292,5 @@ See `TEST_RESULTS.md` for the checks actually run in this environment.
 This is original source for this project, not a rebranded copy of Aitum. Before a
 public release, select a distribution license compatible with OBS and all linked
 dependencies, perform a security review and complete the live-platform test matrix.
+
 
