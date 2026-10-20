@@ -24,11 +24,11 @@ void check(bool ok,const char *message){if(!ok)throw std::runtime_error(message)
 struct Tone {
  obs_source_t *source;std::atomic<bool> stop{false};std::thread thread;
  Tone(obs_source_t *s):source(s),thread([this]{
-  uint64_t sample=0;float left[480],right[480];
-  while(!stop){for(int i=0;i<480;++i){left[i]=right[i]=.2f*std::sin(2*3.141592653589793*440*(sample++)/48000);}
+  uint64_t sample=0;const uint64_t base=os_gettime_ns();const auto start=std::chrono::steady_clock::now();float left[480],right[480];
+  while(!stop){const uint64_t first=sample;for(int i=0;i<480;++i){left[i]=right[i]=.2f*std::sin(2*3.141592653589793*440*(sample++)/48000);}
    obs_source_audio a{};a.data[0]=reinterpret_cast<const uint8_t*>(left);a.data[1]=reinterpret_cast<const uint8_t*>(right);
-   a.frames=480;a.speakers=SPEAKERS_STEREO;a.format=AUDIO_FORMAT_FLOAT_PLANAR;a.samples_per_sec=48000;a.timestamp=os_gettime_ns();
-   obs_source_output_audio(source,&a);std::this_thread::sleep_for(10ms);
+   a.frames=480;a.speakers=SPEAKERS_STEREO;a.format=AUDIO_FORMAT_FLOAT_PLANAR;a.samples_per_sec=48000;a.timestamp=base+first*1000000000ULL/48000;
+   obs_source_output_audio(source,&a);std::this_thread::sleep_until(start+std::chrono::nanoseconds(sample*1000000000ULL/48000));
   }
  }){}
  ~Tone(){stop=true;thread.join();}
@@ -71,7 +71,8 @@ int main(int argc,char **argv){
  QCoreApplication app(argc,argv);
  try {
   check(argc==3,"Expected OBS runtime root and mode");const auto root=std::filesystem::absolute(argv[1]);const std::string mode=argv[2];
-  const auto data=(root/"data"/"libobs").string();check(obs_startup("en-US",nullptr,nullptr),"OBS startup failed");obs_add_data_path(data.c_str());
+  check(obs_startup("en-US",nullptr,nullptr),"OBS startup failed");
+  // Execute beside the official obs.dll so its normal data paths resolve.
   obs_audio_info ai{};ai.samples_per_sec=48000;ai.speakers=SPEAKERS_STEREO;check(obs_reset_audio(&ai),"Audio initialization failed");
   obs_video_info vi{};const auto graphics=(root/"bin"/"64bit"/"libobs-d3d11.dll").string();vi.graphics_module=graphics.c_str();
   vi.fps_num=30;vi.fps_den=1;vi.base_width=vi.output_width=1920;vi.base_height=vi.output_height=1080;vi.output_format=VIDEO_FORMAT_NV12;
