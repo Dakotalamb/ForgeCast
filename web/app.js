@@ -18,7 +18,15 @@ async function run(fn, target) { if(target){target.disabled=true;target.setAttri
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
-function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...Object.fromEntries(new FormData(f)),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');if(form==='destinationForm'){resetDestinationForm();$('destinationSaved').textContent='Destination saved. Check its picture format and platform preview before going live.';}},f.querySelector('button')); }; }
+function formData(f,form){
+ const data=Object.fromEntries(new FormData(f));
+ if(form==='destinationForm'&&['youtube','youtube_vertical'].includes(data.platform)){
+  data.name=data.name||(data.platform==='youtube_vertical'?'YouTube Vertical':'YouTube Horizontal');
+  data.platform='youtube';
+ }
+ return data;
+}
+function bind(form, op, extras={}) { $(form).onsubmit = event => { event.preventDefault(); const f=event.currentTarget; run(async()=>{await action(op,{...formData(f,form),...extras}); if(form!=='hubForm'&&form!=='obsForm')f.querySelectorAll('input[type=password]').forEach(e=>e.value='');if(form==='destinationForm'){resetDestinationForm();$('destinationSaved').textContent='Destination saved. Check its picture format and platform preview before going live.';}},f.querySelector('button')); }; }
 document.querySelectorAll('[data-open-rumble]').forEach(b=>b.onclick=()=>{openTab('setup');$('rumbleChat').scrollIntoView({behavior:'smooth'});$('rumbleForm').elements.api_url.focus();});
 for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCase()+platform.slice(1)).onclick=()=>{if(!state?.hub_paired){error('Pair with your Hub first.');return;}window.open(state.hub_url+'/auth/'+platform,'_blank','noopener,noreferrer');};
 bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
@@ -40,22 +48,29 @@ function resetDestinationForm(){
 $('destinationCancel').onclick=resetDestinationForm;
 let destinationCatalog=[];
 function destinationPlatformChanged(){
- const platform=$('destinationPlatform').value, row=destinationCatalog.find(r=>r.id===platform);
+ const preset=$('destinationPlatform').value, platform=preset==='youtube_vertical'?'youtube':preset, row=destinationCatalog.find(r=>r.id===platform);
+ if(platform==='youtube'){
+  const vertical=preset==='youtube_vertical';
+  $('destinationPicture').value=vertical?'vertical_studio':'main';
+  $('destinationForm').elements.name.placeholder=vertical?'YouTube Vertical':'YouTube Horizontal';
+  $('destinationForm').elements.key.placeholder=vertical?'Paste the right-hand vertical Encoder key':'Paste the horizontal stream key';
+ }else $('destinationForm').elements.key.placeholder='Paste your stream key';
  const required=row?row.requires_server:platform==='custom';
  $('destinationAdvanced').open=required;
  $('destinationForm').elements.server.required=required;
  $('destinationForm').elements.server.value='';
- $('destinationForm').elements.name.placeholder=row?.name||{twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
- $('destinationHelp').textContent=row?.help||'Paste your server address and stream key.';
+ if(platform!=='youtube')$('destinationForm').elements.name.placeholder=row?.name||{twitch:'Twitch',youtube:'YouTube',kick:'Kick',custom:'My destination'}[platform];
+ $('destinationHelp').textContent=platform==='youtube'?(preset==='youtube_vertical'?'In YouTube Live Control Room, set the vertical preview to Encoder and copy its separate stream key. Send your Vertical Studio layout here. Keep the horizontal destination running with its own key; both feeds share one broadcast and chat.':'Use the horizontal preview’s stream key. Sends the OBS picture at its actual resolution; use landscape OBS settings for horizontal video. For a custom vertical feed, add YouTube Vertical with the separate Encoder key.'):row?.help||'Paste your server address and stream key.';
+ pictureChanged();
 }
 function renderDestinationCatalog(rows){
  if(!rows?.length||JSON.stringify(rows)===JSON.stringify(destinationCatalog))return;
  const selected=$('destinationPlatform').value;destinationCatalog=rows;
- $('destinationPlatform').replaceChildren(...rows.map(r=>{const o=el('option',r.name);o.value=r.id;return o;}));
- $('destinationPlatform').value=rows.some(r=>r.id===selected)?selected:rows[0].id;
+ $('destinationPlatform').replaceChildren(...rows.flatMap(r=>{const o=el('option',r.id==='youtube'?'YouTube Horizontal':r.name);o.value=r.id;if(r.id!=='youtube')return [o];const v=el('option','YouTube Vertical');v.value='youtube_vertical';return [o,v];}));
+ $('destinationPlatform').value=(selected==='youtube_vertical'||rows.some(r=>r.id===selected))?selected:rows[0].id;
  destinationPlatformChanged();
 }
-$('destinationPlatform').onchange=destinationPlatformChanged;
+$('destinationPlatform').onchange=()=>{$('destinationForm').elements.key.value='';destinationPlatformChanged();};
 destinationPlatformChanged();
 let pairingLoaded=false,obsPasswordLoaded=false;
 $('showObsPassword').onclick=()=>{const input=$('obsForm').elements.password;input.type=input.type==='password'?'text':'password';$('showObsPassword').textContent=input.type==='password'?'Show password':'Hide password';};
@@ -153,7 +168,7 @@ function outputStatus(s,d){
 function addVerticalOutput(original){
  resetDestinationForm();const f=$('destinationForm');
  f.elements.paired_with.value=original?.id||'main';f.elements.platform.value=original?.platform||destinationCatalog.find(r=>(state?.main_output?.name||'').toLowerCase().includes(r.name.toLowerCase()))?.id||'custom';destinationPlatformChanged();
- const vertical=!original||(original.picture||'main')==='main';f.elements.picture.value=vertical?'vertical_studio':'main';f.elements.name.value=(original?.name||'Main stream')+(vertical?' · Vertical':' · OBS picture');
+ const vertical=!original||(original.picture||'main')==='main';if(f.elements.platform.value==='youtube'&&vertical){f.elements.platform.value='youtube_vertical';destinationPlatformChanged();}f.elements.picture.value=vertical?'vertical_studio':'main';f.elements.name.value=(original?.name||'Main stream')+(vertical?' · Vertical':' · OBS picture');
  f.elements.server.value='';f.elements.key.value='';$('destinationAdvanced').open=true;$('destinationPairHelp').hidden=false;
  $('destinationCancel').hidden=false;$('destinationCancel').textContent='Cancel setup';
  $('destinationFormTitle').textContent=vertical?'Add a separate vertical output':'Add a separate OBS-picture output';pictureChanged();openTab('outputs');f.scrollIntoView({behavior:'smooth'});f.elements.key.focus();
@@ -234,7 +249,7 @@ function render(s) {
    controls.append(button((d.picture||'main')==='main'?'Add separate vertical output':'Add separate OBS-picture output',()=>addVerticalOutput(d)));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');
-     f.elements.platform.value=d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
+     f.elements.platform.value=d.platform==='youtube'&&(d.picture||'main')!=='main'?'youtube_vertical':d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
      f.elements.paired_with.value=d.paired_with||'';$('destinationPairHelp').hidden=!d.paired_with;
      f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';f.elements.picture.value=d.picture||'main';pictureChanged();
      $('destinationFormTitle').textContent='Edit '+d.name;$('destinationSave').textContent='Save changes';$('destinationCancel').hidden=false;$('destinationCancel').textContent='Cancel editing';$('destinationSaved').textContent='';f.scrollIntoView({behavior:'smooth'});f.elements.picture.focus();

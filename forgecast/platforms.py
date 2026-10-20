@@ -1,6 +1,6 @@
 """Streaming destinations; chat support is separate from ingest support."""
 PLATFORMS = [
-    dict(id='twitch', name='Twitch', server='rtmp://live.twitch.tv/app', help='Server is selected automatically. Paste your Twitch stream key.'),
+    dict(id='twitch', name='Twitch', server='rtmp://live.twitch.tv/app', help='Server is selected automatically. Paste your Twitch stream key. Twitch dual format uses OBS Enhanced Broadcasting with an Additional Canvas, rather than a second ordinary output. FDGCast Vertical Studio is not yet integrated with that feature.'),
     dict(id='youtube', name='YouTube', server='rtmps://a.rtmps.youtube.com:443/live2', help='Server is selected automatically. Paste your YouTube stream key.'),
     dict(id='kick', name='Kick', server='', requires_server=False, help='Uses your linked Kick account to find its server. If unavailable, paste the server from your Kick dashboard.'),
     dict(id='facebook', name='Facebook Live', server='rtmps://rtmp-api.facebook.com:443/rtmp/', help='The standard Facebook server is selected automatically. In Live Producer choose Streaming software and paste its stream key. Override the server under Advanced if Facebook supplies a different address. Check the preview and any Go live confirmation in Facebook. Connect Facebook chat separately through Hub in Connections.'),
@@ -17,3 +17,4 @@ for row in PLATFORMS:
     row.setdefault('server', '')
     row.setdefault('requires_server', not bool(row['server']))
 CATALOG = {row['id']: row for row in PLATFORMS}
+
