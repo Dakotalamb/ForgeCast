@@ -361,7 +361,7 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'kick','key':'SECRET'})
         self.assertEqual(r.status,400)
         self.assertIn('Advanced settings',await r.text())
-        r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','platform':'kick','server':'rtmps://example.com/app','key':'SECRET'})
+        r=await self.client.post('/api/action',headers=self.headers,json={'op':'save_destination','id':self.state.config['destinations'][-1]['id'],'platform':'kick','server':'rtmps://example.com/app','key':'SECRET'})
         self.assertEqual(r.status,200)
 
     async def test_custom_still_requires_server_and_replacement_keeps_key(self):
@@ -461,3 +461,4 @@ class ServerTests(unittest.IsolatedAsyncioTestCase):
         self.state.obs.connect.assert_awaited_once_with(4455,'KEEP-OBS-SECRET')
         self.assertEqual(self.state.vault.get('obs_password'),'KEEP-OBS-SECRET')
         self.state.demo=True
+

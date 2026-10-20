@@ -80,84 +80,14 @@ MODULE_EXPORT const char *obs_module_description(void)
 
 // A video-only wrapper reads the current program source each frame, including
 // OBS transitions. Audio continues through the existing main AAC encoder.
-static const char *portraitName(void *) { return "FDGCast portrait picture"; }
-static void *portraitCreate(obs_data_t *settings, obs_source_t *source)
-{
-    return new PortraitData(obs_data_get_bool(settings,"fill"),obs_data_get_bool(settings,"studio"),source);
-}
-static void portraitRender(void *data, gs_effect_t *)
-{
-    auto *program = obs_get_output_source(0);
-    if (!program) return;
-    auto *picture=static_cast<PortraitData *>(data);
-    if(picture->studio){picture->render(program);obs_source_release(program);return;}
-    const auto layout = fdgcast::portraitLayout(static_cast<float>(obs_source_get_width(program)),
-                                               static_cast<float>(obs_source_get_height(program)),
-                                               picture->fill);
-    if (layout.scale > 0) {
-        gs_matrix_push();
-        gs_matrix_translate3f(layout.x, layout.y, 0.f);
-        gs_matrix_scale3f(layout.scale, layout.scale, 1.f);
-        obs_source_video_render(program);
-        gs_matrix_pop();
-    }
-    obs_source_release(program);
-}
-
-struct PortraitVideo {
-    obs_view_t *view = nullptr;
-    obs_encoder_t *encoder = nullptr;
-    bool added = false;
-    bool create(obs_encoder_t *main, bool fill, bool studio=false)
-    {
-        obs_video_info info{};
-        if (!obs_get_video_info(&info)) return false;
-        info.base_width = info.output_width = 720;
-        info.base_height = info.output_height = 1280;
-        info.output_format = VIDEO_FORMAT_NV12;
-        info.colorspace = VIDEO_CS_709;
-        info.range = VIDEO_RANGE_PARTIAL;
-        view = obs_view_create();
-        if (!view) return false;
-        auto *settings = obs_data_create();
-        obs_data_set_bool(settings, "fill", fill);
-        obs_data_set_bool(settings, "studio", studio);
-        auto *source = obs_source_create_private("fdgcast_portrait", "FDGCast portrait", settings);
-        obs_data_release(settings);
-        if (!source) return false;
-        obs_view_set_source(view, 0, source);
-        obs_source_release(source);
-        auto *video = obs_view_add2(view, &info);
-        if (!video) return false;
-        added = true;
-        auto *mainSettings = obs_encoder_get_settings(main);
-        settings = obs_data_create();
-        obs_data_apply(settings, mainSettings);
-        obs_data_release(mainSettings);
-        obs_data_set_string(settings, "rate_control", "CBR");
-        obs_data_set_int(settings, "bitrate", 4500);
-        obs_data_set_int(settings, "keyint_sec", 2);
-        encoder = obs_video_encoder_create(obs_encoder_get_id(main),
-            fill ? "FDGCast portrait fill" : "FDGCast portrait fit", settings, nullptr);
-        obs_data_release(settings);
-        if (!encoder) return false;
-        obs_encoder_set_video(encoder, video);
-        return true;
-    }
-    ~PortraitVideo()
-    {
-        if (encoder) obs_encoder_release(encoder);
-        if (added) obs_view_remove(view);
-        if (view) obs_view_destroy(view);
-    }
-};
-
+#include "portrait-video.hpp"
 
 struct Destination {
     std::shared_ptr<PortraitVideo> portrait;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
+    QString picture;
     bool starting = false;
     bool stopping = false;
     int startupTicks = 0;
@@ -941,7 +871,7 @@ public:
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
             QComboBox platform(&dialog), picture(&dialog);
-            picture.addItem("Horizontal · OBS scene", "main");
+            picture.addItem("OBS picture · actual OBS resolution", "main");
             picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
             picture.addItem("Vertical · show whole picture", "vertical_fit");
             picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
@@ -1044,8 +974,12 @@ public:
                 for (const auto &output : outputs) {
                     const auto row = output.toObject();
                     if (row.value("id") == dest.value("id")) {
-                        state = row.value("active").toBool() ? "LIVE" :
-                                row.value("busy").toBool() ? "CONNECTING / STOPPING" : "OFFLINE";
+                        const QString transport=row.value("transmission_state").toString();
+                        state=transport=="sending"?"SENDING":transport=="stalled"?"NO DATA":
+                              transport=="starting"?"WAITING FOR DATA":row.value("busy").toBool()?"CONNECTING / STOPPING":"OFFLINE";
+                        const int width=row.value("width").toInt(),height=row.value("height").toInt();
+                        if(width>0 && height>0) state+=" · "+QString::number(width)+" × "+QString::number(height);
+                        if(row.value("bitrate_kbps").isDouble()) state+=" · "+QString::number(row.value("bitrate_kbps").toInt())+" kbps";
                         if (!row.value("error").toString().isEmpty()) error = row.value("error").toString();
                         if (row.value("reconnecting").toBool()) state = "RECONNECTING";
                     }
@@ -1057,8 +991,8 @@ public:
                 item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
                 item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
                 item->setData(Qt::UserRole, dest.value("id").toString());
-                if (state == "LIVE") item->setForeground(QColor("#80d6a0"));
-                else if (state == "ERROR") item->setForeground(QColor("#ff6b6b"));
+                if (state.startsWith("SENDING")) item->setForeground(QColor("#80d6a0"));
+                else if (state == "ERROR" || state.startsWith("NO DATA")) item->setForeground(QColor("#ff6b6b"));
                 else if (state != "OFFLINE") item->setForeground(QColor("#ffd166"));
                 else item->setForeground(QColor("#a8afb8"));
                 if (item->data(Qt::UserRole).toString() == selected) list->setCurrentItem(item);
@@ -1361,6 +1295,14 @@ public:
             !url.userInfo().isEmpty() || !url.query().isEmpty() || !url.fragment().isEmpty() ||
             obj.value("key").toString().isEmpty())
             return "invalid_destination";
+        auto *mainService=obs_frontend_get_streaming_service();
+        if(mainService) {
+            const QString mainKey=QString::fromUtf8(obs_service_get_key(mainService));
+            const QUrl mainUrl(QString::fromUtf8(obs_service_get_url(mainService)));
+            if(!mainKey.isEmpty() && mainKey==obj.value("key").toString() &&
+                mainUrl.host().compare(url.host(),Qt::CaseInsensitive)==0)
+                return "duplicate_ingest";
+        }
         auto old = destinations.find(id);
         if (old != destinations.end()) {
             if (obs_output_active(old->second->output) || old->second->starting || old->second->stopping)
@@ -1395,6 +1337,7 @@ public:
             video = d->portrait->encoder;
         }
         d->name = obj.value("name").toString();
+        d->picture = picture;
         obs_data_t *settings = obs_data_create();
         QByteArray server = obj.value("server").toString().toUtf8();
         QByteArray key = obj.value("key").toString().toUtf8();
@@ -1524,7 +1467,11 @@ public:
             {"vertical_supported",mainCompatible()},{"detail",mainPictureError}};
         auto *mainStream = obs_frontend_get_streaming_output();
         if (mainStream) {
-            const QJsonObject counters{{"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
+            auto *mainVideo=obs_output_get_video_encoder(mainStream);
+            obs_video_info currentInfo{};obs_get_video_info(&currentInfo);
+            const QJsonObject counters{{"fps_num",static_cast<int>(currentInfo.fps_num)},{"fps_den",static_cast<int>(currentInfo.fps_den)},{"width",mainVideo?static_cast<int>(obs_encoder_get_width(mainVideo)):0},
+                {"height",mainVideo?static_cast<int>(obs_encoder_get_height(mainVideo)):0},
+                {"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
                 {"reconnecting",obs_output_reconnecting(mainStream)},
                 {"dropped",obs_output_get_frames_dropped(mainStream)},{"frames",obs_output_get_total_frames(mainStream)},
                 {"bytes",static_cast<double>(obs_output_get_total_bytes(mainStream))}};
@@ -1554,7 +1501,12 @@ public:
                 d.error = "Destination did not start within 30 seconds.";
                 results.append(QJsonObject{{"destination_id", entry.first}, {"status", "start_timeout_stopped"}});
             }
-            outputs.append(QJsonObject{{"id", entry.first}, {"name", d.name}, {"active", active},
+            auto *outputVideo=obs_output_get_video_encoder(d.output);
+            obs_video_info outputInfo{};obs_get_video_info(&outputInfo);
+            outputs.append(QJsonObject{{"fps_num",static_cast<int>(outputInfo.fps_num)},{"fps_den",static_cast<int>(outputInfo.fps_den)},{"picture",d.picture},
+                {"width",outputVideo?static_cast<int>(obs_encoder_get_width(outputVideo)):0},
+                {"height",outputVideo?static_cast<int>(obs_encoder_get_height(outputVideo)):0},
+                {"id", entry.first}, {"name", d.name}, {"active", active},
                 {"intentional_stop", intentionalStop}, {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
                 {"dropped", obs_output_get_frames_dropped(d.output)},
                 {"frames", obs_output_get_total_frames(d.output)},
@@ -1736,22 +1688,7 @@ static void frontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
-    obs_source_info portrait{};
-    portrait.id = "fdgcast_portrait";
-    portrait.type = OBS_SOURCE_TYPE_INPUT;
-    portrait.output_flags = OBS_SOURCE_VIDEO | OBS_SOURCE_CUSTOM_DRAW;
-    portrait.get_name = portraitName;
-    portrait.create = portraitCreate;
-    portrait.destroy = [](void *data) { delete static_cast<PortraitData *>(data); };
-    portrait.video_tick = [](void *data,float) {static_cast<PortraitData *>(data)->tick();};
-    portrait.enum_active_sources = [](void *data,obs_source_enum_proc_t callback,void *param) {
-        auto *p=static_cast<PortraitData *>(data);std::lock_guard<std::recursive_mutex> lock(p->mutex);
-        for(const auto &entry:p->children)callback(p->self,entry.second,param);
-    };
-    portrait.get_width = [](void *) -> uint32_t { return 720; };
-    portrait.get_height = [](void *) -> uint32_t { return 1280; };
-    portrait.video_render = portraitRender;
-    obs_register_source(&portrait);
+    registerPortraitSource();
     return true;
 }
 
@@ -1820,4 +1757,5 @@ void obs_module_unload(void)
     obs_frontend_remove_event_callback(frontendEvent, nullptr);
     // OBS normally emits EXIT first. Do not access frontend UI after Qt shutdown.
 }
+
 

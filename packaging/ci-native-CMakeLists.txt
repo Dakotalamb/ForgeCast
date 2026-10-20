@@ -13,3 +13,9 @@ target_link_libraries(${CMAKE_PROJECT_NAME} PRIVATE OBS::libobs OBS::obs-fronten
 target_sources(${CMAKE_PROJECT_NAME} PRIVATE src/plugin-main.cpp)
 set_target_properties(${CMAKE_PROJECT_NAME} PROPERTIES AUTOMOC ON AUTOUIC ON AUTORCC ON CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)
 set_target_properties_plugin(${CMAKE_PROJECT_NAME} PROPERTIES OUTPUT_NAME ${_name})
+
+
+find_package(Qt6 REQUIRED COMPONENTS Gui)
+add_executable(fdgcast-video-qa src/video-qa.cpp)
+target_link_libraries(fdgcast-video-qa PRIVATE OBS::libobs Qt6::Core Qt6::Gui)
+set_target_properties(fdgcast-video-qa PROPERTIES CXX_STANDARD 17 CXX_STANDARD_REQUIRED YES)

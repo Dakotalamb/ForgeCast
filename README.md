@@ -1,3 +1,8 @@
+# Output recovery review: 1.0.2-rc.1
+
+Review candidate only; stable 1.0.1 and the Hub feed are unchanged. See
+[output recovery changes and test scope](docs/OUTPUT_RECOVERY_REVIEW.md).
+
 # FDGCast 1.0.1 — emergency recovery update
 
 [Download the recovery release](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.1).
@@ -277,4 +282,5 @@ See `TEST_RESULTS.md` for the checks actually run in this environment.
 This is original source for this project, not a rebranded copy of Aitum. Before a
 public release, select a distribution license compatible with OBS and all linked
 dependencies, perform a security review and complete the live-platform test matrix.
+
 

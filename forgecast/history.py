@@ -112,12 +112,16 @@ class StreamHistory:
                 bad[uid] = dict(code=code,title=title,name=name,destination_id=uid, severity='critical' if code in ('failed','stopped') or ratio is not None and ratio>=0.05 else 'warning',
                     evidence=(str(dropped)+' network frames dropped in the latest sample.' if code=='network_drops' else 'OBS reports this output '+code+'.'),
                     suggestion='Check this destination and its route; OBS telemetry cannot prove the faulty network hop.',confidence='high')
-            state = 'attention' if uid in bad else 'live' if out.get('active') else 'connecting' if out.get('busy') else 'offline'
+            transport=out.get('transmission_state')
+            if transport=='stalled':
+                bad[uid]=dict(code='no_data',title=name+' is active but is not sending bytes.',name=name,destination_id=uid,severity='critical',evidence='No increase in output bytes for at least five seconds.',suggestion='Check encoder and connection status. Platform playback is not verified.',confidence='high')
+            state = 'attention' if uid in bad else transport if transport else 'live' if out.get('active') else 'connecting' if out.get('busy') else 'offline'
             rate = None
             if before and now>before['sample_at'] and out.get('active') and before.get('active'):
                 rate = max(0,(out.get('bytes',0)-before.get('bytes',0))*8/(now-before['sample_at'])/1000)
+            if 'bitrate_kbps' in out: rate=out['bitrate_kbps']
             self.health.append(dict(id=uid,name=name,state=state,bitrate_kbps=round(rate) if rate is not None else None))
-        healthy = [r['name'] for r in self.health if r['state']=='live']
+        healthy = [r['name'] for r in self.health if r['state'] in ('live','sending')]
         issues = list(bad.values())
         if len(bad)>1:
             issues.append(dict(code='shared',title='Multiple destinations are struggling.',evidence='Several outputs report problems in the same sample.',suggestion='A shared upload or system issue is possible; the cause is not proven.',confidence='medium'))
@@ -215,3 +219,4 @@ class StreamHistory:
                 lines.append(time.strftime('%H:%M:%S',time.localtime(e['time']))+' · '+e.get('title',e['kind']))
         lines += ['Observed telemetry only; viewer playback and exact root cause are not verified.','Output/source names may appear above. Review before sharing.']
         return '\n'.join(lines)
+

@@ -99,7 +99,7 @@
  get('vsSave').onclick=()=>perform(get('vsSave'),async()=>{const result=await action('vertical_save',{scene_id:scope,layout:draft});saved=result.settings.layouts;dirty=false;followState();note('Saved · vertical outputs follow this layout');get('vsDraftName').textContent=nameOf(scope)+' · saved';});
  get('vsRevert').onclick=()=>{if(!dirty||confirm('Discard unsaved edits?'))chooseScene(scope);};
  get('vsReset').onclick=()=>perform(get('vsReset'),async()=>{if(!confirm(scope==='*'?'Remove the saved default layout?':'Remove this scene’s saved layout and follow the default?'))return;const result=await action('vertical_reset',{scene_id:scope});saved=result.settings.layouts;chooseScene(scope);});
- get('vsAssign').onclick=()=>perform(get('vsAssign'),async()=>{if(!get('vsDestination').value)throw Error('Add a destination first.');if(get('vsDestination').value==='__obs_main__') {await action('main_picture',{picture:'vertical_studio'});note('Main stream request sent. Check the applied picture in Destinations before streaming.');} else {await action('vertical_assign',{id:get('vsDestination').value});note('Destination set to Vertical Studio. Save your layout, then start it in Destinations.');}await refresh();});
+ get('vsAssign').onclick=()=>perform(get('vsAssign'),async()=>{if(!get('vsDestination').value)throw Error('Add a destination first.');if(get('vsDestination').value==='__obs_main__') {await action('main_picture',{picture:'vertical_studio'});note('Main stream request sent. Check the applied picture in Destinations before streaming.');} else {await action('vertical_assign',{id:get('vsDestination').value});note('This output now uses Vertical Studio instead of its old picture. To keep a separate OBS-picture output, add a vertical output alongside it in Destinations.');}await refresh();});
  get('vsPause').onclick=()=>{paused=!paused;get('vsPause').textContent=paused?'Resume previews':'Pause previews';get('vsPreviewStatus').textContent=paused?'Previews paused · broadcast video continues.':'Resuming live previews…';};
  function addCamera(){
   if(draft.regions.length>=4){note('Choose an existing picture to crop. Four pictures maximum.');return false;}
@@ -137,7 +137,7 @@
  };
  canvas.onpointerup=()=>{drag=null;};canvas.onpointercancel=()=>{drag=null;};
  canvas.onkeydown=e=>{const deltas={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]},d=deltas[e.key];if(!d)return;e.preventDefault();const r=draft.regions[selected],n=e.shiftKey?10:1;r.x=clamp(r.x+d[0]*n,0,720-r.width);r.y=clamp(r.y+d[1]*n,0,1280-r.height);draft.preset='custom';changed();inspector();};
- window.renderVerticalStatus=s=>{connected=s.obs_connected;const options=[...(s.main_output?[{id:'__obs_main__',name:s.main_output.name||'OBS main stream',picture:s.main_output.picture}]:[]),...s.destinations];const key=JSON.stringify(options.map(d=>[d.id,d.name,d.picture]));if(destinationKey!==key){destinationKey=key;const chosen=get('vsDestination').value;get('vsDestination').replaceChildren(...(options.length?options:[{id:'',name:'Connect OBS or add a destination'}]).map(d=>{const o=document.createElement('option');o.value=d.id;o.textContent=d.name+(d.picture==='vertical_studio'?' · Studio':'');return o;}));if(options.some(d=>d.id===chosen))get('vsDestination').value=chosen;}if(!connected)get('vsConnection').textContent='OBS disconnected · saved layout remains available';};
+ window.renderVerticalStatus=s=>{connected=s.obs_connected;const options=[...(s.main_output?.vertical_supported?[{id:'__obs_main__',name:s.main_output.name||'OBS main stream',picture:s.main_output.picture}]:[]),...s.destinations];const key=JSON.stringify(options.map(d=>[d.id,d.name,d.picture]));if(destinationKey!==key){destinationKey=key;const chosen=get('vsDestination').value;get('vsDestination').replaceChildren(...(options.length?options:[{id:'',name:'Connect OBS or add a destination'}]).map(d=>{const o=document.createElement('option');o.value=d.id;o.textContent=d.name+(d.picture==='vertical_studio'?' · Studio':'');return o;}));if(options.some(d=>d.id===chosen))get('vsDestination').value=chosen;}if(!connected)get('vsConnection').textContent='OBS disconnected · saved layout remains available';};
  async function previews(){
   try{
    if(!document.hidden&&get('vertical').classList.contains('active')&&!paused){
@@ -163,3 +163,4 @@
  }
  followState();inspector();draw();previews();
 })();
+

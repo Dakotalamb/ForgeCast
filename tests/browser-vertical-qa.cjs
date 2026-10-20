@@ -7,8 +7,8 @@ async function main(){
   const url=await new Promise((resolve,reject)=>{let out='';const timer=setTimeout(()=>reject(Error('Startup timeout')),15000);server.stdout.on('data',data=>{out+=data;const m=out.match(/http:\/\/127\.0\.0\.1:17654\/#\S+/);if(m){clearTimeout(timer);resolve(m[0]);}});server.on('exit',code=>reject(Error('Server exit '+code)));});
   browser=await chromium.launch({headless:true,args:['--no-sandbox']});const page=await browser.newPage({viewport:{width:1600,height:1100}}),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('dialog',d=>d.accept());
   const pictures=await page.evaluate(()=>{const make=(color,w,h)=>{const c=document.createElement('canvas');c.width=w;c.height=h;const ctx=c.getContext('2d');ctx.fillStyle=color;ctx.fillRect(0,0,w,h);if(w===960){ctx.fillStyle='#dd2222';ctx.fillRect(w*0.7,h*0.6,w*0.25,h*0.35);}return c.toDataURL('image/jpeg');};return {program:make('#1058dd',960,540),camera:make('#dd2222',640,480)};});
-  let current='scene-one',layouts={},previewCalls=0,lastSources=[],mainPicture='main',mainBusy=false,mainRequests=0,mainSupported=true;
-  await page.route('**/api/state',async route=>{const r=await route.fetch(),data=await r.json();data.obs_connected=true;data.native_connected=true;data.main_output={id:'main',name:'OBS main stream · YouTube',picture:mainPicture,busy:mainBusy,vertical_supported:mainSupported};data.destinations=[{id:'dest',name:'Phone stream',picture:'main'}];await route.fulfill({response:r,json:data});});
+  let current='scene-one',layouts={},previewCalls=0,lastSources=[],mainPicture='main',mainBusy=false,mainRequests=0,mainSupported=true,transport='offline';
+  await page.route('**/api/state',async route=>{const r=await route.fetch(),data=await r.json();data.obs_connected=true;data.native_connected=true;data.main_output={id:'main',name:'OBS main stream · YouTube',picture:mainPicture,busy:mainBusy,vertical_supported:mainSupported,width:1920,height:1080,transmission_state:transport,bitrate_kbps:transport==='sending'?4500:0};data.destinations=[{id:'dest',name:'Phone stream',picture:'main'}];await route.fulfill({response:r,json:data});});
   await page.route('**/api/vertical',route=>route.fulfill({json:{scene_id:current,scenes:[{id:'scene-one',name:'Gameplay'},{id:'scene-two',name:'BRB'}],sources:[{id:'camera',name:'Existing webcam'}],settings:{schema_version:1,layouts}}}));
   await page.route('**/api/vertical/preview',route=>{previewCalls++;const d=route.request().postDataJSON();lastSources=d.sources;const selected=d.scene_id==='*'?current:d.scene_id;return route.fulfill({json:{scene_id:current,scene_name:current==='scene-one'?'Gameplay':'BRB',selected_id:selected,frames:{[current]:pictures.program,[selected]:pictures.program,camera:pictures.camera},missing:[],captured_at:Date.now()/1000}});});
   await page.route('**/api/action',route=>{const d=route.request().postDataJSON();if(d.op==='main_picture'){mainPicture=d.picture;mainRequests++;return route.fulfill({json:{ok:true,pending:true}});}if(d.op==='vertical_save'){layouts[d.scene_id]=structuredClone(d.layout);return route.fulfill({json:{ok:true,settings:{schema_version:1,layouts}}});}return route.continue();});
@@ -30,9 +30,13 @@ async function main(){
   await page.locator('#vsDestination').selectOption('__obs_main__');await page.locator('#vsAssign').click();
   await page.locator('[data-tab=outputs]').click();await page.waitForFunction(()=>document.querySelector('#mainStreamPicture').value==='vertical_studio');
   assert.match(await page.locator('#mainStreamName').textContent(),/YouTube/);assert.equal(mainRequests,1);
-  await page.locator('#mainStreamPicture').selectOption('main');await page.locator('#mainStreamSave').click();await page.waitForFunction(()=>document.querySelector('#mainStreamStatus').textContent.includes('Applied: Horizontal'));
+  await page.locator('#mainStreamPicture').selectOption('main');await page.locator('#mainStreamSave').click();await page.waitForFunction(()=>document.querySelector('#mainStreamPicture').value==='main' && document.querySelector('#mainStreamStatus').textContent.includes('1920 × 1080'));
   mainBusy=true;await page.waitForFunction(()=>document.querySelector('#mainStreamSave').disabled);assert.equal(await page.locator('#mainStreamPicture').isDisabled(),true);mainBusy=false;
-  mainSupported=false;await page.waitForFunction(()=>document.querySelector('#mainStreamPicture option[value=vertical_studio]').disabled);assert.match(await page.locator('#mainStreamStatus').textContent(),/temporarily disabled/);
+  mainSupported=false;await page.waitForFunction(()=>document.querySelector('#mainStreamPicture option[value=vertical_studio]').disabled);assert.match(await page.locator('#mainStreamStatus').textContent(),/disabled/);
+  transport='stalled';await page.waitForFunction(()=>document.querySelector('#mainStreamStatus').textContent.includes('NO DATA'));
+  transport='sending';await page.waitForFunction(()=>document.querySelector('#mainStreamStatus').textContent.includes('SENDING DATA'));
+  await page.locator('#mainAddVertical').click();assert.equal(await page.locator('#destinationPairHelp').isVisible(),true);assert.equal(await page.locator('#destinationForm input[name=key]').inputValue(),'');assert.equal(await page.locator('#destinationForm input[name=paired_with]').inputValue(),'main');
+  await page.locator('#destinationCancel').click();assert.equal(await page.locator('#destinationPairHelp').isVisible(),false);assert.equal(await page.locator('#destinationForm input[name=paired_with]').inputValue(),'');
   await page.locator('[data-tab=vertical]').click();
   current='scene-two';await page.waitForFunction(()=>document.querySelector('#vsScene').value==='scene-two');assert.equal(await page.locator('#vsFollow').isChecked(),true);
   await page.locator('#vsBackground').evaluate(e=>{e.value='#202020';e.dispatchEvent(new Event('input',{bubbles:true}));});current='scene-one';await page.waitForFunction(()=>document.querySelector('#vsSaved').textContent.includes('save or revert'));assert.equal(await page.locator('#vsScene').inputValue(),'scene-two');
@@ -43,3 +47,4 @@ async function main(){
  }finally{if(browser)await browser.close();server.kill('SIGINT');}
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
+

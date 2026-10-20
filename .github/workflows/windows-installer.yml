@@ -2,7 +2,7 @@ name: Build FDGCast Windows installer
 
 on:
   push:
-    branches: [main, release/0.9.0]
+    branches: [main, release/0.9.0, next/output-recovery]
   workflow_dispatch:
 
 permissions:
@@ -34,6 +34,8 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Portrait framing tests failed' }
           ./build-portrait/Release/main-picture-test.exe
           if ($LASTEXITCODE -ne 0) { throw 'Main stream routing tests failed' }
+          ./build-portrait/Release/render-guard-test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'Renderer recursion guard failed' }
       - name: Configure OBS 32.2.2 native build
         shell: pwsh
         run: |
@@ -43,6 +45,9 @@ jobs:
           Copy-Item 'native/chat-scroll-follow.hpp' (Join-Path $template 'src/chat-scroll-follow.hpp') -Force
           Copy-Item 'native/portrait-layout.hpp' (Join-Path $template 'src/portrait-layout.hpp') -Force
           Copy-Item 'native/main-picture.hpp' (Join-Path $template 'src/main-picture.hpp') -Force
+          Copy-Item 'native/portrait-video.hpp' (Join-Path $template 'src/portrait-video.hpp') -Force
+          Copy-Item 'native/render-guard.hpp' (Join-Path $template 'src/render-guard.hpp') -Force
+          Copy-Item 'tests/encoded/video-qa.cpp' (Join-Path $template 'src/video-qa.cpp') -Force
           Copy-Item 'native/vertical-render.hpp' (Join-Path $template 'src/vertical-render.hpp') -Force
           Copy-Item 'packaging/ci-native-CMakeLists.txt' (Join-Path $template 'CMakeLists.txt') -Force
           $locale = Join-Path $template 'data/locale'
@@ -53,7 +58,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'FDGCast'
-          $spec.version = '1.0.1'
+          $spec.version = '1.0.2'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -95,6 +100,31 @@ jobs:
           node --check web/vertical-studio.js
           node tests/test-overlay-renderer.cjs
           if ($LASTEXITCODE -ne 0) { throw 'JavaScript syntax failed' }
+      - name: Verify real OBS encoded landscape and portrait outputs
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $runtime = Join-Path $env:RUNNER_TEMP 'obs-runtime-32.2.2'
+          $archive = Join-Path $env:RUNNER_TEMP 'obs-runtime-32.2.2.zip'
+          Invoke-WebRequest 'https://github.com/obsproject/obs-studio/releases/download/32.2.2/OBS-Studio-32.2.2-Windows-x64.zip' -OutFile $archive
+          if ((Get-FileHash $archive -Algorithm SHA256).Hash.ToLowerInvariant() -ne '4d6e40e3ab155f56b30de517380566a206d74b63cdf5ad49aa596924768f97e1') { throw 'Official OBS runtime checksum mismatch' }
+          Expand-Archive $archive $runtime -Force
+          choco install ffmpeg --yes --no-progress
+          if ($LASTEXITCODE -ne 0) { throw 'FFmpeg installation failed' }
+          $env:Path = "$env:ChocolateyInstall/bin;" + $env:Path
+          $harness = Get-ChildItem '.obs-template/build_x64' -Recurse -Filter 'fdgcast-video-qa.exe' | Select-Object -First 1
+          if (-not $harness) { throw 'Native video harness missing' }
+          $binary = Join-Path $runtime 'bin/64bit/fdgcast-video-qa.exe'
+          Copy-Item $harness.FullName $binary -Force
+          python tests/encoded/run.py --exe $binary --runtime $runtime --out qa-encoded
+          if ($LASTEXITCODE -ne 0) { throw 'Real encoded output verification failed; do not publish this candidate' }
+      - name: Upload encoded output evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FDGCast-1.0.2-rc.1-encoded-output-evidence
+          path: qa-encoded/
+          if-no-files-found: ignore
       - name: Verify Companion UI in Chromium
         shell: pwsh
         run: |
@@ -113,7 +143,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.1-UI-quality-check
+          name: FDGCast-1.0.2-rc.1-UI-quality-check
           path: |
             qa/*.png
             qa-next/*.png
@@ -197,12 +227,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-1.0.1-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-1.0.2-rc.1-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-1.0.1-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-1.0.2-rc.1-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -215,11 +245,11 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.1-OBS-32.2.2-Windows-installer
-          path: release/FDGCast-1.0.1-win-x64-setup.exe
+          name: FDGCast-1.0.2-rc.1-OBS-32.2.2-Windows-installer
+          path: release/FDGCast-1.0.2-rc.1-win-x64-setup.exe
           if-no-files-found: error
 
-      - name: Publish approved stable 1.0.1 release
+      - name: Publish approved stable 1.0.2-rc.1 release
         if: github.ref == 'refs/heads/release/0.9.0' && github.event_name == 'push'
         shell: pwsh
         env:
@@ -230,18 +260,19 @@ jobs:
           $version = python -c "from forgecast import __version__; print(__version__)"
           if ($LASTEXITCODE -ne 0) { throw 'Could not read package version' }
           if ($version -ne '1.0.1') { Write-Host 'Not the approved stable version; skipping publication.'; exit 0 }
-          $tag = 'v1.0.1'
-          $installer = 'release/FDGCast-1.0.1-win-x64-setup.exe'
+          $tag = 'v1.0.2-rc.1'
+          $installer = 'release/FDGCast-1.0.2-rc.1-win-x64-setup.exe'
           $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
-          "$hash  FDGCast-1.0.1-win-x64-setup.exe" | Set-Content 'release/SHA256SUMS.txt' -Encoding utf8NoBOM
+          "$hash  FDGCast-1.0.2-rc.1-win-x64-setup.exe" | Set-Content 'release/SHA256SUMS.txt' -Encoding utf8NoBOM
           $manifest = Get-Content 'docs/latest-release.example.json' -Raw | ConvertFrom-Json
           $manifest | Add-Member -NotePropertyName sha256 -NotePropertyValue $hash -Force
           $manifest | ConvertTo-Json -Depth 6 | Set-Content 'release/latest.json' -Encoding utf8NoBOM
           gh release view $tag --json tagName 2>$null | Out-Null
           if ($LASTEXITCODE -eq 0) { throw 'Release already exists; refusing to replace published binaries' }
-          gh release create $tag --target '${{ github.sha }}' --title 'FDGCast 1.0.1' --notes-file 'docs/RELEASE_1.0.1.md' --draft
+          gh release create $tag --target '${{ github.sha }}' --title 'FDGCast 1.0.2-rc.1' --notes-file 'docs/RELEASE_1.0.2-rc.1.md' --draft
           if ($LASTEXITCODE -ne 0) { throw 'Could not create draft release' }
           gh release upload $tag $installer 'release/SHA256SUMS.txt' 'release/latest.json'
           if ($LASTEXITCODE -ne 0) { throw 'Release asset upload failed; release remains draft' }
           gh release edit $tag --draft=false --latest
           if ($LASTEXITCODE -ne 0) { throw 'Release publication failed' }
+

@@ -24,16 +24,17 @@ for(const platform of ['facebook','instagram'])$('connect'+platform[0].toUpperCa
 bind('rumbleForm','extra_chat_connect',{platform:'rumble'});
 $('tiktokForm').onsubmit=e=>{e.preventDefault();run(()=>action('extra_chat_connect',{platform:'tiktok',username:e.currentTarget.elements.username.value,experimental:e.currentTarget.elements.experimental.checked}),$('tiktokForm').querySelector('button'));};
 bind('obsForm','obs_connect'); bind('destinationForm','save_destination'); bind('twitchForm','chat_connect',{platform:'twitch'}); bind('youtubeForm','chat_connect',{platform:'youtube'}); bind('hubForm','hub_save');
-const pictureLabels={main:'Horizontal · OBS scene',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture',vertical_studio:'Vertical Studio · saved scene layouts'};
+const pictureLabels={main:'OBS picture · actual OBS resolution',vertical_fill:'Vertical 9:16 · crop sides',vertical_fit:'Vertical 9:16 · whole picture',vertical_studio:'Vertical Studio · saved scene layouts'};
 function pictureChanged(){
  const mode=$('destinationPicture').value;
- $('pictureHelp').textContent=mode==='main'?'Uses your horizontal OBS scene. Shares its encoder with other horizontal destinations; when the main stream is vertical, horizontal destinations use a separate shared encoder.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
+ $('pictureHelp').textContent=mode==='main'?'Uses the actual picture and resolution configured in OBS. Reuses its video encoder. This does not force landscape; check the reported dimensions before streaming.':'720 × 1280 at 4500 kbps. '+(mode==='vertical_fill'?'Fills the phone screen; the sides of wide scenes are cropped. Keep important content in the center.':'Keeps the whole scene visible, with black space above and below a wide picture.')+' Follows main scene changes and audio. Uses an extra video encoder; watch Stream Doctor for encoding lag. Stop the destination before changing format.';
+ if(mode==='vertical_fit')$('pictureHelp').textContent+=' A wide scene stays wide inside the portrait frame, so a landscape player may show black space on all sides. Choose Fill to crop the sides or create a Studio layout.';
  if(mode==='vertical_studio')$('pictureHelp').textContent='Uses saved layouts from the Vertical Studio tab. Arrange existing camera/game sources per OBS scene, save layouts there, then use Start All.';
  $('pictureGuide').hidden=mode==='main'||mode==='vertical_studio';$('pictureGuide').className=mode;
 }
 $('destinationPicture').onchange=pictureChanged;pictureChanged();
 function resetDestinationForm(){
- const f=$('destinationForm');f.elements.id.value='';f.elements.name.value='';f.elements.key.value='';f.elements.picture.value='main';
+ const f=$('destinationForm');f.elements.id.value='';f.elements.name.value='';f.elements.key.value='';f.elements.picture.value='main';f.elements.paired_with.value='';$('destinationPairHelp').hidden=true;
  destinationPlatformChanged();pictureChanged();$('destinationFormTitle').textContent='Add destination';$('destinationSave').textContent='Save destination';$('destinationCancel').hidden=true;$('destinationSaved').textContent='';
 }
 $('destinationCancel').onclick=resetDestinationForm;
@@ -137,15 +138,26 @@ function renderAudio(s){
  if(!s.audio_history?.length)$('audioHistory').append(el('p','No audio incidents recorded yet.','muted'));
 }
 function issue(i) { const d=el('article',undefined,'issue');d.append(el('h3',i.title),el('small',i.confidence.toUpperCase()+' confidence · symptom classification'),el('p',i.evidence),el('p',i.suggestion));return d; }
-function outputStatus(s,d){
- const current=s.outputs.find(x=>x.id===d.id), detail=current?.error||s.output_errors?.[d.id];
- if(!s.native_connected)return {text:'OFFLINE · OBS module disconnected',level:'offline'};
- if(detail)return {text:'ERROR',level:'error',detail};
- if(current?.reconnecting)return {text:'RECONNECTING',level:'attention'};
- if(current?.busy)return {text:'CONNECTING / STOPPING',level:'attention'};
- if(current?.active)return {text:'LIVE',level:'healthy'};
- return {text:'OFFLINE',level:'offline'};
+const transportNames={sending:'SENDING DATA',starting:'WAITING FOR DATA',stalled:'NO DATA · CHECK OUTPUT',reconnecting:'RECONNECTING',stopping:'STOPPING',offline:'OFFLINE',error:'ERROR'};
+function outputEvidence(row){
+ const size=row?.width>0&&row?.height>0?row.width+' × '+row.height+' · '+(row.width>row.height?'landscape':row.width<row.height?'portrait':'square'):'Actual resolution not reported yet';
+ return size+(row?.bitrate_kbps!=null?' · '+row.bitrate_kbps+' kbps':'');
 }
+function outputStatus(s,d){
+ const current=s.outputs.find(x=>x.id===d.id),detail=current?.error||s.output_errors?.[d.id];
+ if(!s.native_connected)return {text:'UNKNOWN · OBS module disconnected',level:'offline'};
+ if(detail)return {text:'ERROR',level:'error',detail};
+ const status=current?.transmission_state||(current?.reconnecting?'reconnecting':current?.active?'starting':current?.busy?'starting':'offline');
+ return {text:transportNames[status]||'CHECKING',level:status==='sending'?'healthy':status==='stalled'||status==='error'?'error':status==='offline'?'offline':'attention',detail:current?.active?'Sending status measures transport bytes; platform publication and viewer playback are not verified.':''};
+}
+function addVerticalOutput(original){
+ resetDestinationForm();const f=$('destinationForm');
+ f.elements.paired_with.value=original?.id||'main';f.elements.platform.value=original?.platform||destinationCatalog.find(r=>(state?.main_output?.name||'').toLowerCase().includes(r.name.toLowerCase()))?.id||'custom';destinationPlatformChanged();
+ f.elements.picture.value='vertical_studio';f.elements.name.value=(original?.name||'Main stream')+' · Vertical';
+ f.elements.server.value='';f.elements.key.value='';$('destinationAdvanced').open=true;$('destinationPairHelp').hidden=false;
+ $('destinationFormTitle').textContent='Add a separate vertical output';pictureChanged();openTab('outputs');f.scrollIntoView({behavior:'smooth'});f.elements.key.focus();
+}
+$('mainAddVertical').onclick=()=>addVerticalOutput(null);
 $('mainStreamSave').onclick=()=>run(async()=>{await action('main_picture',{picture:$('mainStreamPicture').value});$('mainStreamStatus').textContent='Requested · waiting for OBS confirmation…';},$('mainStreamSave'));
 let mainPictureSeen=null;
 function renderMainStream(s){
@@ -155,7 +167,8 @@ function renderMainStream(s){
  $('mainStreamPicture').disabled=!available||busy;
  $('mainStreamSave').disabled=!available||busy;
  $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
- $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':m.detail||(busy?'LIVE / CONNECTING · stop before changing picture.':('Applied: '+(m.picture==='vertical_studio'?'Vertical Studio':'Horizontal · OBS scene')+'. '+(!m.vertical_supported?'Main stream routing is temporarily disabled; OBS controls this picture. Use an added destination for Vertical Studio.':'Ready for the next stream.')));
+ $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':(m.detail||((transportNames[m.transmission_state]||'CHECKING')+' · '+outputEvidence(m)+'. '+(busy?'Stop before changing output settings. ':'')+'OBS controls the main picture; main-stream vertical routing remains disabled.'));
+ $('mainAddVertical').disabled=s.demo||busy||!available;
 }
 let lastDest='';
 function renderHistory(s){
@@ -183,7 +196,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'1.0.1';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'1.0.2-rc.1';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -213,12 +226,14 @@ function render(s) {
    enabled.title='Choose destinations for the next Start All. Unchecking does not stop a live stream.';
    enabled.append(check,el('strong',d.name));
    const health=el('span','● '+status.text,'output-status '+status.level);health.title=status.detail||status.text;
-   card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'));if(status.detail)card.append(el('p',status.detail,'danger'));
+   card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'),el('p',outputEvidence(s.outputs.find(x=>x.id===d.id)),'muted'));if(d.paired_with)card.append(el('p','Additional vertical output · original '+(d.paired_with==='main'?'OBS main stream':s.destinations.find(x=>x.id===d.paired_with)?.name||'destination')+' is kept separately.','muted'));if(status.detail)card.append(el('p',status.detail,'danger'));
    const controls=el('div',undefined,'controls');
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
+   if((d.picture||'main')==='main')controls.append(button('Add separate vertical output',()=>addVerticalOutput(d)));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');
      f.elements.platform.value=d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
+     f.elements.paired_with.value=d.paired_with||'';$('destinationPairHelp').hidden=!d.paired_with;
      f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';f.elements.picture.value=d.picture||'main';pictureChanged();
      $('destinationFormTitle').textContent='Edit '+d.name;$('destinationSave').textContent='Save changes';$('destinationCancel').hidden=false;$('destinationSaved').textContent='';f.scrollIntoView({behavior:'smooth'});f.elements.picture.focus();
    }));
@@ -345,3 +360,4 @@ const controlHints={
  showPairCode:'Show or hide the pairing code. Keep this code private.',
 };
 for(const [id,hint] of Object.entries(controlHints))if($(id))$(id).title=hint;
+

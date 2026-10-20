@@ -22,6 +22,7 @@ from .obs import ObsClient
 from .chat import Twitch, YouTube, ApiError, api
 from .audio import AudioGuard, validate_settings, notify_windows, play_warning_sound
 from .history import StreamHistory
+from .output_health import OutputMonitor
 from .sound import read_pcm, MAX_BYTES
 from .updates import Updates
 from .suite import EVENT_KINDS, DEFAULT_EVENTS, connection_help, normalize_events, session_summaries, audience_counts
@@ -98,6 +99,7 @@ class State:
         self.audio_notice_queue = asyncio.Queue(maxsize=20)
         self.history = StreamHistory(self.directory, demo, self.doctor.sensitivity)
         self.main_output = None
+        self.output_monitor = OutputMonitor()
         self.doctor_notice_queue = asyncio.Queue(maxsize=20)
         self.audio_history_cursor = self.audio.history[-1] if self.audio.history else None
         self.updates = Updates(self)
@@ -257,6 +259,7 @@ def combined_events(s):
 OUTPUT_ERRORS = {
     'start_main_obs_stream_first':'Start your main OBS stream first.',
     'main_output_unavailable':'OBS main output is unavailable.',
+    'duplicate_ingest':'This broadcast connection is already used by OBS. Another format needs a separate broadcast connection/key.',
     'main_picture_temporarily_disabled':'Main stream routing is temporarily disabled in 1.0.1. OBS controls the main picture. Use an added destination for Vertical Studio.',
     'main_picture_setup_failed':'Main stream picture setup failed. Check the main stream card and OBS encoder settings.',
     'main_picture_unsupported':'Vertical main stream needs RTMP/RTMPS. Turn off Enhanced Broadcasting / multitrack video in OBS.',
@@ -696,11 +699,23 @@ async def action(request):
                 raise ValueError('Stop secondary outputs before editing destinations.')
             dest = await resolve_destination(s, data)
             previous = next((d for d in s.config.get('destinations', []) if d['id'] == dest['id']), {})
+            pair = data.get('paired_with') or previous.get('paired_with')
+            if pair:
+                parent = next((d for d in s.config.get('destinations',[]) if d['id']==pair),None)
+                if pair != 'main' and not parent: raise ValueError('The original destination is missing.')
+                if parent and parent.get('picture','main')!='main': raise ValueError('Keep the original destination in OBS format before adding its vertical output.')
+                if not previous and not data.get('key'): raise ValueError('Paste a separate vertical broadcast key. The original key is never copied.')
+                if dest['picture']=='main': raise ValueError('Choose a vertical format for the additional output.')
+                if pair==dest['id']: raise ValueError('A destination cannot be paired with itself.')
+                dest['paired_with']=pair
             dest['enabled'] = previous.get('enabled', True)
             key = data.get('key') or s.vault.get('stream:'+dest['id'])
             if not key or len(key) > 4096:
                 raise ValueError('A valid stream key is required.')
             items = [x for x in s.config.get('destinations', []) if x['id'] != dest['id']]
+            for other in items:
+                if other['server'].rstrip('/')==dest['server'].rstrip('/') and s.vault.get('stream:'+other['id'])==key:
+                    raise ValueError('That broadcast connection is already used. Another format needs its own broadcast connection and key.')
             if len(items) >= 8:
                 raise ValueError('Alpha supports at most eight destinations.')
             s.vault.set('stream:'+dest['id'], key)
@@ -711,6 +726,8 @@ async def action(request):
                 raise ValueError('Stop all secondary outputs first.')
             s.config['destinations'] = [x for x in s.config.get('destinations', []) if x['id'] != data['id']]
             s.vault.delete('stream:'+data['id'])
+            for child in s.config['destinations']:
+                if child.get('paired_with')==data['id']: child.pop('paired_with',None)
             s.save()
         elif op == 'native_command':
             if not data.get('confirmed'): raise ValueError('Explicit confirmation required.')
@@ -827,8 +844,12 @@ async def native(request):
     s.native_seen = time.time()
     features = data.get('features', [])
     s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1','main_picture_v1') if isinstance(features,list) and v in features}
-    s.native_outputs = data.get('outputs', [])[:8]
-    s.main_output = data.get('main_output') if isinstance(data.get('main_output'), dict) else None
+    raw_outputs = data.get('outputs', [])
+    raw_outputs = raw_outputs[:8] if isinstance(raw_outputs,list) else []
+    main = data.get('main_output')
+    monitored = s.output_monitor.sample(([dict(main,id='main')] if isinstance(main,dict) else [])+raw_outputs)
+    s.main_output = next((r for r in monitored if r['id']=='main'),None)
+    s.native_outputs = [r for r in monitored if r['id']!='main']
     if isinstance(data.get('audio'), dict):
         s.audio_snapshot = data['audio']
         s.audio_snapshot['sources'] = s.audio_snapshot.get('sources', [])[:128]
@@ -1367,4 +1388,5 @@ def main(on_ready=None):
 
 if __name__ == '__main__':
     main()
+
 

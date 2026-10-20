@@ -112,3 +112,19 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         r=await choose('main');self.assertEqual(r.status,200)
         r=await choose('bogus');self.assertEqual(r.status,400)
         self.s.native_seen=0;self.assertIsNone(self.s.public()['main_output'])
+
+    async def test_additional_vertical_keeps_original_and_never_copies_key(self):
+        self.s.demo=False
+        original=dict(id='wide',name='Wide',server='rtmp://example.com/live',picture='main',platform='custom')
+        self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:wide','ORIGINAL')
+        async def save(**extra):
+            return await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='phone',name='Phone',platform='custom',server='rtmp://example.com/live',picture='vertical_studio',paired_with='wide',**extra))
+        r=await save();self.assertEqual(r.status,400)
+        r=await save(key='ORIGINAL');self.assertEqual(r.status,400)
+        self.assertEqual(self.s.config['destinations'],[original])
+        r=await save(key='SEPARATE');self.assertEqual(r.status,200)
+        self.assertEqual(self.s.config['destinations'][0],original)
+        self.assertEqual(self.s.config['destinations'][1]['paired_with'],'wide')
+        self.assertEqual(self.s.config['destinations'][1]['picture'],'vertical_studio')
+        self.assertEqual(self.s.vault.get('stream:wide'),'ORIGINAL')
+        self.assertEqual(self.s.vault.get('stream:phone'),'SEPARATE')
