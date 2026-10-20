@@ -128,3 +128,11 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.s.config['destinations'][1]['picture'],'vertical_studio')
         self.assertEqual(self.s.vault.get('stream:wide'),'ORIGINAL')
         self.assertEqual(self.s.vault.get('stream:phone'),'SEPARATE')
+
+    async def test_add_obs_picture_alongside_existing_vertical_preserves_it(self):
+        self.s.demo=False
+        original=dict(id='phone',name='Phone',platform='custom',server='rtmp://example.com/live',picture='vertical_studio')
+        self.s.config['destinations']=[original.copy()];self.s.vault.set('stream:phone','PHONE')
+        r=await self.client.post('/api/action',headers=self.headers,json=dict(op='save_destination',id='wide',name='Wide',platform='custom',server='rtmp://example.com/live',picture='main',paired_with='phone',key='WIDE'))
+        self.assertEqual(r.status,200,await r.text());self.assertEqual(self.s.config['destinations'][0],original)
+        self.assertEqual(self.s.vault.get('stream:phone'),'PHONE');self.assertEqual(self.s.config['destinations'][1]['picture'],'main')

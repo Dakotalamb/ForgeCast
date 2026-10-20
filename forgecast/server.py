@@ -703,9 +703,9 @@ async def action(request):
             if pair:
                 parent = next((d for d in s.config.get('destinations',[]) if d['id']==pair),None)
                 if pair != 'main' and not parent: raise ValueError('The original destination is missing.')
-                if parent and parent.get('picture','main')!='main': raise ValueError('Keep the original destination in OBS format before adding its vertical output.')
-                if not previous and not data.get('key'): raise ValueError('Paste a separate vertical broadcast key. The original key is never copied.')
-                if dest['picture']=='main': raise ValueError('Choose a vertical format for the additional output.')
+                parent_is_obs = not parent or parent.get('picture','main')=='main'
+                if parent_is_obs == (dest['picture']=='main'): raise ValueError('Choose the other picture format for the additional output; the original stays unchanged.')
+                if not previous and not data.get('key'): raise ValueError('Paste a separate broadcast key. The original key is never copied.')
                 if pair==dest['id']: raise ValueError('A destination cannot be paired with itself.')
                 dest['paired_with']=pair
             dest['enabled'] = previous.get('enabled', True)

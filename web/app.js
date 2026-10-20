@@ -14,7 +14,7 @@ async function api(path, data) {
 async function action(op, data={}) { return api('/api/action', {op,...data}); }
 function el(tag, text, cls) { const e=document.createElement(tag); if(text!==undefined) e.textContent=text; if(cls) e.className=cls; return e; }
 function button(text, fn) { const e=el('button',text); e.onclick=()=>run(fn,e); return e; }
-async function run(fn, target) { if(target){target.disabled=true;target.setAttribute('aria-busy','true');} try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target){target.disabled=false;target.removeAttribute('aria-busy');} if(state)renderProductivity(state); } }
+async function run(fn, target) { if(target){target.disabled=true;target.setAttribute('aria-busy','true');} try { await fn(); await refresh(); } catch(e) { error(e.message); } finally { if(target){target.disabled=false;target.removeAttribute('aria-busy');} if(state){renderProductivity(state);renderMainStream(state);} } }
 function openTab(id){document.querySelectorAll('.tab').forEach(t=>t.classList.toggle('active',t.id===id));document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x.dataset.tab===id));}
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.tab));
 document.querySelectorAll('[data-open-tab]').forEach(b=>b.onclick=()=>openTab(b.dataset.openTab));
@@ -153,9 +153,10 @@ function outputStatus(s,d){
 function addVerticalOutput(original){
  resetDestinationForm();const f=$('destinationForm');
  f.elements.paired_with.value=original?.id||'main';f.elements.platform.value=original?.platform||destinationCatalog.find(r=>(state?.main_output?.name||'').toLowerCase().includes(r.name.toLowerCase()))?.id||'custom';destinationPlatformChanged();
- f.elements.picture.value='vertical_studio';f.elements.name.value=(original?.name||'Main stream')+' · Vertical';
+ const vertical=!original||(original.picture||'main')==='main';f.elements.picture.value=vertical?'vertical_studio':'main';f.elements.name.value=(original?.name||'Main stream')+(vertical?' · Vertical':' · OBS picture');
  f.elements.server.value='';f.elements.key.value='';$('destinationAdvanced').open=true;$('destinationPairHelp').hidden=false;
- $('destinationFormTitle').textContent='Add a separate vertical output';pictureChanged();openTab('outputs');f.scrollIntoView({behavior:'smooth'});f.elements.key.focus();
+ $('destinationCancel').hidden=false;$('destinationCancel').textContent='Cancel setup';
+ $('destinationFormTitle').textContent=vertical?'Add a separate vertical output':'Add a separate OBS-picture output';pictureChanged();openTab('outputs');f.scrollIntoView({behavior:'smooth'});f.elements.key.focus();
 }
 $('mainAddVertical').onclick=()=>addVerticalOutput(null);
 $('mainStreamSave').onclick=()=>run(async()=>{await action('main_picture',{picture:$('mainStreamPicture').value});$('mainStreamStatus').textContent='Requested · waiting for OBS confirmation…';},$('mainStreamSave'));
@@ -168,7 +169,7 @@ function renderMainStream(s){
  $('mainStreamSave').disabled=!available||busy;
  $('mainStreamPicture').closest('label').hidden=!m?.vertical_supported;$('mainStreamSave').hidden=!m?.vertical_supported;
  $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
- $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':(m.detail||((transportNames[m.transmission_state]||'CHECKING')+' · '+outputEvidence(m)+'. '+(busy?'Stop before changing output settings. ':'')+'OBS controls the main picture; main-stream vertical routing remains disabled.'));
+ $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':(m.detail||((transportNames[m.transmission_state]||'CHECKING')+' · '+outputEvidence(m)+'. '+(busy?'Stop before changing output settings. ':'')+'OBS controls the main picture; main-stream vertical routing remains disabled.'+(m.width>0&&m.width<m.height?' Your OBS output is portrait. For landscape, change OBS Settings → Video while stopped.':'')));
  $('mainAddVertical').disabled=s.demo||busy||!available;
 }
 let lastDest='';
@@ -227,16 +228,16 @@ function render(s) {
    enabled.title='Choose destinations for the next Start All. Unchecking does not stop a live stream.';
    enabled.append(check,el('strong',d.name));
    const health=el('span','● '+status.text,'output-status '+status.level);health.title=status.detail||status.text;
-   card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'),el('p',outputEvidence(s.outputs.find(x=>x.id===d.id)),'muted'));if(d.paired_with)card.append(el('p','Additional vertical output · original '+(d.paired_with==='main'?'OBS main stream':s.destinations.find(x=>x.id===d.paired_with)?.name||'destination')+' is kept separately.','muted'));if(status.detail)card.append(el('p',status.detail,status.level==='error'?'danger':'muted'));
+   card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'),el('p',outputEvidence(s.outputs.find(x=>x.id===d.id)),'muted'));if(d.paired_with)card.append(el('p','Additional output · original '+(d.paired_with==='main'?'OBS main stream':s.destinations.find(x=>x.id===d.paired_with)?.name||'destination')+' is kept separately.','muted'));if(status.detail)card.append(el('p',status.detail,status.level==='error'?'danger':'muted'));
    const controls=el('div',undefined,'controls');
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
-   if((d.picture||'main')==='main')controls.append(button('Add separate vertical output',()=>addVerticalOutput(d)));
+   controls.append(button((d.picture||'main')==='main'?'Add separate vertical output':'Add separate OBS-picture output',()=>addVerticalOutput(d)));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');
      f.elements.platform.value=d.platform||'custom';destinationPlatformChanged();$('destinationAdvanced').open=true;
      f.elements.paired_with.value=d.paired_with||'';$('destinationPairHelp').hidden=!d.paired_with;
      f.elements.id.value=d.id;f.elements.name.value=d.name;f.elements.server.value=d.server;f.elements.key.value='';f.elements.picture.value=d.picture||'main';pictureChanged();
-     $('destinationFormTitle').textContent='Edit '+d.name;$('destinationSave').textContent='Save changes';$('destinationCancel').hidden=false;$('destinationSaved').textContent='';f.scrollIntoView({behavior:'smooth'});f.elements.picture.focus();
+     $('destinationFormTitle').textContent='Edit '+d.name;$('destinationSave').textContent='Save changes';$('destinationCancel').hidden=false;$('destinationCancel').textContent='Cancel editing';$('destinationSaved').textContent='';f.scrollIntoView({behavior:'smooth'});f.elements.picture.focus();
    }));
    controls.append(button('Remove',async()=>{if(confirm('Remove destination '+d.name+' and its saved key?'))await action('delete_destination',{id:d.id});}));
    card.append(controls);return card;

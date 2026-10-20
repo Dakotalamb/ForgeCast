@@ -12,7 +12,7 @@ change the stable update feed, deploy the Hub or modify a running OBS instance.
 - Both OBS main and additional outputs report their real encoder dimensions and
   rate. OBS picture reuses whatever resolution OBS actually has; it does not
   force landscape. Old-module/missing telemetry is labelled unavailable.
-- Adding a separate vertical output preserves the original, never copies its key,
+- Adding a separate output in the other format preserves the original (in either direction), never copies its key,
   and asks for another supported broadcast connection. Duplicate saved ingest/key
   combinations are rejected; the native start also protects OBS main's connection.
   Both selected outputs can start together. One RTMP output still sends one format;
