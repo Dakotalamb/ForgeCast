@@ -10,16 +10,14 @@ struct MainPictureRoute {
     std::shared_ptr<PortraitVideo> portrait;
     bool apply(obs_output_t *target, std::shared_ptr<PortraitVideo> picture)
     {
-        if (!target || obs_output_active(target) || output) return false;
+        if (!target || !picture || !picture->encoder || obs_output_active(target) || output) return false;
         output = obs_output_get_ref(target);
         for (size_t i=0; i<originals.size(); ++i) {
             originals[i] = obs_encoder_get_ref(obs_output_get_video_encoder2(target,i));
             if (originals[i]) obs_output_set_video_encoder2(target,nullptr,i);
         }
         portrait = std::move(picture);
-        // A null picture intentionally blocks startup after a setup failure.
-        // Never fall back to broadcasting the wrong picture.
-        obs_output_set_video_encoder(target,portrait ? portrait->encoder : nullptr);
+        obs_output_set_video_encoder(target,portrait->encoder);
         return true;
     }
     bool restore()

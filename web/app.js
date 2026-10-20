@@ -155,7 +155,7 @@ function renderMainStream(s){
  $('mainStreamPicture').disabled=!available||busy;
  $('mainStreamSave').disabled=!available||busy;
  $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
- $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':m.detail||(busy?'LIVE / CONNECTING · stop before changing picture.':('Applied: '+(m.picture==='vertical_studio'?'Vertical Studio':'Horizontal · OBS scene')+'. '+(!m.vertical_supported?'Vertical needs RTMP/RTMPS with Enhanced Broadcasting / multitrack video off.':'Ready for the next stream.')));
+ $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':m.detail||(busy?'LIVE / CONNECTING · stop before changing picture.':('Applied: '+(m.picture==='vertical_studio'?'Vertical Studio':'Horizontal · OBS scene')+'. '+(!m.vertical_supported?'Main stream routing is temporarily disabled; OBS controls this picture. Use an added destination for Vertical Studio.':'Ready for the next stream.')));
 }
 let lastDest='';
 function renderHistory(s){
@@ -183,7 +183,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'1.0.0';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'1.0.1';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';

@@ -152,7 +152,6 @@ struct PortraitVideo {
     }
 };
 
-#include "main-picture.hpp"
 
 struct Destination {
     std::shared_ptr<PortraitVideo> portrait;
@@ -1088,7 +1087,6 @@ class ForgeDock : public QWidget {
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
     std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
-    MainPictureRoute mainPictureRoute;
     QString mainPicture = "main";
     QString mainPictureError;
     QJsonArray results;
@@ -1106,7 +1104,8 @@ public:
     ForgeDock() : QWidget(), network(this)
     {
         QSettings preferences("Forged Destiny Gaming", "ForgeCast");
-        if (preferences.value("main-picture").toString()=="vertical_studio") mainPicture="vertical_studio";
+        // 1.0.1 recovery: discard saved main-output overrides from 1.0.0.
+        preferences.remove("main-picture");
         setObjectName("forgecastDock");
         setStyleSheet("QWidget#forgecastDock { background: #151719; color: #f4f4f4; }"
                       "QLabel { color: #f4f4f4; padding: 10px; }"
@@ -1273,48 +1272,9 @@ public:
 
     bool mainCompatible() const
     {
-        auto *config=obs_frontend_get_profile_config();
-        if(config && (config_get_bool(config,"Stream1","EnableMultitrackVideo") ||
-            config_get_int(config,"Stream1","WHIPSimulcastTotalLayers")>1)) return false;
-        auto *service=obs_frontend_get_streaming_service(); // frontend-owned, borrowed
-        const char *protocol=service ? obs_service_get_protocol(service) : nullptr;
-        return protocol && (strcmp(protocol,"RTMP")==0 || strcmp(protocol,"RTMPS")==0);
-    }
-
-    void prepareMainPicture()
-    {
-        if(mainPicture!="vertical_studio") return;
-        mainPictureRoute.restore();
-        auto *output=obs_frontend_get_streaming_output();
-        auto *video=output ? obs_output_get_video_encoder(output) : nullptr;
-        auto *audio=output ? obs_output_get_audio_encoder(output,0) : nullptr;
-        std::shared_ptr<PortraitVideo> picture;
-        mainPictureError.clear();
-        const auto studioConfig=std::atomic_load(&verticalStudioConfig);
-        if(!studioConfig || !studioConfig->contains("layouts")) {
-            mainPictureError="Open Companion and wait for Vertical Studio layouts to sync before starting the vertical main stream.";
-        } else if(!mainCompatible() || !video || !audio || strcmp(obs_encoder_get_codec(video),"h264") ||
-            strcmp(obs_encoder_get_codec(audio),"aac") || obs_output_get_video_encoder2(output,1)) {
-            mainPictureError="Vertical main stream needs standard RTMP/RTMPS, H.264 and AAC. Turn off Enhanced Broadcasting / multitrack video in OBS.";
-        } else {
-            picture=portraitVideos["vertical_studio"].lock();
-            if(!picture) {
-                picture=std::make_shared<PortraitVideo>();
-                if(!picture->create(video,false,true)) picture.reset();
-            }
-            if(!picture) mainPictureError="Vertical main picture could not be created. Check the OBS log and encoder availability.";
-        }
-        if(output && mainPictureRoute.apply(output,picture)) {
-            if(picture) portraitVideos["vertical_studio"]=picture;
-        } else mainPictureError="Could not select the main stream picture. Stop the stream and retry.";
-        if(output) obs_output_release(output);
-        if(!mainPictureError.isEmpty()) {
-            label->setText(mainPictureError);
-            results.append(QJsonObject{{"destination_id","main"},{"status","main_picture_setup_failed"}});
-        }
-        // Also runs after a synchronous failed start. Active/reconnecting streams
-        // keep the portrait view and encoder until OBS is fully stopped.
-        QTimer::singleShot(0,this,[this] { if(!mainBusy()) mainPictureRoute.restore(); });
+        // Emergency rollback: OBS exclusively owns the main output video.
+        // Vertical Studio remains available on FDGCast secondary destinations.
+        return false;
     }
 
     QJsonObject audioSnapshot()
@@ -1414,8 +1374,7 @@ public:
         obs_output_t *mainOutput = obs_frontend_get_streaming_output();
         if (!mainOutput)
             return "main_output_unavailable";
-        obs_encoder_t *video = mainPictureRoute.horizontal();
-        if(!video) video = obs_output_get_video_encoder(mainOutput);
+        obs_encoder_t *video = obs_output_get_video_encoder(mainOutput);
         obs_encoder_t *audio = obs_output_get_audio_encoder(mainOutput, 0);
         if (!video || !audio || std::strcmp(obs_encoder_get_codec(video), "h264") != 0 ||
             std::strcmp(obs_encoder_get_codec(audio), "aac") != 0) {
@@ -1485,9 +1444,9 @@ public:
             const QString picture=cmd.value("picture").toString();
             if(picture!="main" && picture!="vertical_studio") result="invalid_picture_format";
             else if(mainBusy() || !bulkStarts.isEmpty()) result="already_active_or_busy";
-            else if(picture=="vertical_studio" && !mainCompatible()) {result="main_picture_unsupported";mainPictureError="Vertical main stream needs RTMP/RTMPS with Enhanced Broadcasting / multitrack video off.";}
+            else if(picture=="vertical_studio") {result="main_picture_temporarily_disabled";mainPictureError="Main stream picture routing is temporarily disabled in 1.0.1. OBS controls the main picture. Use an added destination for Vertical Studio."; }
             else {
-                mainPictureRoute.restore();mainPicture=picture;mainPictureError.clear();
+                mainPicture=picture;mainPictureError.clear();
                 QSettings preferences("Forged Destiny Gaming","ForgeCast");preferences.setValue("main-picture",mainPicture);
                 result="main_picture_saved";
             }
@@ -1524,7 +1483,6 @@ public:
 
     void tick()
     {
-        if(!mainBusy()) mainPictureRoute.restore();
         if (!bulkStarts.isEmpty()) {
             if (obs_frontend_streaming_active()) {
                 const auto selected = bulkStarts; bulkStarts = QJsonArray(); bulkTicks = 0;
@@ -1754,7 +1712,6 @@ static void arrangeFDGCastDocks()
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
-    if (event == OBS_FRONTEND_EVENT_STREAMING_STARTING && dock) dock->prepareMainPicture();
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {

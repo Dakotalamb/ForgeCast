@@ -1,3 +1,15 @@
+# FDGCast 1.0.1 — emergency recovery update
+
+[Download the recovery release](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.1).
+
+1.0.1 removes the 1.0.0 main-output video override and clears its saved preference.
+OBS controls its own main encoder again. Main-output Vertical Studio routing is
+temporarily disabled; vertical layouts remain available on added destinations.
+Close OBS and Companion before installing. See [hotfix notes](docs/RELEASE_1.0.1.md).
+
+Earlier 1.0.0 feature notes follow; main-output vertical routing described there
+is disabled by 1.0.1.
+
 # FDGCast 1.0.0
 
 [Download Windows installer and release notes](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.0).

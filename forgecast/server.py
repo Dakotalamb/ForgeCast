@@ -257,6 +257,7 @@ def combined_events(s):
 OUTPUT_ERRORS = {
     'start_main_obs_stream_first':'Start your main OBS stream first.',
     'main_output_unavailable':'OBS main output is unavailable.',
+    'main_picture_temporarily_disabled':'Main stream routing is temporarily disabled in 1.0.1. OBS controls the main picture. Use an added destination for Vertical Studio.',
     'main_picture_setup_failed':'Main stream picture setup failed. Check the main stream card and OBS encoder settings.',
     'main_picture_unsupported':'Vertical main stream needs RTMP/RTMPS. Turn off Enhanced Broadcasting / multitrack video in OBS.',
     'requires_main_h264_aac_disable_enhanced_broadcasting':'Use H.264 video and AAC audio on the main stream; disable Enhanced Broadcasting.',
@@ -606,7 +607,7 @@ async def action(request):
             if s.main_output.get('active') or s.main_output.get('busy'):
                 raise ValueError('Stop the main stream before changing its picture.')
             if picture=='vertical_studio' and not s.main_output.get('vertical_supported'):
-                raise ValueError('Use standard RTMP/RTMPS and turn off Enhanced Broadcasting / multitrack video in OBS first.')
+                raise ValueError('Vertical routing for the main stream is temporarily disabled. OBS controls its picture; use an added destination for Vertical Studio.')
             if len(s.commands)>=30: raise ValueError('Command queue is full.')
             s.commands.append(dict(id=uuid.uuid4().hex,action='main_picture',picture=picture,created=time.time()))
             return web.json_response({'ok':True,'pending':True})
