@@ -81,9 +81,12 @@ MODULE_EXPORT const char *obs_module_description(void)
 // A video-only wrapper reads the current program source each frame, including
 // OBS transitions. Audio continues through the existing main AAC encoder.
 #include "portrait-video.hpp"
+#include "vertical-canvas-frontend.hpp"
 
 struct Destination {
     std::shared_ptr<PortraitVideo> portrait;
+    std::shared_ptr<RtmpVideo> compatibleVideo;
+    std::shared_ptr<RtmpAudio> compatibleAudio;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
@@ -1038,6 +1041,8 @@ class ForgeDock : public QWidget {
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
     std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
+    std::weak_ptr<RtmpVideo> rtmpMainVideo;
+    std::map<size_t,std::weak_ptr<RtmpAudio>> rtmpAudio;
     QString mainPicture = "main";
     QString mainPictureError;
     QJsonArray results;
@@ -1306,7 +1311,7 @@ public:
         if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit" && picture != "vertical_studio")
             return "invalid_picture_format";
         const auto platform = obj.value("platform").toString();
-        if(picture!="main" && platform!="youtube" && platform!="tiktok" && platform!="instagram")
+        if(picture!="main" && platform!="youtube" && platform!="tiktok" && platform!="instagram" && platform!="vimeo")
             return "vertical_platform_unsupported";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
@@ -1338,17 +1343,32 @@ public:
             return "main_output_unavailable";
         obs_encoder_t *video = obs_output_get_video_encoder(mainOutput);
         obs_encoder_t *audio = obs_output_get_audio_encoder(mainOutput, 0);
-        if (!video || !audio || std::strcmp(obs_encoder_get_codec(video), "h264") != 0 ||
-            std::strcmp(obs_encoder_get_codec(audio), "aac") != 0) {
+        if (!video || !audio) {
             obs_output_release(mainOutput);
-            return "requires_main_h264_aac_disable_enhanced_broadcasting";
+            return "main_encoders_unavailable";
         }
         auto d = std::make_unique<Destination>();
+        if(std::strcmp(obs_encoder_get_codec(audio),"aac")!=0){
+            const auto track=obs_encoder_get_mixer_index(audio);
+            d->compatibleAudio=rtmpAudio[track].lock();
+            if(!d->compatibleAudio){d->compatibleAudio=std::make_shared<RtmpAudio>();
+                if(!d->compatibleAudio->create(audio)){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpAudio[track]=d->compatibleAudio;}
+            audio=d->compatibleAudio->encoder;
+        }
+        if(picture=="main" && std::strcmp(obs_encoder_get_codec(video),"h264")!=0){
+            d->compatibleVideo=rtmpMainVideo.lock();
+            if(!d->compatibleVideo){d->compatibleVideo=std::make_shared<RtmpVideo>();
+                d->compatibleVideo->encoder=createRtmpVideo(video,"FDGCast shared landscape H.264",obs_get_video(),6000);
+                if(!d->compatibleVideo->encoder){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpMainVideo=d->compatibleVideo;}
+            video=d->compatibleVideo->encoder;
+        }
         if (picture != "main") {
             d->portrait = portraitVideos[picture].lock();
             if (!d->portrait) {
                 d->portrait = std::make_shared<PortraitVideo>();
-                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio")) {
+                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio",verticalCanvas?verticalCanvas->canvas:nullptr)) {
                     obs_output_release(mainOutput);
                     return "vertical_setup_failed";
                 }
@@ -1403,6 +1423,9 @@ public:
                 else message="Audio fix could not be applied. Check your selected source in Companion.";
                 doctorDock->message(message);
             }
+        } else if (action == "vertical_canvas") {
+            result=setVerticalCanvas(cmd.value("enabled").toBool());
+            if(result!="vertical_canvas_ready"&&result!="vertical_canvas_disabled")verticalCanvasError=result;
         } else if (action == "main_picture") {
             const QString picture=cmd.value("picture").toString();
             if(picture!="main" && picture!="vertical_studio") result="invalid_picture_format";
@@ -1513,6 +1536,10 @@ public:
                 obs_output_set_video_encoder(d.output, nullptr);
                 d.portrait.reset();
             }
+            if(!active && !d.starting && !d.stopping){
+                if(d.compatibleVideo){obs_output_set_video_encoder(d.output,nullptr);d.compatibleVideo.reset();}
+                if(d.compatibleAudio){obs_output_set_audio_encoder(d.output,nullptr,0);d.compatibleAudio.reset();}
+            }
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
@@ -1538,7 +1565,7 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1"}}, {"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1","vertical_canvas_v1"}}, {"outputs", outputs}, {"vertical_canvas",verticalCanvasTelemetry()}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
@@ -1684,8 +1711,14 @@ static void arrangeFDGCastDocks()
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
+    if(event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING){verticalCanvasLoading=true;verticalCanvas.reset();}
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING||event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)verticalCanvasLoading=false;
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
+       event==OBS_FRONTEND_EVENT_PROFILE_CHANGED || event==OBS_FRONTEND_EVENT_STREAMING_STOPPED)
+        QTimer::singleShot(0, qApp, []{restoreVerticalCanvas();});
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();
+    if(event==OBS_FRONTEND_EVENT_EXIT){verticalCanvasClosing=true;verticalCanvas.reset();}
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {
         obs_frontend_remove_dock("fdgcast-hub");if(hubDock)delete hubDock.data();hubDock.clear();
         obs_frontend_remove_dock("forgecast-chat");
@@ -1769,12 +1802,19 @@ void obs_module_post_load(void)
     obs_frontend_add_tools_menu_item("FDGCast: Arrange docks", [](void *) {
         arrangeFDGCastDocks();
     }, nullptr);
+    obs_frontend_add_tools_menu_item("FDGCast: Enable Twitch vertical canvas", [](void *) {
+        const auto result=setVerticalCanvas(true);
+        QMessageBox::information(static_cast<QWidget *>(obs_frontend_get_main_window()),"FDGCast Twitch vertical",
+            result=="vertical_canvas_ready"?"Canvas ready. In OBS Settings → Stream enable Enhanced Broadcasting and select FDGCast Vertical Studio under Additional Canvas. Start Streaming sends both formats. No second Twitch destination/key is needed.":
+            "Stop streaming, recording and other video outputs, then try again. The main stream was not changed.");
+    },nullptr);
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }
 
 void obs_module_unload(void)
 {
     obs_frontend_remove_event_callback(frontendEvent, nullptr);
+    verticalCanvas.reset();
     // OBS normally emits EXIT first. Do not access frontend UI after Qt shutdown.
 }
 

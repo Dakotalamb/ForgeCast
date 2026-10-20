@@ -19,6 +19,7 @@
 #include "portrait-layout.hpp"
 #include "vertical-render.hpp"
 #include "portrait-video.hpp"
+#include "vertical-canvas.hpp"
 using namespace std::chrono_literals;
 void check(bool ok,const char *message){if(!ok)throw std::runtime_error(message);}
 struct Tone {
@@ -91,13 +92,29 @@ int main(int argc,char **argv){
   auto *settings=obs_data_create();obs_data_set_string(settings,"rate_control","CBR");obs_data_set_int(settings,"bitrate",3000);obs_data_set_int(settings,"keyint_sec",1);obs_data_set_string(settings,"preset","ultrafast");
   auto *video=obs_video_encoder_create("obs_x264","QA main",settings,nullptr);check(video,"x264 unavailable");obs_encoder_set_video(video,obs_get_video());
   obs_data_set_int(settings,"bitrate",128);auto *audio=obs_audio_encoder_create("ffmpeg_aac","QA audio",settings,0,nullptr);obs_data_release(settings);check(audio,"AAC unavailable");obs_encoder_set_audio(audio,obs_get_audio());
+  std::shared_ptr<VerticalCanvasVideo> canvas;
+  RtmpAudio compatibleAudio;
+  if(mode=="canvas"){
+   // Exercise the persistent canvas save/load path used across OBS restarts.
+   canvas=std::make_shared<VerticalCanvasVideo>();
+   check(canvas->attach(obs_canvas_create("FDGCast Vertical Studio",nullptr,ACTIVATE)),"Canvas setup failed");
+   auto *saved=obs_save_canvas(canvas->canvas);check(saved,"Canvas was not persistent");
+   const std::string uuid=obs_canvas_get_uuid(canvas->canvas);
+   obs_canvas_remove(canvas->canvas);canvas.reset();
+   canvas=std::make_shared<VerticalCanvasVideo>();check(canvas->attach(obs_load_canvas(saved)),"Canvas reload failed");obs_data_release(saved);
+   check(uuid==obs_canvas_get_uuid(canvas->canvas),"Canvas UUID changed across restore");
+   check(!(obs_canvas_get_flags(canvas->canvas)&EPHEMERAL),"Canvas would be excluded by Additional Canvas picker");
+   check(compatibleAudio.create(audio),"Compatible AAC setup failed");
+  }
   auto *main=stream("Main","rtmp://127.0.0.1:19350/live",video,audio);PortraitVideo portrait;
   obs_output_t *vertical=nullptr;
   for(int cycle=0;cycle<2;++cycle){
    obs_set_output_source(0,obs_scene_get_source(cycle?two:one));
    std::cout<<"READY "<<cycle<<std::endl;std::string command;std::getline(std::cin,command);check(command=="start","Missing start command");
    check(obs_output_start(main),"Main start failed");waitActive(main);
-   if(!vertical){check(portrait.create(video,mode=="fill",mode=="studio"),"Production portrait setup failed");vertical=stream("Vertical","rtmp://127.0.0.1:19351/live",portrait.encoder,audio);}
+   if(!vertical){check(portrait.create(mode=="canvas"?nullptr:video,mode=="fill",mode=="studio"||mode=="canvas",canvas?canvas->canvas:nullptr),"Production portrait setup failed");
+    if(canvas){check(portrait.canvas==canvas->canvas && !portrait.view,"Canvas rendering was duplicated");}
+    vertical=stream("Vertical","rtmp://127.0.0.1:19351/live",portrait.encoder,mode=="canvas"?compatibleAudio.encoder:audio);}
    check(obs_output_get_video_encoder(main)==video,"Portrait setup changed main encoder");
    check(obs_encoder_get_width(video)==1920&&obs_encoder_get_height(video)==1080,"Main dimensions were changed");
    check(obs_output_start(vertical),"Vertical start failed");waitActive(vertical);
@@ -112,6 +129,9 @@ int main(int argc,char **argv){
   if(portrait.encoder){obs_encoder_release(portrait.encoder);portrait.encoder=nullptr;}
   if(portrait.added){obs_view_remove(portrait.view);portrait.added=false;}
   if(portrait.view){obs_view_destroy(portrait.view);portrait.view=nullptr;}
+  if(portrait.canvas){obs_canvas_release(portrait.canvas);portrait.canvas=nullptr;}
+  if(compatibleAudio.encoder){obs_encoder_release(compatibleAudio.encoder);compatibleAudio.encoder=nullptr;}
+  if(canvas){obs_canvas_remove(canvas->canvas);canvas.reset();}
   obs_shutdown();std::cout<<"PASS native RTMP encoder lifecycle"<<std::endl;return 0;
  } catch(const std::exception &e){std::cerr<<"FAIL "<<e.what()<<std::endl;return 2;}
 }

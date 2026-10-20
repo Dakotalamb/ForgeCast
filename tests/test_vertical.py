@@ -140,7 +140,7 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
     async def test_platform_vertical_choices_and_legacy_start_are_guarded(self):
         from forgecast.platforms import CATALOG
         from forgecast.server import resolve_destination
-        self.assertEqual({p for p,r in CATALOG.items() if r['vertical_output']}, {'youtube','tiktok','instagram'})
+        self.assertEqual({p for p,r in CATALOG.items() if r['vertical_output']}, {'youtube','tiktok','instagram','vimeo'})
         self.s.demo=False;self.s.native_seen=time.time()
         self.s.native_features={'portrait_v1','vertical_studio_v1','vertical_crop_v1'}
         for platform in ('kick','twitch','facebook','rumble','custom'):

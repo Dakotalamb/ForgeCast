@@ -1,5 +1,6 @@
 #pragma once
 #include "render-guard.hpp"
+#include "rtmp-encoders.hpp"
 static const char *portraitName(void *) { return "FDGCast portrait picture"; }
 static void *portraitCreate(obs_data_t *settings, obs_source_t *source)
 {
@@ -27,10 +28,11 @@ static void portraitRender(void *data, gs_effect_t *)
 }
 
 struct PortraitVideo {
+    obs_canvas_t *canvas = nullptr;
     obs_view_t *view = nullptr;
     obs_encoder_t *encoder = nullptr;
     bool added = false;
-    bool create(obs_encoder_t *main, bool fill, bool studio=false)
+    bool create(obs_encoder_t *main, bool fill, bool studio=false, obs_canvas_t *sharedCanvas=nullptr)
     {
         obs_video_info info{};
         if (!obs_get_video_info(&info)) return false;
@@ -39,6 +41,12 @@ struct PortraitVideo {
         info.output_format = VIDEO_FORMAT_NV12;
         info.colorspace = VIDEO_CS_709;
         info.range = VIDEO_RANGE_PARTIAL;
+        video_t *video = nullptr;
+        if (studio && sharedCanvas && !obs_canvas_removed(sharedCanvas)) {
+            canvas = obs_canvas_get_ref(sharedCanvas);
+            video = obs_canvas_get_video(canvas);
+            if (!video) return false;
+        } else {
         view = obs_view_create();
         if (!view) return false;
         auto *settings = obs_data_create();
@@ -49,21 +57,12 @@ struct PortraitVideo {
         if (!source) return false;
         obs_view_set_source(view, 0, source);
         obs_source_release(source);
-        auto *video = obs_view_add2(view, &info);
+        video = obs_view_add2(view, &info);
         if (!video) return false;
         added = true;
-        auto *mainSettings = obs_encoder_get_settings(main);
-        settings = obs_data_create();
-        obs_data_apply(settings, mainSettings);
-        obs_data_release(mainSettings);
-        obs_data_set_string(settings, "rate_control", "CBR");
-        obs_data_set_int(settings, "bitrate", 4500);
-        obs_data_set_int(settings, "keyint_sec", 2);
-        encoder = obs_video_encoder_create(obs_encoder_get_id(main),
-            fill ? "FDGCast portrait fill" : "FDGCast portrait fit", settings, nullptr);
-        obs_data_release(settings);
+        }
+        encoder = createRtmpVideo(main,"FDGCast shared portrait H.264",video,4500);
         if (!encoder) return false;
-        obs_encoder_set_video(encoder, video);
         return true;
     }
     ~PortraitVideo()
@@ -71,6 +70,7 @@ struct PortraitVideo {
         if (encoder) obs_encoder_release(encoder);
         if (added) obs_view_remove(view);
         if (view) obs_view_destroy(view);
+        if (canvas) obs_canvas_release(canvas);
     }
 };
 

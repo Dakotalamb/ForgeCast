@@ -68,6 +68,7 @@ class State:
         self.native_seen = 0
         self.native_features = set()
         self.native_outputs = []
+        self.native_canvas = {}
         self.output_errors = {}
         self.stats = {}
         self.stats_seen = 0
@@ -225,6 +226,7 @@ class State:
     def public(self):
         return dict(overlay_access=overlay_access(self), overlay_designs=designs(self), audio_test=self.audio_test.public(), demo=self.demo, updates=self.updates.public(), stats_connected=self.demo or time.time()-self.stats_seen<8, obs_connected=bool(self.obs and self.obs.connected),
                     native_connected=time.time()-self.native_seen < 5,
+                    vertical_canvas={**self.native_canvas, 'available':'vertical_canvas_v1' in self.native_features} if time.time()-self.native_seen < 5 else {},
                     main_output=self.main_output if time.time()-self.native_seen < 5 else None,
                     stats=self.stats, issues=self.current_issues, scene=self.scene,
                     audio_sound_custom=self.audio_sound_path.exists(), audio_guard=self.audio.current, audio_settings=self.audio.settings, audio_history=list(self.audio.history),
@@ -271,6 +273,11 @@ OUTPUT_ERRORS = {
     'main_start_timeout':'OBS main stream did not go live within 60 seconds. Check OBS settings and its log.',
     'invalid_destination':'This destination has invalid settings.',
     'destination_limit':'The maximum number of destinations has been reached.',
+    'main_encoders_unavailable':'OBS has not exposed its main video/audio encoders yet. Check that the main output is sending data, then retry.',
+    'rtmp_compatible_encoder_failed':'FDGCast could not create compatible H.264/AAC encoding for this destination. Check available encoder resources in OBS.',
+    'vertical_canvas_busy':'Stop streaming, recording and other video outputs before changing the Twitch canvas.',
+    'vertical_canvas_selected':'Set Additional Canvas to None in OBS Settings → Stream before disabling it.',
+    'vertical_canvas_setup_failed':'OBS could not prepare the FDGCast canvas. Stop video outputs and retry; check the OBS log if it persists.',
     'vertical_platform_unsupported':'This platform is not enabled for direct vertical output. Twitch dual format needs Enhanced Broadcasting and an Additional Canvas; use OBS picture here.',
     'vertical_setup_failed':'Vertical video could not be created. Stop this destination, check OBS encoder resources, then retry. The main stream is unchanged.',
     'invalid_picture_format':'Choose Same as OBS or a supported vertical picture format, then save the destination again.',
@@ -617,6 +624,17 @@ async def action(request):
             if len(s.commands)>=30: raise ValueError('Command queue is full.')
             s.commands.append(dict(id=uuid.uuid4().hex,action='main_picture',picture=picture,created=time.time()))
             return web.json_response({'ok':True,'pending':True})
+        if op == 'vertical_canvas':
+            if not isinstance(data.get('enabled'),bool): raise ValueError('Choose whether to enable the Twitch canvas.')
+            if time.time()-s.native_seen>5 or 'vertical_canvas_v1' not in s.native_features:
+                raise ValueError('Install the matching FDGCast OBS module and connect Companion to set up the Twitch canvas.')
+            if s.native_canvas.get('busy') or s.main_output and (s.main_output.get('active') or s.main_output.get('busy')):
+                raise ValueError('Stop streaming, recording and other video outputs before changing the Twitch canvas.')
+            if not data['enabled'] and s.native_canvas.get('selected'):
+                raise ValueError('In OBS Settings → Stream, set Additional Canvas to None before disabling it.')
+            if len(s.commands)>=30: raise ValueError('Command queue is full.')
+            s.commands.append(dict(id=uuid.uuid4().hex,action='vertical_canvas',enabled=data['enabled'],created=time.time()))
+            return web.json_response({'ok':True,'pending':True})
         if op == 'vertical_save': return web.json_response(await s.vertical.save(data))
         if op == 'vertical_reset':
             uid=data.get('scene_id'); value=vertical_settings(s)
@@ -847,7 +865,11 @@ async def native(request):
     data = await request.json()
     s.native_seen = time.time()
     features = data.get('features', [])
-    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1','main_picture_v1') if isinstance(features,list) and v in features}
+    s.native_features = {v for v in ('portrait_v1','vertical_studio_v1','vertical_crop_v1','main_picture_v1','vertical_canvas_v1') if isinstance(features,list) and v in features}
+    canvas = data.get('vertical_canvas')
+    s.native_canvas = {k:canvas.get(k) is True for k in ('enabled','registered','selected','enhanced','twitch_main','busy')} if isinstance(canvas,dict) else {}
+    if isinstance(canvas,dict) and canvas.get('error') in OUTPUT_ERRORS:
+        s.native_canvas['error'] = OUTPUT_ERRORS[canvas['error']]
     raw_outputs = data.get('outputs', [])
     raw_outputs = raw_outputs[:8] if isinstance(raw_outputs,list) else []
     main = data.get('main_output')

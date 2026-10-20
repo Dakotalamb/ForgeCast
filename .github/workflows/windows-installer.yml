@@ -45,6 +45,9 @@ jobs:
           Copy-Item 'native/chat-scroll-follow.hpp' (Join-Path $template 'src/chat-scroll-follow.hpp') -Force
           Copy-Item 'native/portrait-layout.hpp' (Join-Path $template 'src/portrait-layout.hpp') -Force
           Copy-Item 'native/main-picture.hpp' (Join-Path $template 'src/main-picture.hpp') -Force
+          Copy-Item 'native/vertical-canvas.hpp' (Join-Path $template 'src/vertical-canvas.hpp') -Force
+          Copy-Item 'native/vertical-canvas-frontend.hpp' (Join-Path $template 'src/vertical-canvas-frontend.hpp') -Force
+          Copy-Item 'native/rtmp-encoders.hpp' (Join-Path $template 'src/rtmp-encoders.hpp') -Force
           Copy-Item 'native/portrait-video.hpp' (Join-Path $template 'src/portrait-video.hpp') -Force
           Copy-Item 'native/render-guard.hpp' (Join-Path $template 'src/render-guard.hpp') -Force
           Copy-Item 'tests/encoded/video-qa.cpp' (Join-Path $template 'src/video-qa.cpp') -Force

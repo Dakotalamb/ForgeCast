@@ -41,7 +41,7 @@ async function main(){
   assert.equal(await page.locator('#destinationPicture').inputValue(),'main');
   assert.equal(await page.locator('#pictureGuide').isVisible(),false);
   await page.selectOption('#destinationPlatform','kick');
-  assert.equal(await page.locator('#destinationPicture option[value=vertical_fill]').isDisabled(),true);
+  assert.equal(await page.locator('#destinationPicture option[value=vertical_fill]').evaluate(e=>e.disabled&&e.hidden),true);
   await page.selectOption('#destinationPlatform','youtube_vertical');
   assert.equal(await page.locator('#destinationPicture').inputValue(),'vertical_studio');
   assert.match(await page.locator('#destinationHelp').textContent(),/separate stream key/);

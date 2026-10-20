@@ -61,7 +61,7 @@ function destinationPlatformChanged(){
   $('destinationPicture').value=vertical?'vertical_studio':'main';
   $('destinationForm').elements.name.placeholder=vertical?'YouTube Vertical':'YouTube Horizontal';
   $('destinationForm').elements.key.placeholder=vertical?'Paste the right-hand vertical Encoder key':'Paste the horizontal stream key';
- }else $('destinationForm').elements.key.placeholder='Paste your stream key';
+ }else {$('destinationForm').elements.key.placeholder='Paste your stream key';if(['tiktok','instagram'].includes(platform))$('destinationPicture').value='vertical_studio';}
  updatePictureChoices(platform);
  const required=row?row.requires_server:platform==='custom';
  $('destinationAdvanced').open=required;
@@ -183,7 +183,8 @@ function addVerticalOutput(original){
  $('destinationCancel').hidden=false;$('destinationCancel').textContent='Cancel setup';
  $('destinationFormTitle').textContent=vertical?'Add a separate vertical output':'Add a separate OBS-picture output';pictureChanged();openTab('outputs');f.scrollIntoView({behavior:'smooth'});f.elements.key.focus();
 }
-$('mainAddVertical').onclick=()=>addVerticalOutput(null);
+$('mainAddVertical').onclick=()=>mainPlatform()==='twitch'?openTwitchVertical():addVerticalOutput(null);
+function openTwitchVertical(){openTab('vertical');$('vsTwitchSetup').scrollIntoView({behavior:'smooth'});}
 $('mainStreamSave').onclick=()=>run(async()=>{await action('main_picture',{picture:$('mainStreamPicture').value});$('mainStreamStatus').textContent='Requested · waiting for OBS confirmation…';},$('mainStreamSave'));
 let mainPictureSeen=null;
 function renderMainStream(s){
@@ -195,7 +196,7 @@ function renderMainStream(s){
  $('mainStreamPicture').closest('label').hidden=!m?.vertical_supported;$('mainStreamSave').hidden=!m?.vertical_supported;
  $('mainStreamPicture').querySelector('[value=vertical_studio]').disabled=!m?.vertical_supported;
  $('mainStreamStatus').textContent=!available?'Waiting for OBS native module.':(m.detail||((transportNames[m.transmission_state]||'CHECKING')+' · '+outputEvidence(m)+'. '+(busy?'Stop before changing output settings. ':'')+'OBS controls the main picture; main-stream vertical routing remains disabled.'+(m.width>0&&m.width<m.height?' Your OBS output is portrait. For landscape, change OBS Settings → Video while stopped.':'')));
- $('mainAddVertical').hidden=!directVertical(mainPlatform());$('mainAddVertical').disabled=s.demo||busy||!available;
+ $('mainAddVertical').textContent=mainPlatform()==='twitch'?'Set up Twitch vertical':'Add separate vertical output';$('mainAddVertical').hidden=mainPlatform()!=='twitch'&&!directVertical(mainPlatform());$('mainAddVertical').disabled=s.demo||!available||(mainPlatform()!=='twitch'&&busy);
 }
 let lastDest='';
 function renderHistory(s){
@@ -256,6 +257,7 @@ function render(s) {
    card.append(enabled,health,el('p',pictureLabels[d.picture||'main']||'Unknown picture format','muted'),el('p',outputEvidence(s.outputs.find(x=>x.id===d.id)),'muted'));if(d.paired_with)card.append(el('p','Additional output · original '+(d.paired_with==='main'?'OBS main stream':s.destinations.find(x=>x.id===d.paired_with)?.name||'destination')+' is kept separately.','muted'));if(status.detail)card.append(el('p',status.detail,status.level==='error'?'danger':'muted'));
    const controls=el('div',undefined,'controls');
    for(const cmd of ['start','stop'])controls.append(button(cmd==='start'?'Start':'Stop',async()=>{if(confirm(cmd+' '+d.name+'?'))await action('native_command',{command:cmd,id:d.id,confirmed:true});}));
+   if(d.platform==='twitch')controls.append(button('Set up Twitch vertical',openTwitchVertical));
    if(directVertical(d.platform))controls.append(button((d.picture||'main')==='main'?'Add separate vertical output':'Add separate OBS-picture output',()=>addVerticalOutput(d)));
    controls.append(button('Edit',()=>{
      const f=$('destinationForm');

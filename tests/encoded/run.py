@@ -33,7 +33,7 @@ def verify(path,mode,vertical,cycle):
     if not vertical:color(path,100,100,blue);color(path,1800,1000,cam)
     elif mode=='fit':color(path,360,100,(0,0,0));color(path,100,500,blue);color(path,680,800,cam)
     elif mode=='fill':color(path,360,100,blue);color(path,360,1100,blue)
-    elif mode=='studio':
+    elif mode in ('studio','canvas'):
         color(path,360,1100 if cycle else 192,cam)
         color(path,100,400 if cycle else 700,blue)
     audio=subprocess.check_output(['ffmpeg','-v','error','-ss','1','-i',str(path),'-t','0.5','-vn','-ac','1','-ar','8000','-f','f32le','-'])
@@ -87,8 +87,8 @@ def run(exe,runtime,out,mode):
 def main():
     p=argparse.ArgumentParser();p.add_argument('--exe',type=Path,required=True);p.add_argument('--runtime',type=Path,required=True);p.add_argument('--out',type=Path,required=True);a=p.parse_args()
     a.out.mkdir(parents=True,exist_ok=True);result=[]
-    for mode in ('fit','fill','studio'):result+=run(a.exe.resolve(),a.runtime.resolve(),a.out.resolve(),mode)
+    for mode in ('fit','fill','studio','canvas'):result+=run(a.exe.resolve(),a.runtime.resolve(),a.out.resolve(),mode)
     (a.out/'results.json').write_text(json.dumps(result,indent=2))
-    print('PASS: real libobs -> local RTMP -> decoded H.264/AAC, simultaneous landscape/portrait, fit/fill/crop, scene changes and stop/restart; no public broadcasts.')
+    print('PASS: real libobs -> local RTMP -> decoded H.264/AAC, simultaneous landscape/portrait, fit/fill/crop, persistent shared canvas, compatible H.264/AAC, scene changes and stop/restart; no public broadcasts.')
 
 if __name__=='__main__':main()
