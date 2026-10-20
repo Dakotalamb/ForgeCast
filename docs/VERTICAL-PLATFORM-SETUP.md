@@ -17,8 +17,9 @@ Kick and unverified encoder destinations are excluded from FDGCast's portrait op
 1. Stop streaming and recording. In Vertical Studio select **Enable FDGCast canvas in OBS**.
 2. Open **OBS → Settings → Stream**. Set the service to Twitch and enable **Enhanced Broadcasting**.
 3. Select **FDGCast Vertical Studio** under **Additional Canvas**, then Apply. Reopen Settings if it was already open when the canvas was created.
-4. Save your scene layouts. **Start Streaming** in OBS sends both pictures together. Start All also starts checked destinations.
-5. Check Twitch Inspector and actual mobile playback. A configured status does not prove platform delivery.
+4. Under Multitrack Video, set **Maximum Video Tracks** to at least **4**. Two canvases require at least two video tracks each. If the same error persists, inspect the OBS log for GPU/encoder limits. For horizontal-only streaming, select **None** for Additional Canvas.
+5. Save your scene layouts. **Start Streaming** in OBS sends both pictures together. Start All also starts checked destinations.
+6. Check Twitch Inspector and actual mobile playback. A configured status does not prove platform delivery.
 
 The canvas is saved with the OBS scene collection and restored at startup. Stop video outputs before changing or disabling it. To disable, select **None** for Additional Canvas in OBS first. The main encoder is not replaced. The portrait canvas does not mix another copy of audio; OBS's stream audio is used.
 
