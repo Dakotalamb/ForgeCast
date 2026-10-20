@@ -1714,7 +1714,7 @@ static void frontendEvent(enum obs_frontend_event event, void *)
     if(event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING){verticalCanvasLoading=true;verticalCanvas.reset();}
     if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING||event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)verticalCanvasLoading=false;
     if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
-       event==OBS_FRONTEND_EVENT_PROFILE_CHANGED || event==OBS_FRONTEND_EVENT_STREAMING_STOPPED)
+       event==OBS_FRONTEND_EVENT_PROFILE_CHANGED || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_RENAMED || event==OBS_FRONTEND_EVENT_STREAMING_STOPPED)
         QTimer::singleShot(0, qApp, []{restoreVerticalCanvas();});
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();

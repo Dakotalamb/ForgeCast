@@ -12,7 +12,7 @@ inline const char *rtmpH264Encoder(obs_encoder_t *main)
     const char *id=nullptr,*software=nullptr,*hardware=nullptr;
     for(size_t i=0;obs_enum_encoder_types(i,&id);++i){
         const char *codec=obs_get_encoder_codec(id);if(!codec||std::strcmp(codec,"h264")!=0||
-            (obs_get_encoder_caps(id)&OBS_ENCODER_CAP_DEPRECATED))continue;
+            (obs_get_encoder_caps(id)&(OBS_ENCODER_CAP_DEPRECATED|OBS_ENCODER_CAP_INTERNAL)))continue;
         if(std::strcmp(id,"obs_x264")==0)software=id;
         if(family && std::string(id).find(family)!=std::string::npos)hardware=id;
     }

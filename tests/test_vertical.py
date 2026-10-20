@@ -159,3 +159,32 @@ class VerticalTests(unittest.IsolatedAsyncioTestCase):
                 queue_outputs(self.s,'stop','legacy');self.s.commands.clear()
                 fixed=await resolve_destination(self.s,{**legacy,'picture':'main'})
                 self.assertEqual(fixed['picture'],'main')
+
+    async def test_canvas_requires_matching_native_and_only_queues_setup(self):
+        self.s.demo=False
+        async def setup(value=True):
+            return await self.client.post('/api/action',headers=self.headers,json={'op':'vertical_canvas','enabled':value})
+        self.assertEqual((await setup()).status,400)
+        self.s.native_seen=time.time();self.assertEqual((await setup()).status,400)
+        self.s.native_features={'vertical_canvas_v1'}
+        for value in (None,1,'true'):
+            self.assertEqual((await setup(value)).status,400)
+        response=await setup();self.assertEqual(response.status,200,await response.text())
+        command=self.s.commands.pop();self.assertEqual(command['action'],'vertical_canvas');self.assertIs(command['enabled'],True)
+        self.assertNotIn('key',command);self.assertNotIn('server',command)
+        self.s.obs.request.assert_not_awaited()
+        for snapshot in ({'busy':True},{'selected':True}):
+            self.s.native_canvas=snapshot;self.assertEqual((await setup(False)).status,400)
+        self.s.native_canvas={};self.s.main_output={'busy':True}
+        self.assertEqual((await setup()).status,400);self.assertEqual(len(self.s.commands),0)
+        self.s.main_output=None;self.s.demo=True;self.assertEqual((await setup()).status,400)
+
+    async def test_canvas_telemetry_is_bounded_and_expires(self):
+        headers={**self.headers,'Authorization':'Bearer '+self.s.native_key}
+        response=await self.client.post('/native/poll',headers=headers,json={
+            'features':['vertical_canvas_v1'], 'vertical_canvas':{'enabled':True,'registered':True,'selected':1,'busy':'false',
+                'enhanced':True,'twitch_main':True,'key':'PRIVATE','error':'arbitrary PRIVATE'}})
+        self.assertEqual(response.status,200)
+        canvas=self.s.public()['vertical_canvas'];self.assertTrue(canvas['available']);self.assertTrue(canvas['registered'])
+        self.assertFalse(canvas['selected']);self.assertFalse(canvas['busy']);self.assertNotIn('PRIVATE',str(canvas))
+        self.s.native_seen=0;self.assertEqual(self.s.public()['vertical_canvas'],{})

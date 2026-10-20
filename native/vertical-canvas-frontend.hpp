@@ -11,7 +11,7 @@ static QString canvasCollectionKey()
     char *collection = obs_frontend_get_current_scene_collection();
     const auto key = QString::fromLatin1(QUrl::toPercentEncoding(QString::fromUtf8(collection ? collection : "Default")));
     if (collection) bfree(collection);
-    return "vertical-canvas/collections/" + key + "/uuid";
+    return "vertical-canvas/collections/" + key;
 }
 static bool canvasSelected()
 {
@@ -29,11 +29,11 @@ static QString setVerticalCanvas(bool enabled)
     if (!enabled) {
         if (verticalCanvas) {
             auto *canvas = obs_canvas_get_ref(verticalCanvas->canvas);
+            if(!obs_frontend_remove_canvas(canvas)){obs_canvas_release(canvas);return "vertical_canvas_setup_failed";}
             verticalCanvas.reset();
-            obs_frontend_remove_canvas(canvas);
             obs_canvas_release(canvas);
         }
-        settings.setValue("vertical-canvas/enabled", false);
+        settings.setValue(canvasCollectionKey()+"/enabled", false);
         verticalCanvasError.clear();
         obs_frontend_save();
         return "vertical_canvas_disabled";
@@ -42,9 +42,13 @@ static QString setVerticalCanvas(bool enabled)
     if (!obs_get_video_info(&info)) return "vertical_canvas_setup_failed";
     if (verticalCanvas && !obs_canvas_removed(verticalCanvas->canvas) &&
         obs_canvas_get_video_info(verticalCanvas->canvas,&current) && current.fps_num==info.fps_num && current.fps_den==info.fps_den)
-        {verticalCanvasError.clear();return "vertical_canvas_ready";}
+        {
+            settings.setValue(canvasCollectionKey()+"/uuid",QString::fromUtf8(obs_canvas_get_uuid(verticalCanvas->canvas)));
+            settings.setValue(canvasCollectionKey()+"/enabled",true);
+            verticalCanvasError.clear();return "vertical_canvas_ready";
+        }
     verticalCanvas.reset();
-    const QString saved = settings.value(canvasCollectionKey()).toString();
+    const QString saved = settings.value(canvasCollectionKey()+"/uuid").toString();
     obs_canvas_t *owned = nullptr;
     obs_frontend_canvas_list list{};
     obs_frontend_get_canvases(&list);
@@ -65,8 +69,8 @@ static QString setVerticalCanvas(bool enabled)
         if(created)obs_frontend_remove_canvas(owned);
         return "vertical_canvas_setup_failed";
     }
-    settings.setValue(canvasCollectionKey(),QString::fromUtf8(obs_canvas_get_uuid(owned)));
-    settings.setValue("vertical-canvas/enabled",true);
+    settings.setValue(canvasCollectionKey()+"/uuid",QString::fromUtf8(obs_canvas_get_uuid(owned)));
+    settings.setValue(canvasCollectionKey()+"/enabled",true);
     verticalCanvas=std::move(next);
     verticalCanvasError.clear();
     obs_frontend_save();
@@ -76,7 +80,7 @@ static void restoreVerticalCanvas()
 {
     if(verticalCanvasClosing||verticalCanvasLoading)return;
     QSettings settings("Forged Destiny Gaming","ForgeCast");
-    if (!settings.value("vertical-canvas/enabled",false).toBool()) return;
+    if (!verticalCanvas && !settings.value(canvasCollectionKey()+"/enabled",false).toBool()) return;
     const QString result=setVerticalCanvas(true);
     if(result!="vertical_canvas_ready")verticalCanvasError=result;
 }
@@ -89,7 +93,7 @@ static QJsonObject verticalCanvasTelemetry()
     auto *serviceSettings=service?obs_service_get_settings(service):nullptr;
     const QString serviceName=serviceSettings?QString::fromUtf8(obs_data_get_string(serviceSettings,"service")):QString();
     if(serviceSettings)obs_data_release(serviceSettings);
-    return QJsonObject{{"enabled",settings.value("vertical-canvas/enabled",false).toBool()},
+    return QJsonObject{{"enabled",settings.value(canvasCollectionKey()+"/enabled",false).toBool()},
         {"registered",registered},{"selected",registered&&canvasSelected()},
         {"enhanced",profile&&config_get_bool(profile,"Stream1","EnableMultitrackVideo")},
         {"twitch_main",serviceName.contains("Twitch",Qt::CaseInsensitive)},
