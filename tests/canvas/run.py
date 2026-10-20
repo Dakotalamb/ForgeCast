@@ -18,11 +18,13 @@ config=runtime/'config'/'obs-studio';profile=config/'basic'/'profiles'/'FDGCastQ
 module=runtime/'obs-plugins'/'64bit'/'fdgcast-canvas-qa.dll';shutil.copy2(a.module,module)
 try:
     for stage in (1,2):
-        report=out/f'frontend-canvas-{stage}.json';env=os.environ.copy();env.update(QT_QPA_PLATFORM='offscreen',FDGCAST_CANVAS_QA_STAGE=str(stage),FDGCAST_CANVAS_QA_REPORT=str(report))
+        report=out/f'frontend-canvas-{stage}.json';env=os.environ.copy();env.pop('QT_QPA_PLATFORM',None);env.update(QT_LOGGING_TO_CONSOLE='1',FDGCAST_CANVAS_QA_STAGE=str(stage),FDGCAST_CANVAS_QA_REPORT=str(report))
         with (out/f'frontend-canvas-{stage}.log').open('w',encoding='utf-8') as log:
             process=subprocess.Popen([str(runtime/'bin'/'64bit'/'obs64.exe'),'--portable','--disable-updater','--disable-shutdown-check','--disable-missing-files-check','--profile','FDGCastQA','--collection','FDGCastQA'],cwd=runtime/'bin'/'64bit',env=env,stdout=log,stderr=subprocess.STDOUT)
             try:code=process.wait(timeout=75)
             except subprocess.TimeoutExpired:
+                title=subprocess.run(['powershell','-NoProfile','-Command',f'(Get-Process -Id {process.pid}).MainWindowTitle'],capture_output=True,text=True).stdout.strip()
+                (out/f'frontend-window-{stage}.txt').write_text(title,encoding='utf-8')
                 process.kill();process.wait();raise RuntimeError(f'OBS frontend did not exit; see stage {stage} log')
         assert report.exists(),f'Missing OBS frontend report for stage {stage}; exit={code}'
         result=json.loads(report.read_text());assert result.get('success'),result
