@@ -3,6 +3,7 @@
 #include <obs-module.h>
 #include <obs-audio-controls.h>
 #include <obs-frontend-api.h>
+#include <util/config-file.h>
 #include <QApplication>
 #include <QDesktopServices>
 #include <QByteArray>
@@ -61,6 +62,8 @@
 #include <QVBoxLayout>
 #include <QWidget>
 #include "chat-scroll-follow.hpp"
+#include "portrait-layout.hpp"
+#include "vertical-render.hpp"
 #include <map>
 #include <memory>
 #include <cstring>
@@ -75,10 +78,19 @@ MODULE_EXPORT const char *obs_module_description(void)
     return "FDGCast by Forged Destiny Gaming: multistream output control";
 }
 
+// A video-only wrapper reads the current program source each frame, including
+// OBS transitions. Audio continues through the existing main AAC encoder.
+#include "portrait-video.hpp"
+#include "vertical-canvas-frontend.hpp"
+
 struct Destination {
+    std::shared_ptr<PortraitVideo> portrait;
+    std::shared_ptr<RtmpVideo> compatibleVideo;
+    std::shared_ptr<RtmpAudio> compatibleAudio;
     obs_output_t *output = nullptr;
     obs_service_t *service = nullptr;
     QString name;
+    QString picture;
     bool starting = false;
     bool stopping = false;
     int startupTicks = 0;
@@ -154,6 +166,14 @@ class ChatFeed : public QTextBrowser {
             painter.drawRect(3,3,7,26); painter.drawRect(10,12,7,8);
             painter.drawRect(17,3,7,9); painter.drawRect(17,20,7,9);
             painter.drawRect(24,3,5,5); painter.drawRect(24,24,5,5);
+        } else if(platform=="facebook"||platform=="instagram") {
+            painter.setBrush(QColor(platform=="facebook"?"#1877f2":"#c13584"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(24);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="facebook"?"f":"IG");
+        } else if(platform=="rumble"||platform=="tiktok") {
+            painter.setBrush(QColor(platform=="rumble"?"#85c742":"#252525"));painter.drawRoundedRect(QRectF(1,1,30,30),6,6);
+            painter.setPen(Qt::white);QFont font=painter.font();font.setBold(true);font.setPixelSize(22);painter.setFont(font);
+            painter.drawText(QRect(0,0,32,32),Qt::AlignCenter,platform=="rumble"?"R":"♪");
         } else {
             painter.setBrush(QColor("#9146ff")); painter.drawPolygon(QPolygon{{3,1},{31,1},{31,22},{22,31},{15,31},{15,26},{3,26}});
             painter.setBrush(Qt::white); painter.drawPolygon(QPolygon{{7,4},{28,4},{28,19},{21,26},{15,26},{15,22},{7,22}});
@@ -229,7 +249,7 @@ class DockView : public QObject {
     }
     void toggle(QMenu *menu,const QString &label,const QString &key,bool current) {
         auto *action=menu->addAction(label);
-        action->setToolTip(key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
+        action->setToolTip(key=="badges"?"Show role and special badge labels beside viewer names, including moderator, bot and game badges. Off by default.":key=="origins"?"Show the original broadcaster beside messages. Hover the platform icon to see this without adding text.":key=="compact"?"Reduce message and control spacing so more fits in the dock.":key=="times"?"Show the local time beside each chat message or event.":key=="controls"?"Show less-used buttons in the dock. They remain available in this menu when hidden.":"Change this dock appearance; the choice is saved on this PC.");
         action->setCheckable(true); action->setChecked(current);
         connect(action,&QAction::triggered,owner,[this,key](bool value) { save(key,value); });
     }
@@ -248,8 +268,9 @@ public:
         body->setLayout(content); // Qt transfers the existing layout from the dock.
         auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
         auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
-        auto *options=new QToolButton(dock);options->setText("⋮");options->setToolTip("Dock appearance and controls");
-        options->setFixedSize(22,20);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
+        auto *options=new QToolButton(dock);options->setText("View options");options->setToolTip("Change text size, badge visibility and other dock settings");
+        options->setAccessibleName("Dock options");
+        options->setMinimumSize(76,26);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
         openButton=new QPushButton("Open app",dock);
         openButton->setToolTip("FDGCast Companion is offline. Open it to reconnect your docks.");
         connect(openButton,&QPushButton::clicked,dock,[] { openCompanionWindow(); });
@@ -270,7 +291,7 @@ public:
                 toggle(menu,"Show channel avatars","avatars",showAvatars);
                 toggle(menu,"Show chat filters","filters",showFilters);
                 toggle(menu,"Alternating message backgrounds","alternate",alternate);
-                toggle(menu,"Show badge labels","badges",showBadges);
+                toggle(menu,"Show badges (roles & special badges)","badges",showBadges);
                 auto *icons=menu->addMenu("Platform icon size");
                 for (int size : {16,18,22,26}) {
                     auto *item=icons->addAction(QString::number(size)+" px");item->setCheckable(true);item->setChecked(size==iconPixels);
@@ -312,7 +333,7 @@ public:
         alternate=settings.value(prefix+"alternate",false).toBool();
         showBadges=settings.value(prefix+"badges",false).toBool();
         iconPixels=qBound(16,settings.value(prefix+"icon",18).toInt(),26);
-        pixels=qBound(11,settings.value(prefix+"font",13).toInt(),17);
+        pixels=qBound(11,settings.value(prefix+"font",prefix=="dock-ui/events/"?15:13).toInt(),17);
         QFont font=owner->font();font.setPixelSize(pixels);owner->setFont(font);
         content->setContentsMargins(compact?4:9,compact?2:9,compact?4:9,compact?2:9);
         content->setSpacing(compact?3:7);
@@ -357,9 +378,14 @@ public:
         feed->setMinimumSize(0,0);
         feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         layout->addWidget(connection);
+        auto *chatSetup=new QPushButton("Set up chats / Rumble",this);
+        chatSetup->setProperty("dockMenuAction",true);
+        chatSetup->setToolTip("Open Companion, then choose Connect Rumble chat or Connections to set up platform chats.");
+        layout->addWidget(chatSetup);
+        connect(chatSetup,&QPushButton::clicked,this,[] { openCompanionWindow(); });
         auto *filters=new QHBoxLayout();
         platformFilter=new QComboBox(this);platformFilter->addItem("All platforms","");
-        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick")}) platformFilter->addItem(name,name);
+        for(const auto &name : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) platformFilter->addItem(name,name);
         channelFilter=new QComboBox(this);channelFilter->addItem("All channels","");
         platformFilter->setMinimumWidth(0);channelFilter->setMinimumWidth(0);
         platformFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);channelFilter->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Fixed);
@@ -384,7 +410,7 @@ public:
         sendTo->addItem("YouTube", "youtube");
         sendTo->addItem("Kick", "kick");
         sendTo->addItem("All connected platforms", "all");
-        sendTo->setToolTip("Send to your own linked channel. All connected platforms sends separately with per-platform results.");
+        sendTo->setToolTip("Send to your linked Twitch, YouTube or Kick channel. Facebook, Instagram, TikTok and Rumble are receive-only.");
         compose = new QLineEdit(this);
         compose->setPlaceholderText("Message your channel…");
         compose->setMaxLength(200);
@@ -454,13 +480,13 @@ public:
         QMenu menu(this);const QString platform=row.value("platform").toString(),user=row.value("user").toString(),origin=row.value("origin").toString();
         menu.addAction(user+" · "+platform+" · "+origin)->setEnabled(false);
         auto *copy=menu.addAction("Copy message");connect(copy,&QAction::triggered,this,[row]{QApplication::clipboard()->setText(row.value("text").toString());});
-        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && r.value("user_id")==row.value("user_id"))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
-        auto *reply=menu.addAction("Reply in my "+platform+" channel");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
+        auto *history=menu.addAction("Recent messages from this account");connect(history,&QAction::triggered,this,[this,row,platform,user]{QStringList lines;for(const auto &entry:lastPayload.value("messages").toArray()){auto r=entry.toObject();if(r.value("platform").toString()==platform && (r.value("user_id").toString().isEmpty()?r.value("user")==row.value("user"):r.value("user_id")==row.value("user_id")))lines.append(r.value("text").toString());}QMessageBox box(this);box.setWindowTitle(user+" · "+platform);box.setTextFormat(Qt::PlainText);box.setText(lines.mid(qMax(0,int(lines.size())-15)).join("\n"));box.exec();});
+        auto *reply=menu.addAction("Reply in my "+platform+" channel");reply->setEnabled(platform=="twitch"||platform=="youtube"||platform=="kick");connect(reply,&QAction::triggered,this,[this,row,user,platform]{sendTo->setCurrentIndex(sendTo->findData(platform));compose->setText("@"+user+" ");compose->setFocus();replyId=platform=="twitch"?row.value("platform_message_id").toString():QString();});
         auto *highlight=menu.addAction("Show on selected-message overlay");connect(highlight,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id},{"immediate",true}});});
         auto *queue=menu.addAction("Queue for selected-message overlay");connect(queue,&QAction::triggered,this,[this,id]{send(QJsonObject{{"action","highlight"},{"id",id}});});
         QString profile;
         if(platform=="youtube" && QRegularExpression("^[A-Za-z0-9_-]{1,100}$").match(row.value("user_id").toString()).hasMatch())profile="https://www.youtube.com/channel/"+row.value("user_id").toString();
-        else if(QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
+        else if((platform=="twitch"||platform=="kick")&&QRegularExpression("^[A-Za-z0-9_]{1,40}$").match(user).hasMatch())profile=(platform=="kick"?"https://kick.com/":"https://www.twitch.tv/")+user;
         if(!profile.isEmpty()){auto *open=menu.addAction("Open platform profile");connect(open,&QAction::triggered,this,[profile]{QDesktopServices::openUrl(QUrl(profile));});}
         const auto capabilities=lastPayload.value("capabilities").toObject().value(platform).toObject();
         menu.addSeparator();
@@ -478,9 +504,10 @@ public:
         const auto statuses = payload.value("statuses").toObject();
         lastPayload=payload;
         QStringList shortStates,details;
-        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick")}) {
+        for (const auto &platform : {QString("twitch"),QString("youtube"),QString("kick"),QString("rumble"),QString("tiktok"),QString("facebook"),QString("instagram")}) {
+            if(!statuses.contains(platform))continue;
             const QString full=statuses.value(platform).toString("offline");
-            const QString state=full=="connected"?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
+            const QString state=full.startsWith("connected",Qt::CaseInsensitive)?"✓":full.contains("waiting",Qt::CaseInsensitive)||full.contains("ready",Qt::CaseInsensitive)?"waiting":full.contains("connecting",Qt::CaseInsensitive)?"connecting":full=="not connected"||full=="disconnected"?"offline":"attention";
             shortStates.append(platform.left(1).toUpper()+platform.mid(1)+" "+state);
             details.append(platform+": "+full);
         }
@@ -559,7 +586,7 @@ public:
 class EventsDock : public QWidget {
     DockView *view;
     QJsonObject lastPayload;
-    QTextBrowser *feed;
+    ChatFeed *feed;
     QByteArray lastEvents;
 public:
     EventsDock() : QWidget()
@@ -568,9 +595,9 @@ public:
                       "QTextBrowser { background:#25303c;border:1px solid #556779;border-radius:4px;padding:6px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
-        feed = new QTextBrowser(this);feed->setOpenExternalLinks(false);
+        feed = new ChatFeed(this);feed->setOpenExternalLinks(false);
         feed->setMinimumSize(0,0);feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
-        feed->setToolTip("Twitch follows, channel point redeems and incoming raids. Connect your own channel in the Hub.");
+        feed->setToolTip("Combined activity from connected platforms. Each card shows its platform icon and channel.");
         layout->addWidget(feed,1);
         view=new DockView(this,layout,"events",false,[this] { lastEvents.clear();if(!lastPayload.isEmpty()) update(lastPayload); });
         disconnected();
@@ -588,15 +615,27 @@ public:
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
         for (const auto &entry : events) {
             const auto row = entry.toObject();
+            const QString platform=row.value("platform").toString();
+            const bool knownPlatform=QStringList{"twitch","youtube","kick","tiktok","rumble","facebook","instagram"}.contains(platform);
+            const QString icon=knownPlatform?"<img width='18' height='18' src='platform:"+platform+"' alt='"+platform.toHtmlEscaped()+"'> ":QString();
             const QString kind=row.value("kind").toString();
-            const QString title=(row.value("simulated").toBool()?"TEST · ":"")+kind.left(1).toUpper()+kind.mid(1)+(row.value("acknowledged").toBool()?" ✓":"");
+            const QString title=kind=="tiktok_gift"?"TikTok gift":kind.left(1).toUpper()+kind.mid(1);
             const QString color=kind=="follow"?"#94e6b0":kind=="redeem"?"#ffb891":"#d3baff";
             const auto description = row.value("text").toString().toHtmlEscaped();
             const QString timestamp=view->showTimes ? " · "+QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble())).toLocalTime().toString("h:mm AP") : QString();
-            html += "<p style='margin:0 0 "+QString::number(view->compact?6:12)+"px'><b style='color:"+color+"'>"+title+"</b><small>"+timestamp+"</small>"+(view->compact?" · ":"<br>")+description+"<small style='color:#a8afb8'> · "+row.value("source").toString().toHtmlEscaped()+"</small></p>";
+            // QTextBrowser supports table cell backgrounds reliably at narrow dock widths.
+            // Keep the event type on its own line even in compact mode.
+            const QString heading=kind=="raid"?"Incoming raid":kind=="follow"?"New follower":kind=="redeem"?"Channel point redeem":title;
+            const QString background=kind=="raid"?"#35294b":kind=="follow"?"#203c36":"#423026";
+            const QString flags=QString(row.value("simulated").toBool()?"TEST · ":"")+(row.value("acknowledged").toBool()?"Acknowledged · ":"");
+            html += "<table width='100%' cellspacing='0' cellpadding='0'><tr><td width='5' bgcolor='"+color+"'></td><td bgcolor='"+background+"' style='padding:"+QString::number(view->compact?10:14)+"px'>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+3)+"px;color:"+color+"'><b>"+icon+flags+heading.toHtmlEscaped()+"</b></p>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+1)+"px;color:#ffffff'>"+description+"</p>"
+                    "<p style='margin:0;color:#bdc8d7;font-size:"+QString::number(qMax(11,view->pixels-1))+"px'>"+row.value("source").toString().toHtmlEscaped()+timestamp+"</p>"
+                    "</td></tr></table><p style='margin:0;font-size:6px'>&nbsp;</p>";
         }
-        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect Twitch in the Hub for follows, redeems and incoming raids."));
-        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for Twitch events.</p>";
+        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect platform accounts for events. Connect a TikTok LIVE username in Companion for TikTok activity."));
+        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for selected events from connected platforms.</p>";
         feed->setHtml(html + "</div>");
     }
 };
@@ -837,32 +876,55 @@ public:
             dialog.setWindowTitle("Add FDGCast destination");
             QFormLayout form(&dialog);
             QLineEdit name(&dialog), server(&dialog), key(&dialog);
-            QComboBox platform(&dialog);
-            platform.addItem("Twitch", "twitch");platform.addItem("YouTube", "youtube");
-            platform.addItem("Kick", "kick");platform.addItem("Other / Custom", "custom");
+            QComboBox platform(&dialog), picture(&dialog);
+            picture.addItem("OBS picture · actual OBS resolution", "main");
+            picture.addItem("Vertical · fill screen (crop sides)", "vertical_fill");
+            picture.addItem("Vertical · show whole picture", "vertical_fit");
+            picture.addItem("Vertical Studio · saved scene layouts", "vertical_studio");
+            picture.setToolTip("Vertical is 720 × 1280 at 4500 kbps, using an extra video encoder. Follows your main scene and audio. Fill crops the edges; whole picture adds black space. Check the platform preview.");
+            const auto catalog=lastPayload.value("destination_platforms").toArray();
+            for(const auto &entry:catalog){
+                const auto row=entry.toObject();const auto id=row.value("id").toString();
+                platform.addItem(id=="youtube"?"YouTube Horizontal":row.value("name").toString(),id);
+                if(id=="youtube")platform.addItem("YouTube Vertical","youtube_vertical");
+            }
+            if(catalog.isEmpty())platform.addItem("Other / Custom RTMP","custom");
             QCheckBox advanced("Use a custom server address", &dialog);
             QLabel help(&dialog);help.setWordWrap(true);
             key.setEchoMode(QLineEdit::Password);
             server.setPlaceholderText("Paste your platform's server address");
             form.addRow("Platform", &platform);
             form.addRow("Stream key", &key);
+            form.addRow("Picture format", &picture);
             form.addRow("Name (optional)", &name);
             form.addRow(&advanced);
             form.addRow("Server address", &server);
             form.addRow(&help);
             auto updatePlatform = [&] {
-                const QString selected=platform.currentData().toString();
-                const bool custom=selected=="custom";
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
+                QJsonObject metadata;for(const auto &entry:catalog)if(entry.toObject().value("id").toString()==selected)metadata=entry.toObject();
+                const bool custom=metadata.isEmpty()||metadata.value("requires_server").toBool();
                 server.setVisible(custom||advanced.isChecked());
                 form.labelForField(&server)->setVisible(custom||advanced.isChecked());
                 advanced.setVisible(!custom);
                 name.setPlaceholderText(platform.currentText());
-                help.setText(custom?"Paste the server address and key from your platform.":selected=="kick"?
-                    "Uses your connected Kick account. If unavailable, choose a custom server address from your Kick dashboard.":
-                    "The server is selected automatically. Just paste your stream key.");
+                help.setText(metadata.value("help").toString("Paste the server address and key from your platform."));
+                if(selected=="youtube")help.setText(preset=="youtube_vertical"?
+                    "Set YouTube's vertical preview to Encoder. Paste its separate right-hand stream key here. Keep the horizontal output on its own key.":
+                    "Paste YouTube's horizontal stream key. Uses the actual OBS picture; configure OBS for landscape. Add YouTube Vertical separately for both formats.");
                 dialog.adjustSize();
             };
-            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();updatePlatform(); });
+            auto updatePicture = [&] {
+                const QString preset=platform.currentData().toString();
+                const QString selected=preset=="youtube_vertical"?"youtube":preset;
+                bool allowed=false;for(const auto &entry:catalog){const auto row=entry.toObject();if(row.value("id").toString()==selected)allowed=row.value("vertical_output").toBool();}
+                picture.clear();picture.addItem("OBS picture · actual OBS resolution","main");
+                if(allowed){picture.addItem("Vertical Studio · saved scene layouts","vertical_studio");picture.addItem("Vertical · fill screen (crop sides)","vertical_fill");picture.addItem("Vertical · show whole picture","vertical_fit");}
+                if(preset=="youtube_vertical"||selected=="tiktok"||selected=="instagram")picture.setCurrentIndex(picture.findData("vertical_studio"));
+            };
+            updatePicture();
+            connect(&platform, &QComboBox::currentIndexChanged, &dialog, [&](int) { advanced.setChecked(false);server.clear();key.clear();updatePicture();updatePlatform(); });
             connect(&advanced, &QCheckBox::toggled, &dialog, [&](bool checked) { if(!checked)server.clear();updatePlatform(); });
             updatePlatform();
             QDialogButtonBox buttons(QDialogButtonBox::Ok | QDialogButtonBox::Cancel, &dialog);
@@ -870,8 +932,8 @@ public:
             connect(&buttons, &QDialogButtonBox::accepted, &dialog, &QDialog::accept);
             connect(&buttons, &QDialogButtonBox::rejected, &dialog, &QDialog::reject);
             if (dialog.exec() == QDialog::Accepted)
-                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()}, {"name", name.text()},
-                                 {"server", server.text()}, {"key", key.text()}});
+                send(QJsonObject{{"action", "save"}, {"platform",platform.currentData().toString()=="youtube_vertical"?QString("youtube"):platform.currentData().toString()}, {"name", name.text().isEmpty()?platform.currentText():name.text()},
+                                 {"server", server.text()}, {"key", key.text()}, {"picture", picture.currentData().toString()}});
             key.clear();
         });
         connect(startButton, &QPushButton::clicked, this, [this] {
@@ -935,20 +997,25 @@ public:
                 for (const auto &output : outputs) {
                     const auto row = output.toObject();
                     if (row.value("id") == dest.value("id")) {
-                        state = row.value("active").toBool() ? "LIVE" :
-                                row.value("busy").toBool() ? "CONNECTING / STOPPING" : "OFFLINE";
+                        const QString transport=row.value("transmission_state").toString();
+                        state=transport=="sending"?"SENDING":transport=="stalled"?"NO DATA":
+                              transport=="starting"?"WAITING FOR DATA":row.value("busy").toBool()?"CONNECTING / STOPPING":"OFFLINE";
+                        const int width=row.value("width").toInt(),height=row.value("height").toInt();
+                        if(width>0 && height>0) state+=" · "+QString::number(width)+" × "+QString::number(height);
+                        if(row.value("bitrate_kbps").isDouble()) state+=" · "+QString::number(row.value("bitrate_kbps").toInt())+" kbps";
                         if (!row.value("error").toString().isEmpty()) error = row.value("error").toString();
                         if (row.value("reconnecting").toBool()) state = "RECONNECTING";
                     }
                 }
                 if (!error.isEmpty()) state = "ERROR";
-                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + "   " + state, list);
+                const QString format = dest.value("picture").toString("main");
+                auto *item = new QListWidgetItem("● "+dest.value("name").toString() + (format == "main" ? "" : " · 9:16") + "   " + state, list);
                 item->setFlags(item->flags() | Qt::ItemIsUserCheckable);
                 item->setCheckState(dest.value("enabled").toBool(true) ? Qt::Checked : Qt::Unchecked);
                 item->setToolTip(error.isEmpty() ? "Checked destinations are included in the next Start All. Changing this does not stop a live stream." : error);
                 item->setData(Qt::UserRole, dest.value("id").toString());
-                if (state == "LIVE") item->setForeground(QColor("#80d6a0"));
-                else if (state == "ERROR") item->setForeground(QColor("#ff6b6b"));
+                if (state.startsWith("SENDING")) item->setForeground(QColor("#80d6a0"));
+                else if (state == "ERROR" || state.startsWith("NO DATA")) item->setForeground(QColor("#ff6b6b"));
                 else if (state != "OFFLINE") item->setForeground(QColor("#ffd166"));
                 else item->setForeground(QColor("#a8afb8"));
                 if (item->data(Qt::UserRole).toString() == selected) list->setCurrentItem(item);
@@ -976,6 +1043,11 @@ class ForgeDock : public QWidget {
     QTimer timer;
     QLabel *label;
     std::map<QString, std::unique_ptr<Destination>> destinations;
+    std::map<QString, std::weak_ptr<PortraitVideo>> portraitVideos;
+    std::weak_ptr<RtmpVideo> rtmpMainVideo;
+    std::map<size_t,std::weak_ptr<RtmpAudio>> rtmpAudio;
+    QString mainPicture = "main";
+    QString mainPictureError;
     QJsonArray results;
     QJsonArray bulkStarts;
     int bulkTicks = 0;
@@ -990,6 +1062,9 @@ class ForgeDock : public QWidget {
 public:
     ForgeDock() : QWidget(), network(this)
     {
+        QSettings preferences("Forged Destiny Gaming", "ForgeCast");
+        // 1.0.1 recovery: discard saved main-output overrides from 1.0.0.
+        preferences.remove("main-picture");
         setObjectName("forgecastDock");
         setStyleSheet("QWidget#forgecastDock { background: #151719; color: #f4f4f4; }"
                       "QLabel { color: #f4f4f4; padding: 10px; }"
@@ -998,7 +1073,7 @@ public:
                       "QPushButton:hover { background: #ff7549; }");
         auto *layout = new QVBoxLayout(this);
         label = new QLabel("FDGCAST · FORGED DESTINY GAMING\nStart the local companion to connect.\n"
-                           "Secondary outputs reuse OBS main H.264 + AAC encoders.\n"
+                           "Destinations use the OBS picture or a vertical crop/fit.\n"
                            "Start the main OBS stream first. No automatic starts.", this);
         label->setWordWrap(true);
         layout->addWidget(label);
@@ -1146,6 +1221,21 @@ public:
         destinations.clear();
     }
 
+    bool mainBusy() const
+    {
+        auto *output=obs_frontend_get_streaming_output();
+        const bool busy=obs_frontend_streaming_active() || (output && obs_output_active(output));
+        if(output) obs_output_release(output);
+        return busy;
+    }
+
+    bool mainCompatible() const
+    {
+        // Emergency rollback: OBS exclusively owns the main output video.
+        // Vertical Studio remains available on FDGCast secondary destinations.
+        return false;
+    }
+
     QJsonObject audioSnapshot()
     {
         QJsonArray rows;
@@ -1220,6 +1310,12 @@ public:
 
     QString start(const QJsonObject &obj)
     {
+        const auto picture = obj.value("picture").toString("main");
+        if (picture != "main" && picture != "vertical_fill" && picture != "vertical_fit" && picture != "vertical_studio")
+            return "invalid_picture_format";
+        const auto platform = obj.value("platform").toString();
+        if(picture!="main" && platform!="youtube" && platform!="tiktok" && platform!="instagram" && platform!="vimeo")
+            return "vertical_platform_unsupported";
         QString id = obj.value("id").toString();
         QUrl url(obj.value("server").toString());
         if (id.isEmpty() || id.size() > 40 || url.host().isEmpty() ||
@@ -1227,6 +1323,14 @@ public:
             !url.userInfo().isEmpty() || !url.query().isEmpty() || !url.fragment().isEmpty() ||
             obj.value("key").toString().isEmpty())
             return "invalid_destination";
+        auto *mainService=obs_frontend_get_streaming_service();
+        if(mainService) {
+            const QString mainKey=QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_STREAM_KEY));
+            const QUrl mainUrl(QString::fromUtf8(obs_service_get_connect_info(mainService,OBS_SERVICE_CONNECT_INFO_SERVER_URL)));
+            if(!mainKey.isEmpty() && mainKey==obj.value("key").toString() &&
+                mainUrl.host().compare(url.host(),Qt::CaseInsensitive)==0)
+                return "duplicate_ingest";
+        }
         auto old = destinations.find(id);
         if (old != destinations.end()) {
             if (obs_output_active(old->second->output) || old->second->starting || old->second->stopping)
@@ -1242,13 +1346,41 @@ public:
             return "main_output_unavailable";
         obs_encoder_t *video = obs_output_get_video_encoder(mainOutput);
         obs_encoder_t *audio = obs_output_get_audio_encoder(mainOutput, 0);
-        if (!video || !audio || std::strcmp(obs_encoder_get_codec(video), "h264") != 0 ||
-            std::strcmp(obs_encoder_get_codec(audio), "aac") != 0) {
+        if (!video || !audio) {
             obs_output_release(mainOutput);
-            return "requires_main_h264_aac_disable_enhanced_broadcasting";
+            return "main_encoders_unavailable";
         }
         auto d = std::make_unique<Destination>();
+        if(std::strcmp(obs_encoder_get_codec(audio),"aac")!=0){
+            const auto track=obs_encoder_get_mixer_index(audio);
+            d->compatibleAudio=rtmpAudio[track].lock();
+            if(!d->compatibleAudio){d->compatibleAudio=std::make_shared<RtmpAudio>();
+                if(!d->compatibleAudio->create(audio)){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpAudio[track]=d->compatibleAudio;}
+            audio=d->compatibleAudio->encoder;
+        }
+        if(picture=="main" && std::strcmp(obs_encoder_get_codec(video),"h264")!=0){
+            d->compatibleVideo=rtmpMainVideo.lock();
+            if(!d->compatibleVideo){d->compatibleVideo=std::make_shared<RtmpVideo>();
+                d->compatibleVideo->encoder=createRtmpVideo(video,"FDGCast shared landscape H.264",obs_get_video(),6000);
+                if(!d->compatibleVideo->encoder){obs_output_release(mainOutput);return "rtmp_compatible_encoder_failed";}
+                rtmpMainVideo=d->compatibleVideo;}
+            video=d->compatibleVideo->encoder;
+        }
+        if (picture != "main") {
+            d->portrait = portraitVideos[picture].lock();
+            if (!d->portrait) {
+                d->portrait = std::make_shared<PortraitVideo>();
+                if (!d->portrait->create(video, picture == "vertical_fill",picture == "vertical_studio",verticalCanvas?verticalCanvas->canvas:nullptr)) {
+                    obs_output_release(mainOutput);
+                    return "vertical_setup_failed";
+                }
+                portraitVideos[picture] = d->portrait;
+            }
+            video = d->portrait->encoder;
+        }
         d->name = obj.value("name").toString();
+        d->picture = picture;
         obs_data_t *settings = obs_data_create();
         QByteArray server = obj.value("server").toString().toUtf8();
         QByteArray key = obj.value("key").toString().toUtf8();
@@ -1293,6 +1425,19 @@ public:
                 else if (result == "audio_stream_track_unavailable") message="OBS stream track is unavailable. Start streaming and try again.";
                 else message="Audio fix could not be applied. Check your selected source in Companion.";
                 doctorDock->message(message);
+            }
+        } else if (action == "vertical_canvas") {
+            result=setVerticalCanvas(cmd.value("enabled").toBool());
+            if(result!="vertical_canvas_ready"&&result!="vertical_canvas_disabled")verticalCanvasError=result;
+        } else if (action == "main_picture") {
+            const QString picture=cmd.value("picture").toString();
+            if(picture!="main" && picture!="vertical_studio") result="invalid_picture_format";
+            else if(mainBusy() || !bulkStarts.isEmpty()) result="already_active_or_busy";
+            else if(picture=="vertical_studio") {result="main_picture_temporarily_disabled";mainPictureError="Main stream picture routing is temporarily disabled in 1.0.1. OBS controls the main picture. Use an added destination for Vertical Studio."; }
+            else {
+                mainPicture=picture;mainPictureError.clear();
+                QSettings preferences("Forged Destiny Gaming","ForgeCast");preferences.setValue("main-picture",mainPicture);
+                result="main_picture_saved";
             }
         } else if (action == "start") {
             result = start(cmd.value("destination").toObject());
@@ -1358,13 +1503,25 @@ public:
         QByteArray token = tokenFile.readAll().trimmed();
         if (token.size() < 32 || token.size() > 128)
             return;
-        QJsonObject mainTelemetry;
+        auto *service=obs_frontend_get_streaming_service();
+        auto *serviceSettings=service ? obs_service_get_settings(service) : nullptr;
+        QString serviceName=serviceSettings ? QString::fromUtf8(obs_data_get_string(serviceSettings,"service")).left(80) : QString();
+        if(serviceSettings) obs_data_release(serviceSettings);
+        if(serviceName.isEmpty()) serviceName="Custom service";
+        QJsonObject mainTelemetry{{"id","main"},{"name","OBS main stream · "+serviceName},
+            {"active",false},{"busy",false},{"picture",mainPicture},
+            {"vertical_supported",mainCompatible()},{"detail",mainPictureError}};
         auto *mainStream = obs_frontend_get_streaming_output();
         if (mainStream) {
-            mainTelemetry = QJsonObject{{"id","main"},{"name","OBS main"},{"active",obs_frontend_streaming_active()},
+            auto *mainVideo=obs_output_get_video_encoder(mainStream);
+            obs_video_info currentInfo{};obs_get_video_info(&currentInfo);
+            const QJsonObject counters{{"fps_num",static_cast<int>(currentInfo.fps_num)},{"fps_den",static_cast<int>(currentInfo.fps_den)},{"width",mainVideo?static_cast<int>(obs_encoder_get_width(mainVideo)):0},
+                {"height",mainVideo?static_cast<int>(obs_encoder_get_height(mainVideo)):0},
+                {"active",obs_frontend_streaming_active()},{"busy",obs_output_active(mainStream)},
                 {"reconnecting",obs_output_reconnecting(mainStream)},
                 {"dropped",obs_output_get_frames_dropped(mainStream)},{"frames",obs_output_get_total_frames(mainStream)},
                 {"bytes",static_cast<double>(obs_output_get_total_bytes(mainStream))}};
+            for(auto it=counters.begin();it!=counters.end();++it) mainTelemetry.insert(it.key(),it.value());
             obs_output_release(mainStream);
         }
         QJsonArray outputs;
@@ -1378,6 +1535,14 @@ public:
                 d.wasLive = false;
             }
             if (!active && d.stopping) d.stopping = false;
+            if (!active && !d.starting && !d.stopping && d.portrait) {
+                obs_output_set_video_encoder(d.output, nullptr);
+                d.portrait.reset();
+            }
+            if(!active && !d.starting && !d.stopping){
+                if(d.compatibleVideo){obs_output_set_video_encoder(d.output,nullptr);d.compatibleVideo.reset();}
+                if(d.compatibleAudio){obs_output_set_audio_encoder(d.output,nullptr,0);d.compatibleAudio.reset();}
+            }
             // A timed-out asynchronous start must be stopped before being retried.
             if (d.starting && ++d.startupTicks > 30) {
                 obs_output_force_stop(d.output);
@@ -1386,7 +1551,12 @@ public:
                 d.error = "Destination did not start within 30 seconds.";
                 results.append(QJsonObject{{"destination_id", entry.first}, {"status", "start_timeout_stopped"}});
             }
-            outputs.append(QJsonObject{{"id", entry.first}, {"name", d.name}, {"active", active},
+            auto *outputVideo=obs_output_get_video_encoder(d.output);
+            obs_video_info outputInfo{};obs_get_video_info(&outputInfo);
+            outputs.append(QJsonObject{{"fps_num",static_cast<int>(outputInfo.fps_num)},{"fps_den",static_cast<int>(outputInfo.fps_den)},{"picture",d.picture},
+                {"width",outputVideo?static_cast<int>(obs_encoder_get_width(outputVideo)):0},
+                {"height",outputVideo?static_cast<int>(obs_encoder_get_height(outputVideo)):0},
+                {"id", entry.first}, {"name", d.name}, {"active", active},
                 {"intentional_stop", intentionalStop}, {"error", d.error}, {"busy", d.starting || d.stopping}, {"reconnecting", obs_output_reconnecting(d.output)},
                 {"dropped", obs_output_get_frames_dropped(d.output)},
                 {"frames", obs_output_get_total_frames(d.output)},
@@ -1398,13 +1568,14 @@ public:
         request.setTransferTimeout(3000);
         request.setAttribute(QNetworkRequest::RedirectPolicyAttribute, QNetworkRequest::ManualRedirectPolicy);
         const int sentResults = results.size();
-        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"outputs", outputs}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
+        auto *reply = network.post(request, QJsonDocument(QJsonObject{{"features", QJsonArray{"portrait_v1","vertical_studio_v1","vertical_crop_v1","main_picture_v1","vertical_canvas_v1"}}, {"outputs", outputs}, {"vertical_canvas",verticalCanvasTelemetry()}, {"main_output", mainTelemetry}, {"results", results}, {"audio", audioSnapshot()}}).toJson());
         pending = true;
         connect(reply, &QNetworkReply::finished, this, [this, reply, sentResults] {
             pending = false;
             if (reply->error() == QNetworkReply::NoError) {
                 for (int i = 0; i < sentResults && !results.isEmpty(); ++i) results.removeAt(0);
                 auto payload = QJsonDocument::fromJson(reply->readAll()).object();
+                std::atomic_store(&verticalStudioConfig,std::make_shared<const QJsonObject>(payload.value("vertical_studio").toObject()));
                 updateInfo=payload.value("updates").toObject();
                 updateButton->setVisible(updateInfo.value("show_notice").toBool());
                 updateButton->setText("Update to "+updateInfo.value("latest").toObject().value("version").toString());
@@ -1543,8 +1714,14 @@ static void arrangeFDGCastDocks()
 }
 static void frontendEvent(enum obs_frontend_event event, void *)
 {
+    if(event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGING){verticalCanvasLoading=true;verticalCanvas.reset();}
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING||event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED)verticalCanvasLoading=false;
+    if(event==OBS_FRONTEND_EVENT_FINISHED_LOADING || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_CHANGED ||
+       event==OBS_FRONTEND_EVENT_PROFILE_CHANGED || event==OBS_FRONTEND_EVENT_SCENE_COLLECTION_RENAMED || event==OBS_FRONTEND_EVENT_STREAMING_STOPPED)
+        QTimer::singleShot(0, qApp, []{restoreVerticalCanvas();});
     if (event == OBS_FRONTEND_EVENT_STREAMING_STOPPING && dock)
         dock->stopAll();
+    if(event==OBS_FRONTEND_EVENT_EXIT){verticalCanvasClosing=true;verticalCanvas.reset();}
     if (event == OBS_FRONTEND_EVENT_EXIT && dock) {
         obs_frontend_remove_dock("fdgcast-hub");if(hubDock)delete hubDock.data();hubDock.clear();
         obs_frontend_remove_dock("forgecast-chat");
@@ -1567,6 +1744,7 @@ static void frontendEvent(enum obs_frontend_event event, void *)
 
 bool obs_module_load(void)
 {
+    registerPortraitSource();
     return true;
 }
 
@@ -1580,7 +1758,7 @@ void obs_module_post_load(void)
         chatDock.clear();
     } else showDocked(chatDock.data());
     eventsDock = new EventsDock();
-    if (!obs_frontend_add_dock_by_id("forgecast-events", "FDGCast Events", eventsDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-events", "FDGCast Combined Activity Feed", eventsDock.data())) {
         delete eventsDock.data();
         eventsDock.clear();
     } else showDocked(eventsDock.data());
@@ -1627,12 +1805,20 @@ void obs_module_post_load(void)
     obs_frontend_add_tools_menu_item("FDGCast: Arrange docks", [](void *) {
         arrangeFDGCastDocks();
     }, nullptr);
+    obs_frontend_add_tools_menu_item("FDGCast: Enable Twitch vertical canvas", [](void *) {
+        const auto result=setVerticalCanvas(true);
+        QMessageBox::information(static_cast<QWidget *>(obs_frontend_get_main_window()),"FDGCast Twitch vertical",
+            result=="vertical_canvas_ready"?"Canvas ready. In OBS Settings → Stream enable Enhanced Broadcasting and select FDGCast Vertical Studio under Additional Canvas. Start Streaming sends both formats. No second Twitch destination/key is needed.":
+            "Stop streaming, recording and other video outputs, then try again. The main stream was not changed.");
+    },nullptr);
     obs_frontend_add_event_callback(frontendEvent, nullptr);
 }
 
 void obs_module_unload(void)
 {
     obs_frontend_remove_event_callback(frontendEvent, nullptr);
+    verticalCanvas.reset();
     // OBS normally emits EXIT first. Do not access frontend UI after Qt shutdown.
 }
+
 

@@ -22,7 +22,16 @@ async function main(){
   assert.match(await page.locator('#mode').textContent(),/DEMO/);
   assert.equal(await page.locator('#messages,#send,.panel.chat').count(),0,'Chat belongs in OBS');
   assert.equal(await page.locator('#updateBanner').isVisible(),false);
+  await page.locator('[data-open-rumble]').click();
+  assert.equal(await page.locator('#setup').isVisible(),true);
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#connectFacebook').isVisible(),true);
+  assert.equal(await page.locator('#connectInstagram').isVisible(),true);
+  assert.equal(await page.locator('#studioPlatforms option[value=facebook]').count(),1);
+  assert.equal(await page.locator('#studioPlatforms option[value=instagram]').count(),1);
+  await page.locator('[data-tab=live]').click();
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
+  assert.ok(await page.locator('#activityPanel').evaluate(e=>e.getBoundingClientRect().width)>600);
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){
    await page.locator('[data-tab="'+tab+'"]').click();
@@ -30,10 +39,35 @@ async function main(){
   }
   await page.locator('[data-tab="outputs"]').click();
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+  assert.equal(await page.locator('#destinationPicture').inputValue(),'main');
+  assert.equal(await page.locator('#pictureGuide').isVisible(),false);
+  await page.selectOption('#destinationPlatform','kick');
+  assert.equal(await page.locator('#destinationPicture option[value=vertical_fill]').evaluate(e=>e.disabled&&e.hidden),true);
+  await page.selectOption('#destinationPlatform','youtube_vertical');
+  assert.equal(await page.locator('#destinationPicture').inputValue(),'vertical_studio');
+  assert.match(await page.locator('#destinationHelp').textContent(),/separate stream key/);
+  await page.selectOption('#destinationPicture','vertical_fill');
+  assert.match(await page.locator('#pictureHelp').textContent(),/sides.*cropped/);
+  assert.equal(await page.locator('#pictureGuide').isVisible(),true);
+  await page.screenshot({path:path.join(output,'vertical-fill.png'),fullPage:true});
+  await page.selectOption('#destinationPicture','vertical_fit');
+  assert.match(await page.locator('#pictureHelp').textContent(),/whole scene.*black space/);
+  assert.equal(await page.locator('#pictureGuide').getAttribute('class'),'vertical_fit');
+  assert.match(await page.locator('#startAll').getAttribute('title'),/every checked/);
+  assert.equal(await page.locator('#startAll').evaluate(e=>getComputedStyle(e).cursor),'not-allowed');
+  await page.selectOption('#destinationPicture','main');
   await page.selectOption('#destinationPlatform','custom');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
-  await page.selectOption('#destinationPlatform','youtube');
+  for(const platform of ['rumble','tiktok','x','instagram','linkedin','dlive','vimeo']){
+   await page.selectOption('#destinationPlatform',platform);
+   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),true);
+   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),'');
+ }
+ await page.selectOption('#destinationPlatform','facebook');
+ assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
+ assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
+ await page.selectOption('#destinationPlatform','youtube');
   assert.equal(await page.locator('#destinationForm input[name=server]').isVisible(),false);
   assert.equal(await page.locator('#destinationForm input[name=server]').getAttribute('required'),null);
   await page.locator('[data-tab="doctor"]').click();
@@ -45,6 +79,9 @@ async function main(){
   assert.equal(await page.locator('#audioSoundVolume').getAttribute('value'),'45');
   await page.screenshot({path:path.join(output,'doctor-demo.png'),fullPage:true});
   await page.locator('[data-tab="setup"]').click();
+  assert.equal(await page.locator('#rumbleForm input[name=api_url]').getAttribute('type'),'password');
+  assert.equal(await page.locator('#tiktokForm input[name=experimental]').getAttribute('required'),'');
+  assert.equal(await page.locator('#tiktokForm input[name=token]').count(),0);
   assert.equal(await page.locator('#showPairCode').isVisible(),true);
   await page.locator('#showPairCode').click();
   assert.equal(await page.locator('#hubForm input[name=token]').getAttribute('type'),'text');
@@ -57,11 +94,21 @@ async function main(){
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
   await page.route('**/api/state',async route=>{
     const response=await route.fetch(),data=await response.json();
+    data.combined_events=[{id:'tiktok-test',platform:'tiktok',kind:'tiktok_gift',text:'Viewer · Sent 3 × Rose <test>',source:'TIKTOK · creator',time:1700000000,simulated:true}];
     data.updates={installed:'0.7.0-preview',latest:{version:'0.8.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
     await route.fulfill({response,json:data});
   });
   await page.waitForSelector('#updateBanner:not([hidden])');
   assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
+  assert.equal(await page.locator('#audienceEvents img').getAttribute('src'),'/icons/tiktok.svg');
+  assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'TikTok');
+  assert.equal(await page.evaluate(async()=>{const card=document.querySelector('#audienceEvents .activity-card');await refresh();return card===document.querySelector('#audienceEvents .activity-card');}),true,'Unchanged activity must retain its card and focus across refreshes');
+  assert.equal(await page.getByRole('heading',{name:'Combined Activity Feed',exact:true,includeHidden:true}).count(),1);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TIKTOK · creator/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/Rose <test>/);
+  assert.equal(await page.locator('#audienceEvents test').count(),0);
+  assert.equal(await page.locator('#eventKinds input[value=tiktok_gift],#eventKinds input[value=like],#eventKinds input[value=share]').count(),3);
   await page.locator('#updateView').click();
   assert.equal(await page.locator('#updateNotes').isVisible(),true);
   assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.7.0-preview/);
@@ -73,6 +120,7 @@ async function main(){
   await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('Demo mode'));
   await page.locator('#error').click();
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
@@ -92,4 +140,5 @@ async function main(){
  }
 }
 main().catch(e=>{console.error(e);process.exitCode=1;});
+
 

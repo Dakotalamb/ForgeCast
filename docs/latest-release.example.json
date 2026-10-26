@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "version": "0.8.0-preview",
+  "version": "1.0.3",
   "platform": "windows-x64",
-  "download_url": "/downloads/FDGCast-0.8.0-preview-win-x64-setup.exe",
-  "notes": "YouTube streaming chat, guided audio test, reviewed feedback, preference backup and clearer Kick delivery diagnostics.",
-  "sha256": "72947022d800fbff8fe7e4c13426507b2d8e3a83c0a92f5b07a334c6aef4e392"
+  "notes": "TikTok LIVE chat and activity through the existing username reader, without sending video from FDGCast. Combined Activity Feed now shows platform icons, with follows, gifts, subscription notifications and grouped likes/shares. TikTok access remains experimental and requires a public LIVE. Close OBS and Companion before installing.",
+  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.3/FDGCast-1.0.3-win-x64-setup.exe",
+  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.3"
 }
