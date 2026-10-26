@@ -93,11 +93,17 @@ async function main(){
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
   await page.route('**/api/state',async route=>{
     const response=await route.fetch(),data=await response.json();
+    data.combined_events=[{id:'tiktok-test',kind:'tiktok_gift',text:'Viewer · Sent 3 × Rose <test>',source:'TIKTOK · creator',time:Date.now()/1000,simulated:true}];
     data.updates={installed:'0.7.0-preview',latest:{version:'0.8.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
     await route.fulfill({response,json:data});
   });
   await page.waitForSelector('#updateBanner:not([hidden])');
   assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TIKTOK · creator/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/Rose <test>/);
+  assert.equal(await page.locator('#audienceEvents test').count(),0);
+  assert.equal(await page.locator('#eventKinds input[value=tiktok_gift],#eventKinds input[value=like],#eventKinds input[value=share]').count(),3);
   await page.locator('#updateView').click();
   assert.equal(await page.locator('#updateNotes').isVisible(),true);
   assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.7.0-preview/);

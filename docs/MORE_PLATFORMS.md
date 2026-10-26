@@ -56,14 +56,14 @@ example does not supply stable message IDs, so same-user, same-text, same-time
 messages are deduplicated. Rants and other audience events are not added in this
 pass. Replying and moderation remain on Rumble.
 
-## TikTok LIVE chat — Experimental
+## TikTok LIVE chat and events — Experimental
 
 Enter the creator's `@username`, explicitly enable the experimental reader, and
 connect while a public TikTok LIVE is running. The LIVE can be started by phone,
 LIVE Studio or another encoder; no FDGCast streaming destination is needed.
 The reader requires no TikTok password or stream key.
 
-The pinned `TikTokLive==7.0.1` dependency reads comments and uses its default
+The pinned `TikTokLive==7.0.1` dependency reads comments and LIVE activity and uses its default
 third-party signing service. This is an unofficial integration, subject to
 protocol changes, service availability and connection limits; no uptime guarantee
 is made. [Library documentation](https://isaackogan.github.io/TikTokLive/).
@@ -71,8 +71,27 @@ is made. [Library documentation](https://isaackogan.github.io/TikTokLive/).
 Messages have TikTok identity, deduplication, OBS platform/channel filters and
 existing chat-overlay support. Neither TikTok nor Rumble is offered as an
 outgoing message target; reply/moderation controls are disabled for these readers.
-Connections disconnect cleanly and recover with bounded retry delays. Gifts,
-likes and audience events are not subscribed to in this pass.
+Connections disconnect cleanly and recover with bounded retry delays.
+
+Combined Events now receives follows, TikTok gifts, subscription notifications,
+likes and shares. Select categories in **Combined Events → Event categories and
+tests**. New configurations include follows and TikTok gifts by default;
+existing saved category choices remain unchanged. Enable subscriptions, likes
+and shares as desired. TikTok gifts are separate from gifted subscriptions.
+Likes and shares become bounded summaries roughly every 10–20 seconds while
+connected, and remaining summaries flush on disconnect. Gift streaks emit only
+at completion, using the final cumulative count; interrupted unfinished streaks
+are not invented. Subscription notifications do not imply verified purchases,
+renewals or revenue. No money/coin conversion is displayed.
+
+Stable room/message IDs and gift-streak IDs deduplicate observed activity with
+bounded memory, plus the existing persisted event checkpoint. Summary packet
+tracking is retained across automatic reconnects in the same reader, not across
+process restarts. This is a live reader, not a follower-history API: offline
+follows, missed events and complete replay/backfill are unavailable. LIVE activity
+can work even when the FDGCast OBS output is stopped or no OBS is connected.
+Paid live overlay access remains subject to existing entitlements; TikTok alert
+categories follow the same selected event filters.
 
 ## Validation and remaining release work
 

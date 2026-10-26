@@ -616,7 +616,7 @@ public:
         for (const auto &entry : events) {
             const auto row = entry.toObject();
             const QString kind=row.value("kind").toString();
-            const QString title=kind.left(1).toUpper()+kind.mid(1);
+            const QString title=kind=="tiktok_gift"?"TikTok gift":kind.left(1).toUpper()+kind.mid(1);
             const QString color=kind=="follow"?"#94e6b0":kind=="redeem"?"#ffb891":"#d3baff";
             const auto description = row.value("text").toString().toHtmlEscaped();
             const QString timestamp=view->showTimes ? " · "+QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble())).toLocalTime().toString("h:mm AP") : QString();
@@ -631,8 +631,8 @@ public:
                     "<p style='margin:0;color:#bdc8d7;font-size:"+QString::number(qMax(11,view->pixels-1))+"px'>"+row.value("source").toString().toHtmlEscaped()+timestamp+"</p>"
                     "</td></tr></table><p style='margin:0;font-size:6px'>&nbsp;</p>";
         }
-        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect Twitch in the Hub for follows, redeems and incoming raids."));
-        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for Twitch events.</p>";
+        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect platform accounts for events. Connect a TikTok LIVE username in Companion for TikTok activity."));
+        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for selected events from connected platforms.</p>";
         feed->setHtml(html + "</div>");
     }
 };

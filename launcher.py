@@ -78,7 +78,8 @@ def claim_desktop_instance():
 def launch():
     if '--extras-self-check' in sys.argv:
         from TikTokLive import TikTokLiveClient
-        from TikTokLive.events import CommentEvent
+        from TikTokLive.events import CommentEvent, FollowEvent, GiftEvent, LikeEvent, ShareEvent, SubNotifyEvent
+        from forgecast.tiktok_events import TikTokEvents
         from TikTokLive.proto.custom_proto import ExtendedUser
         from TikTokLiveProto.v3.webcast.shared.message import CommonMessageData
         event=CommentEvent(common=CommonMessageData(msg_id=123),content='dependency check',user=ExtendedUser(nickname='Test',display_id='test'))

@@ -105,14 +105,16 @@ class TikTok:
 
     async def run(self):
         from TikTokLive import TikTokLiveClient
-        from TikTokLive.events import ConnectEvent, CommentEvent
+        from TikTokLive.events import ConnectEvent, CommentEvent, FollowEvent, ShareEvent, GiftEvent, LikeEvent, SubNotifyEvent
+        from .tiktok_events import TikTokEvents
+        activity = TikTokEvents(self.username, self.store)
         delay = 15
         while True:
             client = (self.factory or TikTokLiveClient)(unique_id='@'+self.username)
             async def connected(event):
                 nonlocal delay
                 delay = 15
-                self.status('tiktok', 'Connected; reading LIVE chat (experimental, receive-only).')
+                self.status('tiktok', 'Connected; reading LIVE chat and events (experimental, receive-only).')
             async def comment(event):
                 mid = str(getattr(getattr(event, 'common', None), 'msg_id', '') or '')
                 if not mid: return  # No reliable identity: avoid replays masquerading as new chat.
@@ -123,6 +125,16 @@ class TikTok:
                 self.store.add(row)
             client.add_listener(ConnectEvent, connected)
             client.add_listener(CommentEvent, comment)
+            for event_type, kind in ((FollowEvent, 'follow'), (GiftEvent, 'tiktok_gift'),
+                                     (SubNotifyEvent, 'subscription'), (LikeEvent, 'like'), (ShareEvent, 'share')):
+                async def received(event, kind=kind):
+                    activity.accept(kind, event)
+                client.add_listener(event_type, received)
+            async def summaries():
+                while True:
+                    await asyncio.sleep(10)
+                    activity.flush()
+            summary_task = asyncio.create_task(summaries())
             try:
                 self.status('tiktok', 'Connecting to TikTok LIVE (experimental).')
                 event_task = await client.start()
@@ -133,6 +145,9 @@ class TikTok:
             except Exception:
                 self.status('tiktok', 'Offline or TikTok connection unavailable; retrying. No FDGCast output is required.')
             finally:
+                summary_task.cancel()
+                await asyncio.gather(summary_task, return_exceptions=True)
+                activity.flush(force=True)
                 try: await asyncio.wait_for(client.disconnect(close_client=True), timeout=5)
                 except Exception: pass
             await asyncio.sleep(delay)

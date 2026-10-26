@@ -2,7 +2,7 @@ name: Build FDGCast Windows installer
 
 on:
   push:
-    branches: [main, release/0.9.0, next/output-recovery]
+    branches: [main, release/0.9.0, next/output-recovery, next/tiktok-live-events]
   workflow_dispatch:
 
 permissions:
@@ -62,7 +62,7 @@ jobs:
           $spec = Get-Content $specPath -Raw | ConvertFrom-Json
           $spec.name = 'forgecast'
           $spec.displayName = 'FDGCast'
-          $spec.version = '1.0.2'
+          $spec.version = '1.0.3'
           $spec.author = 'Forged Destiny Gaming'
           $spec.website = 'https://forgeddestinygaming.com/'
           $spec.dependencies.'obs-studio'.version = '32.2.2'
@@ -126,7 +126,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.2-encoded-output-evidence
+          name: FDGCast-1.0.3-rc.1-encoded-output-evidence
           path: qa-encoded/
           if-no-files-found: ignore
       - name: Verify Additional Canvas in the real OBS frontend
@@ -162,7 +162,7 @@ jobs:
       - name: Upload UI quality screenshots
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.2-UI-quality-check
+          name: FDGCast-1.0.3-rc.1-UI-quality-check
           path: |
             qa/*.png
             qa-next/*.png
@@ -246,12 +246,12 @@ jobs:
           if (-not (Test-Path $iscc)) { throw 'ISCC.exe missing' }
           & $iscc 'packaging/FDGCast.iss'
           if ($LASTEXITCODE -ne 0) { throw 'Installer creation failed' }
-          if (-not (Test-Path 'release/FDGCast-1.0.2-win-x64-setup.exe')) { throw 'Installer EXE missing' }
+          if (-not (Test-Path 'release/FDGCast-1.0.3-rc.1-win-x64-setup.exe')) { throw 'Installer EXE missing' }
       - name: Smoke test installed OBS module location
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $installer = (Resolve-Path 'release/FDGCast-1.0.2-win-x64-setup.exe').Path
+          $installer = (Resolve-Path 'release/FDGCast-1.0.3-rc.1-win-x64-setup.exe').Path
           $installed = Join-Path $env:ProgramData 'obs-studio/plugins/forgecast/bin/64bit/forgecast.dll'
           $process = Start-Process $installer -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART','/SP-' -Wait -PassThru
           if ($process.ExitCode -ne 0) { throw "Installer failed: $($process.ExitCode)" }
@@ -264,8 +264,8 @@ jobs:
       - name: Upload Windows installer artifact
         uses: actions/upload-artifact@v4
         with:
-          name: FDGCast-1.0.2-OBS-32.2.2-Windows-installer
-          path: release/FDGCast-1.0.2-win-x64-setup.exe
+          name: FDGCast-1.0.3-rc.1-OBS-32.2.2-Windows-installer
+          path: release/FDGCast-1.0.3-rc.1-win-x64-setup.exe
           if-no-files-found: error
 
       - name: Publish approved stable 1.0.2 release

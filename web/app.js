@@ -272,8 +272,8 @@ function render(s) {
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
  $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
-   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid'})[e.kind]||'Event'),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
- }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for Twitch follows, redeems and raids.','muted'));
+   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid',subscription:'Subscription',tiktok_gift:'TikTok gift',like:'Likes',share:'Shares'})[e.kind]||'Event'),el('small',' · '+e.source),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
+ }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for selected events from connected platforms.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
@@ -304,7 +304,7 @@ if(key)loop();else error('Open the dashboard URL printed by Start-FDGCast. Its p
 
 
 // Connected suite screens; no duplicated Companion chat composer.
-const eventLabels={follow:'Follows',redeem:'Channel-point redeems',raid:'Incoming raids',subscription:'Subscriptions',gift:'Gifted subscriptions',bits:'Bits',membership:'YouTube memberships',superchat:'Super Chats',supersticker:'Super Stickers'};
+const eventLabels={follow:'Follows',redeem:'Channel-point redeems',raid:'Incoming raids',subscription:'Subscriptions',gift:'Gifted subscriptions',tiktok_gift:'TikTok gifts',like:'TikTok likes · grouped',share:'TikTok shares · grouped',bits:'Bits',membership:'YouTube memberships',superchat:'Super Chats',supersticker:'Super Stickers'};
 for(const [value,label] of Object.entries(eventLabels)){
  const row=el('label'),input=el('input');input.type='checkbox';input.value=value;input.name='kind';row.append(input,document.createTextNode(' '+label));$('eventKinds').append(row);
 }
