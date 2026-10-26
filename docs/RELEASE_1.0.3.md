@@ -7,7 +7,7 @@
 - TikTok gifts are distinct from gifted subscriptions. Selected TikTok activity can appear in existing overlay alerts, subject to the existing paid overlay entitlement.
 
 - A clearer Overview gives the activity feed more room, with broadcast controls, Audio Guard and health checks alongside it. Recording/replay controls sit in a separate expandable section.
-- Connections starts with OBS and Hub pairing, followed by linked platforms and direct LIVE readers. Updates and manual credentials sit below the main setup. Larger text, stronger contrast, platform names and clearer button emphasis improve readability. The version badge now uses the installed package version.
+- Connections starts with OBS and Hub pairing, followed by linked platforms and direct LIVE readers. Updates and manual credentials sit below the main setup. Activity cards retain focus on unchanged refreshes and preserve scroll position when older activity is being read. Larger text, stronger contrast, platform names and clearer button emphasis improve readability. The version badge now uses the installed package version.
 
 ## Installation and setup
 

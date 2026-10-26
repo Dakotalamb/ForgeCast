@@ -4,6 +4,7 @@ const key = location.hash.slice(1) || sessionStorage.getItem('forgecast-key');
 if (key) sessionStorage.setItem('forgecast-key', key);
 history.replaceState(null, '', '/');
 let state = null;
+let activitySignature = '';
 function error(message) { $('error').textContent = message; $('error').hidden = false; }
 $('error').onclick = () => $('error').hidden = true;
 async function api(path, data) {
@@ -288,8 +289,14 @@ function render(s) {
  }));if(!s.destinations.length)$('destinations').append(el('p','Add a destination, then use Start All.','empty'));}
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
- $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(activityCard));
- if(!s.combined_events?.length){const empty=el('div',undefined,'activity-empty');empty.append(el('strong','Your next follow or gift will appear here'),el('p','Connect a platform and select activity types below. TikTok activity needs a public LIVE.'));$('audienceEvents').append(empty);}
+ const activity=(s.combined_events||[]).slice(0,20), activityKey=JSON.stringify(activity);
+ if(activityKey!==activitySignature){
+   const feed=$('audienceEvents'),position=feed.scrollTop,height=feed.scrollHeight;
+   feed.replaceChildren(...activity.map(activityCard));
+   if(!activity.length){const empty=el('div',undefined,'activity-empty');empty.append(el('strong','Your next follow or gift will appear here'),el('p','Connect a platform and select activity types below. TikTok activity needs a public LIVE.'));feed.append(empty);}
+   if(position>0)feed.scrollTop=Math.max(0,position+feed.scrollHeight-height);
+   activitySignature=activityKey;
+ }
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
