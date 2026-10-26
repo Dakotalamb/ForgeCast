@@ -251,9 +251,9 @@ class State:
 def combined_events(s):
     """Bounded activity available from connected accounts and local OBS telemetry."""
     audience_kinds = set(s.config.get('event_kinds', DEFAULT_EVENTS)) & EVENT_KINDS
-    rows = [dict(time=m.get('time', 0), source=m['platform'].upper()+' · '+m.get('origin', ''),
+    rows = [dict(time=m.get('time', 0), platform=m['platform'], source=m['platform'].upper()+' · '+m.get('origin', ''),
                  text=(m.get('user', '')+' · '+m.get('text', '')).strip(' ·'), kind=m.get('kind'), id=m['id'], simulated=bool(m.get('simulated')), acknowledged=m['id'] in s.event_ack)
-            for m in {r['id']:r for r in list(s.audience_history)+list(s.chat.messages)}.values() if (m.get('platform') == 'twitch' or (m.get('platform') == 'youtube' and m.get('kind') in {'membership','superchat','supersticker'})) and m.get('kind') in audience_kinds and not m.get('deleted')]
+            for m in {r['id']:r for r in list(s.audience_history)+list(s.chat.messages)}.values() if (m.get('platform') in {'twitch','tiktok'} or (m.get('platform') == 'youtube' and m.get('kind') in {'membership','superchat','supersticker'})) and m.get('kind') in audience_kinds and not m.get('deleted')]
     rows.sort(key=lambda row: row['time'], reverse=True)
     return rows[:80]
 

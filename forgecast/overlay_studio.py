@@ -7,6 +7,7 @@ import uuid
 from aiohttp import web
 from .entitlements import overlay_access
 from .storage import atomic_json
+from .suite import DEFAULT_EVENTS
 
 ACTIONS={'overlay_design_save','overlay_design_copy','overlay_design_delete','overlay_design_link','overlay_design_rotate','overlay_design_import'}
 TYPES=('chat','emotes','alerts','text','goal')
@@ -107,7 +108,7 @@ async def studio_feed(request):
         needs_messages=any(l['enabled'] and l['type'] in ('chat','emotes') for l in profile['layers'])
         needs_events=any(l['enabled'] and l['type']=='alerts' for l in profile['layers'])
         messages=[{k:m.get(k) for k in ('id','platform','origin','user','text','fragments','color','time')} for m in s.chat_view() if not m.get('deleted') and m.get('kind','chat')=='chat' and time.time()-m.get('time',0)<120][-50:] if needs_messages else []
-        events=[{k:m.get(k) for k in ('id','platform','kind','user','text','time')} for m in s.audience_history if not m.get('deleted') and time.time()-m.get('time',0)<120][-30:] if needs_events else []
+        events=[{k:m.get(k) for k in ('id','platform','kind','user','text','time')} for m in s.audience_history if (m.get('platform') != 'tiktok' or m.get('kind') in s.config.get('event_kinds', DEFAULT_EVENTS)) and not m.get('deleted') and time.time()-m.get('time',0)<120][-30:] if needs_events else []
         if preview:
             stamp=int(time.time()/10);messages=[dict(id='preview-chat:'+str(stamp),platform='twitch',origin='PREVIEW',user='Sample viewer',text='Preview chat 👋 😂 ❤️',fragments=[{'text':'Preview chat 👋 😂 ❤️'}],color='#8dd9f5',time=time.time())] if needs_messages else []
             events=[dict(id='preview-event:'+str(stamp),platform='twitch',kind='follow',user='SAMPLE FOLLOW',text='Preview only — no live event',time=time.time())] if needs_events else []

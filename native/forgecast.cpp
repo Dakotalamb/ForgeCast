@@ -268,7 +268,7 @@ public:
         body->setLayout(content); // Qt transfers the existing layout from the dock.
         auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
         auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
-        auto *options=new QToolButton(dock);options->setText("Options");options->setToolTip("Change text size, badge visibility and other dock settings");
+        auto *options=new QToolButton(dock);options->setText("View options");options->setToolTip("Change text size, badge visibility and other dock settings");
         options->setAccessibleName("Dock options");
         options->setMinimumSize(76,26);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
         openButton=new QPushButton("Open app",dock);
@@ -333,7 +333,7 @@ public:
         alternate=settings.value(prefix+"alternate",false).toBool();
         showBadges=settings.value(prefix+"badges",false).toBool();
         iconPixels=qBound(16,settings.value(prefix+"icon",18).toInt(),26);
-        pixels=qBound(11,settings.value(prefix+"font",13).toInt(),17);
+        pixels=qBound(11,settings.value(prefix+"font",prefix=="dock-ui/events/"?15:13).toInt(),17);
         QFont font=owner->font();font.setPixelSize(pixels);owner->setFont(font);
         content->setContentsMargins(compact?4:9,compact?2:9,compact?4:9,compact?2:9);
         content->setSpacing(compact?3:7);
@@ -586,7 +586,7 @@ public:
 class EventsDock : public QWidget {
     DockView *view;
     QJsonObject lastPayload;
-    QTextBrowser *feed;
+    ChatFeed *feed;
     QByteArray lastEvents;
 public:
     EventsDock() : QWidget()
@@ -595,9 +595,9 @@ public:
                       "QTextBrowser { background:#25303c;border:1px solid #556779;border-radius:4px;padding:6px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
-        feed = new QTextBrowser(this);feed->setOpenExternalLinks(false);
+        feed = new ChatFeed(this);feed->setOpenExternalLinks(false);
         feed->setMinimumSize(0,0);feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
-        feed->setToolTip("Twitch follows, channel point redeems and incoming raids. Connect your own channel in the Hub.");
+        feed->setToolTip("Combined activity from connected platforms. Each card shows its platform icon and channel.");
         layout->addWidget(feed,1);
         view=new DockView(this,layout,"events",false,[this] { lastEvents.clear();if(!lastPayload.isEmpty()) update(lastPayload); });
         disconnected();
@@ -615,8 +615,11 @@ public:
         QString html = "<div style='font-family:sans-serif;color:#f4f4f4'>";
         for (const auto &entry : events) {
             const auto row = entry.toObject();
+            const QString platform=row.value("platform").toString();
+            const bool knownPlatform=QStringList{"twitch","youtube","kick","tiktok","rumble","facebook","instagram"}.contains(platform);
+            const QString icon=knownPlatform?"<img width='18' height='18' src='platform:"+platform+"' alt='"+platform.toHtmlEscaped()+"'> ":QString();
             const QString kind=row.value("kind").toString();
-            const QString title=kind.left(1).toUpper()+kind.mid(1);
+            const QString title=kind=="tiktok_gift"?"TikTok gift":kind.left(1).toUpper()+kind.mid(1);
             const QString color=kind=="follow"?"#94e6b0":kind=="redeem"?"#ffb891":"#d3baff";
             const auto description = row.value("text").toString().toHtmlEscaped();
             const QString timestamp=view->showTimes ? " · "+QDateTime::fromSecsSinceEpoch(static_cast<qint64>(row.value("time").toDouble())).toLocalTime().toString("h:mm AP") : QString();
@@ -626,13 +629,13 @@ public:
             const QString background=kind=="raid"?"#35294b":kind=="follow"?"#203c36":"#423026";
             const QString flags=QString(row.value("simulated").toBool()?"TEST · ":"")+(row.value("acknowledged").toBool()?"Acknowledged · ":"");
             html += "<table width='100%' cellspacing='0' cellpadding='0'><tr><td width='5' bgcolor='"+color+"'></td><td bgcolor='"+background+"' style='padding:"+QString::number(view->compact?10:14)+"px'>"
-                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+3)+"px;color:"+color+"'><b>"+flags+heading.toHtmlEscaped()+"</b></p>"
+                    "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+3)+"px;color:"+color+"'><b>"+icon+flags+heading.toHtmlEscaped()+"</b></p>"
                     "<p style='margin:0 0 6px;font-size:"+QString::number(view->pixels+1)+"px;color:#ffffff'>"+description+"</p>"
                     "<p style='margin:0;color:#bdc8d7;font-size:"+QString::number(qMax(11,view->pixels-1))+"px'>"+row.value("source").toString().toHtmlEscaped()+timestamp+"</p>"
                     "</td></tr></table><p style='margin:0;font-size:6px'>&nbsp;</p>";
         }
-        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect Twitch in the Hub for follows, redeems and incoming raids."));
-        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for Twitch events.</p>";
+        feed->setToolTip(payload.value("statuses").toObject().value("twitch_events").toString("Connect platform accounts for events. Connect a TikTok LIVE username in Companion for TikTok activity."));
+        if (events.isEmpty()) html += "<p style='color:#a8afb8'>Waiting for selected events from connected platforms.</p>";
         feed->setHtml(html + "</div>");
     }
 };
@@ -1755,7 +1758,7 @@ void obs_module_post_load(void)
         chatDock.clear();
     } else showDocked(chatDock.data());
     eventsDock = new EventsDock();
-    if (!obs_frontend_add_dock_by_id("forgecast-events", "FDGCast Events", eventsDock.data())) {
+    if (!obs_frontend_add_dock_by_id("forgecast-events", "FDGCast Combined Activity Feed", eventsDock.data())) {
         delete eventsDock.data();
         eventsDock.clear();
     } else showDocked(eventsDock.data());

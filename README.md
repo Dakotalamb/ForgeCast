@@ -1,3 +1,13 @@
+# FDGCast 1.0.3 — TikTok LIVE chat and activity
+
+[Download the Windows update](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.3).
+
+Read TikTok LIVE chat and activity without sending video from FDGCast. The Combined Activity Feed shows platform icons, follows, gifts, subscription notifications and grouped likes/shares. The TikTok creator must have a public LIVE running; access remains experimental and receive-only.
+
+Close OBS and Companion before installing. Connect the username in Companion → Connections and choose categories in Combined Activity Feed. See [release notes and limitations](docs/RELEASE_1.0.3.md).
+
+Earlier release notes follow.
+
 # FDGCast 1.0.2 — horizontal and vertical output update
 
 [Download Windows installer](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.2).

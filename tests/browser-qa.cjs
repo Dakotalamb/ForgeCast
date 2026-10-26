@@ -31,6 +31,7 @@ async function main(){
   assert.equal(await page.locator('#studioPlatforms option[value=instagram]').count(),1);
   await page.locator('[data-tab=live]').click();
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
+  assert.ok(await page.locator('#activityPanel').evaluate(e=>e.getBoundingClientRect().width)>600);
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){
    await page.locator('[data-tab="'+tab+'"]').click();
@@ -93,11 +94,21 @@ async function main(){
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
   await page.route('**/api/state',async route=>{
     const response=await route.fetch(),data=await response.json();
+    data.combined_events=[{id:'tiktok-test',platform:'tiktok',kind:'tiktok_gift',text:'Viewer · Sent 3 × Rose <test>',source:'TIKTOK · creator',time:1700000000,simulated:true}];
     data.updates={installed:'0.7.0-preview',latest:{version:'0.8.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
     await route.fulfill({response,json:data});
   });
   await page.waitForSelector('#updateBanner:not([hidden])');
   assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
+  assert.equal(await page.locator('#audienceEvents img').getAttribute('src'),'/icons/tiktok.svg');
+  assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'TikTok');
+  assert.equal(await page.evaluate(async()=>{const card=document.querySelector('#audienceEvents .activity-card');await refresh();return card===document.querySelector('#audienceEvents .activity-card');}),true,'Unchanged activity must retain its card and focus across refreshes');
+  assert.equal(await page.getByRole('heading',{name:'Combined Activity Feed',exact:true,includeHidden:true}).count(),1);
+  assert.match(await page.locator('#audienceEvents').textContent(),/TIKTOK · creator/);
+  assert.match(await page.locator('#audienceEvents').textContent(),/Rose <test>/);
+  assert.equal(await page.locator('#audienceEvents test').count(),0);
+  assert.equal(await page.locator('#eventKinds input[value=tiktok_gift],#eventKinds input[value=like],#eventKinds input[value=share]').count(),3);
   await page.locator('#updateView').click();
   assert.equal(await page.locator('#updateNotes').isVisible(),true);
   assert.match(await page.locator('#updateVersions').textContent(),/Installed: 0.7.0-preview/);
@@ -109,6 +120,7 @@ async function main(){
   await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('Demo mode'));
   await page.locator('#error').click();
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);
