@@ -272,7 +272,11 @@ function render(s) {
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
  $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
-   const item=el('p',undefined,'audience-event');item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid',subscription:'Subscription',tiktok_gift:'TikTok gift',like:'Likes',share:'Shares'})[e.kind]||'Event'),el('small',' · '+e.source),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
+   const item=el('p',undefined,'audience-event');
+   if(['twitch','youtube','kick','tiktok','rumble','facebook','instagram'].includes(e.platform)){
+     const icon=el('img',undefined,'platform-icon');icon.src='/icons/'+e.platform+'.svg';icon.alt=e.platform;icon.title=e.source;icon.style.verticalAlign='middle';icon.style.marginRight='6px';item.append(icon);
+   }
+   item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid',subscription:'Subscription',tiktok_gift:'TikTok gift',like:'Likes',share:'Shares'})[e.kind]||'Event'),el('small',' · '+e.source),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
  }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for selected events from connected platforms.','muted'));
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));

@@ -79,6 +79,8 @@ class IntegrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual({r['kind'] for r in combined_events(s)}, {'follow', 'tiktok_gift'})
             await suite_action(s, 'event_settings', {'kinds': ['subscription'], 'merge': False})
             self.assertEqual([r['kind'] for r in combined_events(s)], ['subscription'])
+            self.assertEqual(combined_events(s)[0]['platform'], 'tiktok')
+            self.assertEqual(combined_events(s)[0]['source'], 'TIKTOK · creator')
             self.assertFalse(s.commands)
             self.assertEqual(len(s.audience_history), 3)
             s.demo = False;s.checkpoint()

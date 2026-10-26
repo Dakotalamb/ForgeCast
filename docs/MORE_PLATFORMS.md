@@ -73,8 +73,8 @@ existing chat-overlay support. Neither TikTok nor Rumble is offered as an
 outgoing message target; reply/moderation controls are disabled for these readers.
 Connections disconnect cleanly and recover with bounded retry delays.
 
-Combined Events now receives follows, TikTok gifts, subscription notifications,
-likes and shares. Select categories in **Combined Events → Event categories and
+Combined Activity Feed now receives follows, TikTok gifts, subscription notifications,
+likes and shares. Select categories in **Combined Activity Feed → Event categories and
 tests**. New configurations include follows and TikTok gifts by default;
 existing saved category choices remain unchanged. Enable subscriptions, likes
 and shares as desired. TikTok gifts are separate from gifted subscriptions.
