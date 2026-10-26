@@ -1,8 +1,8 @@
 {
   "schema_version": 1,
-  "version": "1.0.2",
+  "version": "1.0.3",
   "platform": "windows-x64",
-  "notes": "Twitch Additional Canvas support, clearer YouTube horizontal/vertical presets, and stream output recovery and health fixes. Close OBS and Companion before installing. Twitch dual format needs at least four video tracks and encoder headroom.",
-  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.2/FDGCast-1.0.2-win-x64-setup.exe",
-  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.2"
+  "notes": "TikTok LIVE chat and activity through the existing username reader, without sending video from FDGCast. Combined Activity Feed now shows platform icons, with follows, gifts, subscription notifications and grouped likes/shares. TikTok access remains experimental and requires a public LIVE. Close OBS and Companion before installing.",
+  "download_url": "https://github.com/Dakotalamb/ForgeCast/releases/download/v1.0.3/FDGCast-1.0.3-win-x64-setup.exe",
+  "changes_url": "https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.3"
 }

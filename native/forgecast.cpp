@@ -268,7 +268,7 @@ public:
         body->setLayout(content); // Qt transfers the existing layout from the dock.
         auto *outer=new QVBoxLayout(dock); outer->setContentsMargins(0,0,0,0); outer->setSpacing(0);
         auto *bar=new QHBoxLayout;bar->setContentsMargins(2,0,2,0);bar->addStretch();
-        auto *options=new QToolButton(dock);options->setText("Options");options->setToolTip("Change text size, badge visibility and other dock settings");
+        auto *options=new QToolButton(dock);options->setText("View options");options->setToolTip("Change text size, badge visibility and other dock settings");
         options->setAccessibleName("Dock options");
         options->setMinimumSize(76,26);menu=new QMenu(options);options->setMenu(menu);options->setPopupMode(QToolButton::InstantPopup);
         openButton=new QPushButton("Open app",dock);
@@ -333,7 +333,7 @@ public:
         alternate=settings.value(prefix+"alternate",false).toBool();
         showBadges=settings.value(prefix+"badges",false).toBool();
         iconPixels=qBound(16,settings.value(prefix+"icon",18).toInt(),26);
-        pixels=qBound(11,settings.value(prefix+"font",13).toInt(),17);
+        pixels=qBound(11,settings.value(prefix+"font",prefix=="dock-ui/events/"?15:13).toInt(),17);
         QFont font=owner->font();font.setPixelSize(pixels);owner->setFont(font);
         content->setContentsMargins(compact?4:9,compact?2:9,compact?4:9,compact?2:9);
         content->setSpacing(compact?3:7);

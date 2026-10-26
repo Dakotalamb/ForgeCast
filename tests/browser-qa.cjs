@@ -31,6 +31,7 @@ async function main(){
   assert.equal(await page.locator('#studioPlatforms option[value=instagram]').count(),1);
   await page.locator('[data-tab=live]').click();
   const output=path.resolve(__dirname,'../qa');fs.mkdirSync(output,{recursive:true});
+  assert.ok(await page.locator('#activityPanel').evaluate(e=>e.getBoundingClientRect().width)>600);
   await page.screenshot({path:path.join(output,'desktop-demo.png'),fullPage:true});
   for(const tab of ['outputs','doctor','hub','setup','tools','help','live']){
    await page.locator('[data-tab="'+tab+'"]').click();
@@ -101,7 +102,7 @@ async function main(){
   assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
   assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
   assert.equal(await page.locator('#audienceEvents img').getAttribute('src'),'/icons/tiktok.svg');
-  assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'tiktok');
+  assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'TikTok');
   assert.equal(await page.getByRole('heading',{name:'Combined Activity Feed',exact:true,includeHidden:true}).count(),1);
   assert.match(await page.locator('#audienceEvents').textContent(),/TIKTOK · creator/);
   assert.match(await page.locator('#audienceEvents').textContent(),/Rose <test>/);
@@ -118,6 +119,7 @@ async function main(){
   await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('Demo mode'));
   await page.locator('#error').click();
   await page.setViewportSize({width:390,height:844});
+  assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
   assert.deepEqual(errors,[]);

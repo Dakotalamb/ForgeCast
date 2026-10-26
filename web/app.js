@@ -214,6 +214,23 @@ function renderHistory(s){
  $('doctorNotify').checked=s.doctor_notifications!==false;$('doctorSound').checked=!!s.doctor_sound;
  if(document.activeElement!==$('doctorSensitivity'))$('doctorSensitivity').value=s.doctor_sensitivity||'balanced';
 }
+function activityCard(e){
+ const names={twitch:'Twitch',youtube:'YouTube',kick:'Kick',tiktok:'TikTok',rumble:'Rumble',facebook:'Facebook',instagram:'Instagram'};
+ const types={follow:'New follower',redeem:'Channel point redeem',raid:'Incoming raid',subscription:'Subscription',gift:'Gifted subscriptions',tiktok_gift:'TikTok gift',like:'Likes',share:'Shares',membership:'Membership',superchat:'Super Chat',supersticker:'Super Sticker'};
+ const item=el('article',undefined,'audience-event activity-card'),head=el('div',undefined,'activity-heading');
+ if(names[e.platform]){const icon=el('img',undefined,'platform-icon');icon.src='/icons/'+e.platform+'.svg';icon.alt=names[e.platform];icon.title=e.source;head.append(icon);item.dataset.platform=e.platform;}
+ head.append(el('strong',types[e.kind]||'Activity'));
+ if(e.simulated)head.append(el('span','TEST','activity-test'));
+ item.append(head,el('small',e.source||names[e.platform]||'Platform not reported','activity-source'),el('p',e.text));
+ const foot=el('div',undefined,'activity-footer');
+ if(Number.isFinite(e.time))foot.append(el('time',new Date(e.time*1000).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'})));
+ if(e.acknowledged)foot.append(el('span','Acknowledged','ok'));else foot.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));
+ item.append(foot);return item;
+}
+function connectionCard(platform,message){
+ const names={twitch:'Twitch chat',twitch_events:'Twitch activity',youtube:'YouTube',kick:'Kick',tiktok:'TikTok LIVE',rumble:'Rumble',facebook:'Facebook',instagram:'Instagram'};
+ const row=el('div',undefined,'row connection-row');row.append(el('strong',names[platform]||platform),el('span',message));return row;
+}
 function render(s) {
  if(typeof renderStudio==='function')renderStudio(s);
  if(typeof renderVerticalStatus==='function')renderVerticalStatus(s);
@@ -224,7 +241,7 @@ function render(s) {
  renderAudio(s);
  renderHistory(s);
  renderUpdates(s.updates);
- $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':'1.0.2-rc.2';
+ $('mode').textContent=s.demo?'DEMO · NO LIVE ACTIONS':s.version||s.updates?.installed||'FDGCast';
  $('connection').textContent=(s.obs_connected?'OBS connected':'OBS disconnected')+' · '+(s.native_connected?'Docks connected':'Docks offline');
  $('obsPairStatus').textContent=s.obs_connected?'Connected · port '+s.obs_port:'Disconnected';
  $('obsPairStatus').className=s.obs_connected?'connection-connected':'muted';
@@ -235,12 +252,12 @@ function render(s) {
  $('cpu').textContent=fresh&&stats.cpuUsage!==undefined?stats.cpuUsage.toFixed(1)+'%':'—';
  $('render').textContent=fresh&&stats.averageFrameRenderTime!==undefined?stats.averageFrameRenderTime.toFixed(1)+' ms':'—';
  $('outputCount').textContent=s.native_connected?s.outputs.filter(x=>x.active).length:'—';
- $('persistence').textContent='Credential storage: '+s.secret_persistence+'. Platform tokens stay private. Your pairing code is available only in this local connection form.';
+ $('persistence').textContent=s.secret_persistence==='Session memory only'?'Connections are stored for this session only. Account tokens stay private.':'Saved connection details stay on this computer. Account tokens stay private.';
  $('health').replaceChildren(...((s.issues.length||s.stream_history?.issues?.length)?[...(s.stream_history?.issues||[]),...s.issues].map(issue):[el('p',s.obs_connected?'No new frame-loss counters in the latest sample. This does not verify your whole stream.':'Connect OBS for live measurements.',s.obs_connected?'ok':'muted')]));
- $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
+ $('statuses').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>connectionCard(k,v)));
  renderMainStream(s);
  renderSuite(s);
- $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>{const d=el('div',undefined,'row');d.append(el('strong',k),el('span',v));return d;}));
+ $('chatConnectionStatus').replaceChildren(...Object.entries(s.statuses).map(([k,v])=>connectionCard(k,v)));
  const hubStatus=s.hub_connection==='connected'?'Connected':s.hub_connection==='attention'?'Connection needs attention':s.hub_paired?'Checking connection…':'Not paired';
  $('hubPairStatus').textContent=hubStatus;$('hubPairStatus').className=s.hub_connection==='connected'?'ok':'muted';
  const hubUrl=$('hubForm').elements.url;
@@ -271,13 +288,8 @@ function render(s) {
  }));if(!s.destinations.length)$('destinations').append(el('p','Add a destination, then use Start All.','empty'));}
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
- $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(e=>{
-   const item=el('p',undefined,'audience-event');
-   if(['twitch','youtube','kick','tiktok','rumble','facebook','instagram'].includes(e.platform)){
-     const icon=el('img',undefined,'platform-icon');icon.src='/icons/'+e.platform+'.svg';icon.alt=e.platform;icon.title=e.source;icon.style.verticalAlign='middle';icon.style.marginRight='6px';item.append(icon);
-   }
-   item.append(el('strong',({follow:'Follow',redeem:'Redeem',raid:'Raid',subscription:'Subscription',tiktok_gift:'TikTok gift',like:'Likes',share:'Shares'})[e.kind]||'Event'),el('small',' · '+e.source),el('br'),document.createTextNode(e.text));if(e.simulated)item.prepend(el('strong','TEST · '));if(e.acknowledged)item.append(el('small',' · Acknowledged'));else item.append(button('Acknowledge',()=>action('event_ack',{id:e.id})));return item;
- }));if(!s.combined_events?.length)$('audienceEvents').append(el('p','Waiting for selected events from connected platforms.','muted'));
+ $('audienceEvents').replaceChildren(...(s.combined_events||[]).slice(0,20).map(activityCard));
+ if(!s.combined_events?.length){const empty=el('div',undefined,'activity-empty');empty.append(el('strong','Your next follow or gift will appear here'),el('p','Connect a platform and select activity types below. TikTok activity needs a public LIVE.'));$('audienceEvents').append(empty);}
  $('incidents').replaceChildren(...s.incidents.slice().reverse().map(i=>{const d=issue(i);d.prepend(el('small',new Date(i.time*1000).toLocaleTimeString()));return d;}));
  if(!s.incidents.length)$('incidents').append(el('p','No incidents recorded this session.','empty'));
  $('events').replaceChildren(...s.events.slice().reverse().map(e=>el('p',new Date(e.time*1000).toLocaleTimeString()+' · '+e.text,'muted')));
