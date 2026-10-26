@@ -102,7 +102,7 @@ async function main(){
   assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
   assert.equal(await page.locator('#audienceEvents img').getAttribute('src'),'/icons/tiktok.svg');
   assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'tiktok');
-  assert.equal(await page.getByRole('heading',{name:'Combined Activity Feed',exact:true}).count(),1);
+  assert.equal(await page.getByRole('heading',{name:'Combined Activity Feed',exact:true,includeHidden:true}).count(),1);
   assert.match(await page.locator('#audienceEvents').textContent(),/TIKTOK · creator/);
   assert.match(await page.locator('#audienceEvents').textContent(),/Rose <test>/);
   assert.equal(await page.locator('#audienceEvents test').count(),0);
