@@ -88,3 +88,10 @@ input,select,textarea{background:#191c1f;border-color:#62666a}.primary,#startAll
 .direct-readers{grid-template-columns:repeat(2,minmax(0,1fr))}.direct-readers>.panel{min-width:0}.direct-readers>.panel:last-child{grid-column:1/-1}.section-heading{margin:25px 0 14px}.section-heading h2{margin:0 0 5px}
 @media(max-width:850px){.workspace>aside{grid-template-columns:1fr;grid-template-areas:"activity" "broadcast" "audio" "doctor" "connections"}.setup-steps{grid-template-columns:1fr}.direct-readers{grid-template-columns:1fr}#statuses,#chatConnectionStatus{grid-template-columns:1fr}#activityPanel #audienceEvents{max-height:460px}.panel-top{flex-wrap:wrap}.metrics{margin-bottom:18px}}
 @media(max-width:420px){body{font-size:14px}.panel{padding:16px}#eventKinds{grid-template-columns:1fr}.section-chip{font-size:11px}.activity-card{padding:12px}.metrics small,.metrics span{font-size:11px}#updateBanner{margin:12px 16px}}
+
+/* Destination names keep usable width; actions wrap onto their own line. */
+.destination-card .destination-choice{flex:1 1 220px;min-width:min(220px,100%)}
+.destination-card>.controls{flex:1 1 100%;min-width:0}
+.destination-card>.controls button{max-width:100%;white-space:normal}
+.activity-connection{background:#423026;color:#ffe0ac;border:1px solid #a97537;border-radius:6px;padding:12px;margin:12px 0;overflow-wrap:anywhere;font-size:13px}
+.activity-connection[data-level=ready]{background:#203c36;color:#b8f0cc;border-color:#57866a}

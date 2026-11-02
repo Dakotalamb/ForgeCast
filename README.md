@@ -1,3 +1,13 @@
+## Stable 1.0.4 — activity connection visibility and licensing
+
+Activity Feed now keeps connection readiness visible above old event cards, with
+separate Twitch event permission checks and Companion reconnect guidance.
+Destination controls wrap below readable names. Original FDGCast code is
+GPL-2.0-or-later; see [licensing and third-party details](LICENSING.md) and
+[1.0.4 release notes](docs/RELEASE_1.0.4.md). The installer includes license texts
+and runtime dependency notices. Core features remain free; official optional
+paid overlay access remains unchanged.
+
 # FDGCast 1.0.3 — TikTok LIVE chat and activity
 
 [Download the Windows update](https://github.com/Dakotalamb/ForgeCast/releases/tag/v1.0.3).

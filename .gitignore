@@ -11,3 +11,5 @@ stage/
 *.spec
 .env
 *.log
+
+third-party-licenses/

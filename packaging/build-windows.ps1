@@ -39,6 +39,9 @@ if ($LASTEXITCODE -ne 0) { throw 'Python dependency installation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'FDGCast companion freeze failed.' }
 if (-not (Test-Path (Join-Path $root 'dist\FDGCast\FDGCast.exe'))) { throw 'Companion executable missing.' }
 
+& $python (Join-Path $root 'scripts/collect_dependency_licenses.py') (Join-Path $root 'third-party-licenses')
+if ($LASTEXITCODE -ne 0) { throw 'Dependency license collection failed.' }
+
 & $IsccPath (Join-Path $PSScriptRoot 'FDGCast.iss')
 if ($LASTEXITCODE -ne 0) { throw 'Installer compilation failed.' }
 Write-Host "Installer created in $(Join-Path $root 'release'). Test it on a separate OBS installation before offering it."
