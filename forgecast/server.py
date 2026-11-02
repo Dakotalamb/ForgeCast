@@ -34,6 +34,7 @@ from .vertical import VerticalStudio, settings as vertical_settings, catalog as 
 from .entitlements import accept_entitlements, overlay_access
 from .overlay_studio import ACTIONS as STUDIO_ACTIONS, studio_action, studio_asset, studio_feed, designs
 from .platforms import PLATFORMS, CATALOG, require_picture_support
+from .activity_status import activity_connection
 from . import __version__
 
 PORT = 17654
@@ -234,7 +235,7 @@ class State:
                     output_errors=self.output_errors,
                     outputs=self.native_outputs if time.time()-self.native_seen < 5 else [],
                     destination_platforms=PLATFORMS, destinations=self.config.get('destinations', []), statuses=self.statuses,
-                    status_details=self.status_details, combined_events=combined_events(self),
+                    status_details=self.status_details, activity_connection=activity_connection(self.statuses, self.paused_platforms), combined_events=combined_events(self),
                     messages=self.chat_view(), events=list(self.events), incidents=list(self.doctor.incidents),
                     version=__version__, hub_events=self.coordination()['events'], coordination=self.coordination(),
                     connection_help={k:connection_help(k,v,self.config.get('hub_url','')) for k,v in self.statuses.items()},
@@ -909,6 +910,7 @@ async def native(request):
         'commands': commands, 'version':__version__, 'coordination':s.coordination(), 'output_presets':s.config.get('output_presets',{}), 'summaries':session_summaries(s), 'capabilities':chat_capabilities(s),
         'messages': [m for m in s.chat_view() if m.get('kind', 'chat') in {'chat','superchat','supersticker','membership'} or (s.config.get('merge_events') and m.get('kind') in set(s.config.get('event_kinds', DEFAULT_EVENTS)))][-200:],
         'events': combined_events(s),
+        'activity_connection': activity_connection(s.statuses, s.paused_platforms),
         'issues': (s.history.issues+s.current_issues)[:12],
         'destination_health': s.history.health,
         'audio_guard': s.audio.current,

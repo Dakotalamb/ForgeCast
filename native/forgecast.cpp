@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: GPL-2.0-or-later
 // FDGCast native output module. Alpha: build and validate against your OBS SDK.
 // No credentials are written to OBS logs or the configuration directory.
 #include <obs-module.h>
@@ -587,6 +588,7 @@ class EventsDock : public QWidget {
     DockView *view;
     QJsonObject lastPayload;
     ChatFeed *feed;
+    QLabel *connectionStatus;
     QByteArray lastEvents;
 public:
     EventsDock() : QWidget()
@@ -595,6 +597,10 @@ public:
                       "QTextBrowser { background:#25303c;border:1px solid #556779;border-radius:4px;padding:6px; }"
                       "QLabel { color:#ff7549;padding:5px; }");
         auto *layout = new QVBoxLayout(this);
+        connectionStatus = new QLabel(this);
+        connectionStatus->setTextFormat(Qt::PlainText);
+        connectionStatus->setWordWrap(true);
+        layout->addWidget(connectionStatus);
         feed = new ChatFeed(this);feed->setOpenExternalLinks(false);
         feed->setMinimumSize(0,0);feed->setSizePolicy(QSizePolicy::Ignored,QSizePolicy::Ignored);
         feed->setToolTip("Combined activity from connected platforms. Each card shows its platform icon and channel.");
@@ -602,11 +608,21 @@ public:
         view=new DockView(this,layout,"events",false,[this] { lastEvents.clear();if(!lastPayload.isEmpty()) update(lastPayload); });
         disconnected();
     }
-    void disconnected() { view->setConnected(false); lastPayload=QJsonObject();lastEvents.clear();feed->setHtml("<p>Companion offline</p>"); }
+    void disconnected() { connectionStatus->setText("Companion disconnected — live activity is not being received. Open Companion to reconnect."); connectionStatus->setStyleSheet("QLabel { background:#423026;color:#ffe0ac;border:1px solid #a97537;border-radius:4px;padding:8px; }"); view->setConnected(false); lastPayload=QJsonObject();lastEvents.clear();feed->setHtml("<p>Companion offline</p>"); }
     void update(const QJsonObject &payload)
     {
         view->setConnected(true);
         lastPayload=payload;
+        const auto connection=payload.value("activity_connection").toObject();
+        const bool ready=connection.value("level").toString()=="ready";
+        connectionStatus->setText(connection.value("message").toString("Activity connection status unavailable. Open Companion → Connections.")+(ready?QString():"\nOpen Companion → Connections to reconnect."));
+        QStringList details{connection.value("detail").toString()};
+        for (const auto &entry : connection.value("platforms").toArray()) {
+            const auto row=entry.toObject();
+            details << row.value("label").toString()+": "+row.value("message").toString();
+        }
+        connectionStatus->setToolTip(details.join("\n"));
+        connectionStatus->setStyleSheet(ready?"QLabel { background:#203c36;color:#b8f0cc;border:1px solid #57866a;border-radius:4px;padding:8px; }":"QLabel { background:#423026;color:#ffe0ac;border:1px solid #a97537;border-radius:4px;padding:8px; }");
         const auto events = payload.value("events").toArray();
         QJsonArray signature=events;signature.append(payload.value("statuses"));
         const auto bytes = QJsonDocument(signature).toJson(QJsonDocument::Compact);

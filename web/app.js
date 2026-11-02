@@ -289,6 +289,10 @@ function render(s) {
  }));if(!s.destinations.length)$('destinations').append(el('p','Add a destination, then use Start All.','empty'));}
  $('startAll').disabled=s.demo||!s.native_connected||!s.destinations.some(d=>d.enabled!==false);
  $('stopAll').disabled=s.demo||!s.native_connected;
+ const connection=s.activity_connection||{level:'attention',message:'Activity connection status unavailable.',detail:'Open Connections to check your platform accounts.'};
+ const connectionText=connection.message+' '+connection.detail+' '+(connection.platforms||[]).map(row=>row.label+': '+row.message).join(' · ');
+ if($('activityConnection').textContent!==connectionText)$('activityConnection').textContent=connectionText;
+ $('activityConnection').dataset.level=connection.level;
  const activity=(s.combined_events||[]).slice(0,20), activityKey=JSON.stringify(activity);
  if(activityKey!==activitySignature){
    const feed=$('audienceEvents'),position=feed.scrollTop,height=feed.scrollHeight;
@@ -322,7 +326,7 @@ async function refresh(){render(await api('/api/state'));
  if(!obsPasswordLoaded){const saved=await api('/api/obs-connection');const form=$('obsForm');if(!form.elements.password.value&&document.activeElement!==form.elements.password)form.elements.password.value=saved.password;if(!form.contains(document.activeElement))form.elements.port.value=saved.port;obsPasswordLoaded=true;}
  if(!pairingLoaded){const saved=await api('/api/pairing');const input=$('hubForm').elements.token;if(!input.value&&document.activeElement!==input)input.value=saved.token;pairingLoaded=true;}
 }
-async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';error(e.message);}setTimeout(loop,1500);}
+async function loop(){try{await refresh();}catch(e){$('connection').textContent='Local companion disconnected';$('activityConnection').textContent='Companion disconnected — live activity is not being received. Open Companion to reconnect. Saved events are history.';$('activityConnection').dataset.level='attention';error(e.message);}setTimeout(loop,1500);}
 if(key)loop();else error('Open the dashboard URL printed by Start-FDGCast. Its private session key is missing.');
 
 

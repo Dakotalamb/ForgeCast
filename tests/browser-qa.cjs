@@ -92,8 +92,11 @@ async function main(){
   await page.locator('#showObsPassword').click();
   assert.equal(await page.locator('#obsForm input[name=password]').getAttribute('type'),'password');
   await page.screenshot({path:path.join(output,'connections-demo.png'),fullPage:true});
+  let activityReady=false;
   await page.route('**/api/state',async route=>{
     const response=await route.fetch(),data=await response.json();
+    data.activity_connection={level:activityReady?'ready':'attention',message:activityReady?'Activity connection ready: Twitch.':'Activity connection needs attention: Twitch.',detail:'Saved events do not confirm live delivery.',platforms:[{label:'Twitch',message:activityReady?'Follows: ready':'Disconnected; waiting for Twitch reconnect.'}]};
+    data.destinations=[{id:'qa-youtube-vertical',name:'YouTube Vertical',platform:'youtube',picture:'vertical_studio',enabled:true}];
     data.combined_events=[{id:'tiktok-test',platform:'tiktok',kind:'tiktok_gift',text:'Viewer · Sent 3 × Rose <test>',source:'TIKTOK · creator',time:1700000000,simulated:true}];
     data.updates={installed:'0.7.0-preview',latest:{version:'0.8.0-preview',notes:'Updated streaming tools.',download_url:'https://hub.example/downloads/setup.exe'},available:true,show_notice:true,status:'Update available.'};
     await route.fulfill({response,json:data});
@@ -101,6 +104,11 @@ async function main(){
   await page.waitForSelector('#updateBanner:not([hidden])');
   assert.match(await page.locator('#updateNotice').textContent(),/0.8.0-preview/);
   assert.match(await page.locator('#audienceEvents').textContent(),/TikTok gift/);
+  assert.equal(await page.locator('#activityConnection').getAttribute('data-level'),'attention');
+  assert.match(await page.locator('#activityConnection').textContent(),/Disconnected/);
+  activityReady=true;await page.evaluate(()=>refresh());
+  assert.equal(await page.locator('#activityConnection').getAttribute('data-level'),'ready');
+  activityReady=false;await page.evaluate(()=>refresh());
   assert.equal(await page.locator('#audienceEvents img').getAttribute('src'),'/icons/tiktok.svg');
   assert.equal(await page.locator('#audienceEvents img').getAttribute('alt'),'TikTok');
   assert.equal(await page.evaluate(async()=>{const card=document.querySelector('#audienceEvents .activity-card');await refresh();return card===document.querySelector('#audienceEvents .activity-card');}),true,'Unchanged activity must retain its card and focus across refreshes');
@@ -119,7 +127,17 @@ async function main(){
   await page.locator('[data-command="StartStream"]').click();
   await page.waitForFunction(()=>document.querySelector('#error').textContent.includes('Demo mode'));
   await page.locator('#error').click();
+  await page.screenshot({path:path.join(output,'activity-status-demo.png'),fullPage:true});
+  await page.locator('[data-tab="outputs"]').click();
+  const destinationName=page.locator('#destinations .destination-choice strong');
+  assert.ok(await destinationName.evaluate(e=>e.getBoundingClientRect().height<55),'Destination name must not stack letter by letter');
+  await page.screenshot({path:path.join(output,'destination-layout-demo.png'),fullPage:true});
   await page.setViewportSize({width:390,height:844});
+  assert.ok(await destinationName.evaluate(e=>e.getBoundingClientRect().height<55),'Narrow destination name must stay readable');
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Destination mobile horizontal overflow');
+  await page.screenshot({path:path.join(output,'destination-mobile-demo.png'),fullPage:true});
+  await page.locator('[data-tab="live"]').click();
+
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),true);
   await page.screenshot({path:path.join(output,'mobile-demo.png'),fullPage:true});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth),'Mobile horizontal overflow');
