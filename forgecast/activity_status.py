@@ -4,12 +4,13 @@ SPDX-License-Identifier: GPL-2.0-or-later
 """
 
 
-def activity_connection(statuses, paused=()):
+def activity_connection(statuses, paused=(), configured=()):
     rows = []
     for platform, label in [('twitch', 'Twitch'), ('youtube', 'YouTube'), ('tiktok', 'TikTok')]:
         message = str(statuses.get(platform, ''))
-        if not message or message.lower().startswith('not connected'):
+        if (not message or message.lower().startswith('not connected')) and platform not in configured and platform not in paused:
             continue
+        message = message or 'Not connected.'
         lower = message.lower()
         level = 'ready' if lower == 'connected' or lower.startswith('connected; reading') else 'attention'
         details = message

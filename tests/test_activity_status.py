@@ -31,3 +31,9 @@ class ActivityConnectionTests(unittest.TestCase):
         result=activity_connection({'tiktok':'Connected; reading LIVE chat and events (experimental, receive-only).'}, {'tiktok'})
         self.assertEqual(result['level'],'attention')
         self.assertIn('Paused',result['platforms'][0]['message'])
+
+    def test_saved_disconnected_account_not_hidden_by_another_connected_platform(self):
+        result=activity_connection({'twitch':'not connected','youtube':'connected'}, configured={'twitch':{}})
+        self.assertEqual(result['level'],'attention')
+        self.assertIn('Twitch',result['message'])
+        self.assertEqual(len(result['platforms']),2)
