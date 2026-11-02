@@ -76,6 +76,15 @@ def claim_desktop_instance():
 
 
 def launch():
+    if '--extras-self-check' in sys.argv:
+        from TikTokLive import TikTokLiveClient
+        from TikTokLive.events import CommentEvent, FollowEvent, GiftEvent, LikeEvent, ShareEvent, SubNotifyEvent
+        from forgecast.tiktok_events import TikTokEvents
+        from TikTokLive.proto.custom_proto import ExtendedUser
+        from TikTokLiveProto.v3.webcast.shared.message import CommonMessageData
+        event=CommentEvent(common=CommonMessageData(msg_id=123),content='dependency check',user=ExtendedUser(nickname='Test',display_id='test'))
+        assert event.comment=='dependency check' and event.common.msg_id==123
+        raise SystemExit(0)
     if '--stream-self-check' in sys.argv:
         # CI runs this inside the frozen EXE, without credentials or networking.
         from forgecast.youtube_stream import proto, response_dict, quota_retry_seconds

@@ -24,8 +24,8 @@ older than the stable release of the same number. Use a new version for each
 shipped build; replacing files under the same version does not trigger notices.
 
 Download/changelog links must stay on the saved Hub hostname or under the
-https://github.com/Dakotalamb/ForgeCast/releases/ path. The repository is private,
-so host the installer publicly on the Hub for ordinary users. Signed storage/CDN
+https://github.com/Dakotalamb/ForgeCast/releases/ path. The official public GitHub release may host the installer. The Hub may also
+host a public same-host copy. Signed storage/CDN
 URLs on a different hostname are not supported by this release; use a public
 same-host download endpoint instead. The Hub itself must use HTTPS port 443.
 Keep the feed fresh (Cache-Control: no-cache is recommended). CORS is unnecessary:

@@ -3,3 +3,5 @@ aiohttp==3.13.5
 grpcio==1.76.0
 protobuf==6.33.0
 tzdata==2025.2
+
+TikTokLive==7.0.1
